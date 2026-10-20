@@ -1,4 +1,4 @@
-import { hasDeferredVideoShare, shareVideoDeferred } from "../../../native/deferredVideoShare";
+import { hasDeferredVideoExport, hasDeferredVideoShare, shareVideoDeferred } from "../../../native/deferredVideoShare";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../../../lib/i18n";
@@ -54,10 +54,10 @@ export function useVideoFileDelivery() {
     const controller = new AbortController();
     operation.current = controller;
     const live = () => mounted.current && operation.current === controller && !controller.signal.aborted;
-    if (action === "share" && hasDeferredVideoShare()) {
+    if ((action === "share" && hasDeferredVideoShare()) || (action === "export" && hasDeferredVideoExport())) {
       void shareVideoDeferred(suggestedName, prepare, controller.signal, (stage, fraction) => {
         if (live()) setState({ action, phase: stage === "choosing" ? "native-choosing" : stage === "preparing" ? "native-preparing" : "native-handover", percent: Math.floor(fraction * 100) });
-      }).then(() => { if (live()) setState(null); }).catch((error: unknown) => {
+      }, action).then((sent) => { if (live()) setState(sent && action === "export" ? { action, phase: "saved", percent: 100, savedName: suggestedName } : null); }).catch((error: unknown) => {
         if (live()) setState({ action, phase: "error", percent: 0, error: error instanceof Error ? error.message : t("Could not share video.") });
       }).finally(() => { if (operation.current === controller) operation.current = null; });
       return;

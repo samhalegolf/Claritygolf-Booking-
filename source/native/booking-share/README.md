@@ -4,6 +4,7 @@ This package adds a native file provider to the existing Booking web interface.
 
 - Mac: build the ClarityBookingDesktop executable into an app bundle using `bash script/build_and_run.sh`. It opens claritygolf.app in its own persistent WebKit session.
 - iPhone staff app: the Xcode project links the library directly and installs the bridge from BookingBridgeViewController. Build/sync the existing staff app normally.
+- The Mac wrapper also routes video Export through NSSavePanel before preparation and writes the selected destination atomically.
 - Chrome and other browsers continue to use Web Share; their APIs cannot request destination-first file generation. Installing a PWA does not add the native bridge.
 
 ## Delivery sequence

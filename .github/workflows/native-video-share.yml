@@ -21,10 +21,12 @@ jobs:
           xcrun swiftc -swift-version 5 -typecheck -sdk "$sdk" -target arm64-apple-ios15.0-simulator source/native/booking-share/Sources/ClarityVideoShare/*.swift
       - name: Build desktop app
         run: bash source/native/booking-share/script/build_and_run.sh --build-only
+      - name: Archive app with executable permissions
+        run: ditto -c -k --keepParent "source/native/booking-share/dist/Clarity Booking.app" source/native/booking-share/dist/Clarity-Booking-Mac.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Clarity-Booking-Mac
-          path: source/native/booking-share/dist/
+          path: source/native/booking-share/dist/Clarity-Booking-Mac.zip
           retention-days: 14
 
   web:

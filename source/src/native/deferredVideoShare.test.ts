@@ -46,6 +46,14 @@ test("native chooser opens before preparation; transfer is ordered and cancellat
     assert.equal(preparations, 1, "late native requests are ignored");
 
     messages.length = 0;
+    const saved = shareVideoDeferred("clip.mp4", prepare, new AbortController().signal, () => {}, "export");
+    assert.equal(messages[0].action, "save");
+    assert.equal(preparations, 1, "Save As also opens before preparation");
+    const saveID = messages[0].id as string;
+    emit(saveID, "cancelled");
+    assert.equal(await saved, false);
+
+    messages.length = 0;
     const failed = shareVideoDeferred("clip.mp4", async () => { throw new Error("Encoder failed"); }, new AbortController().signal, () => {});
     emit(messages[0].id as string, "prepare");
     await assert.rejects(failed, /Encoder failed/);

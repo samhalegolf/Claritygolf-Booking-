@@ -1,5 +1,6 @@
 type NativeShareHost = {
   version: number;
+  canSave?: boolean;
   post: (message: Record<string, unknown>) => Promise<unknown>;
 };
 export type ShareStage = "choosing" | "preparing" | "handover";
@@ -14,11 +15,13 @@ function host(): NativeShareHost | null {
   return value?.version === 1 && typeof value.post === "function" ? value : null;
 }
 export function hasDeferredVideoShare() { return host() !== null; }
+export function hasDeferredVideoExport() { return host()?.canSave === true; }
 
 /** Present now; the native destination/provider asks for bytes only when needed. */
 export function shareVideoDeferred(
   name: string, prepare: Prepare, signal: AbortSignal,
   onProgress: (stage: ShareStage, fraction: number) => void,
+  action: "share" | "export" = "share",
 ): Promise<boolean> {
   const native = host();
   if (!native) return Promise.reject(new Error("Native video sharing is unavailable."));
@@ -94,6 +97,6 @@ export function shareVideoDeferred(
   }, 15 * 60 * 1000);
   onProgress("choosing", 0);
   // Must run on the Share icon's original tap, before any asynchronous work.
-  try { void post("present", { name }).catch(fail); } catch (error) { fail(error); }
+  try { void post(action === "export" ? "save" : "present", { name }).catch(fail); } catch (error) { fail(error); }
   return result;
 }

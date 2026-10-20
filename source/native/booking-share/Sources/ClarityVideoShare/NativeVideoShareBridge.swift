@@ -26,6 +26,7 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
         #if os(macOS)
         var picker: NSSharingServicePicker?
         var selectedService: NSSharingService?
+        var saveURL: URL?
         #else
         var controller: UIActivityViewController?
         #endif
@@ -36,13 +37,18 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
         self.webView = webView
         let controller = webView.configuration.userContentController
         controller.addScriptMessageHandler(self, contentWorld: .page, name: Self.handlerName)
+        #if os(macOS)
+        let canSave = "true"
+        #else
+        let canSave = "false"
+        #endif
         let script = """
         (() => {
           const allowed = (location.protocol === 'https:' && location.hostname === 'claritygolf.app') ||
             (location.protocol === 'capacitor:' && location.hostname === 'localhost');
           if (allowed && window === window.top && !window.__clarityVideoShare) {
             Object.defineProperty(window, '__clarityVideoShare', { value: {
-              version: 1, post: message => window.webkit.messageHandlers.clarityVideoShare.postMessage(message)
+              version: 1, canSave: \(canSave), post: message => window.webkit.messageHandlers.clarityVideoShare.postMessage(message)
             }});
           }
         })();
@@ -66,7 +72,7 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
               let id = body["id"] as? String, UUID(uuidString: id) != nil else {
             replyHandler(nil, "Share bridge rejected this request."); return
         }
-        if action == "present" {
+        if action == "present" || action == "save" {
             guard session == nil else { replyHandler(nil, "A share is already open."); return }
             do {
                 guard let name = body["name"] as? String, name.count <= 200,
@@ -77,7 +83,12 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
                 }
                 let current = Session(id: id, file: try ShareFile(name: name), type: type)
                 session = current
+                #if os(macOS)
+                if action == "save" { try presentSave(current) } else { try present(current) }
+                #else
+                guard action == "present" else { throw ShareFile.error("Save picker is unavailable.") }
                 try present(current)
+                #endif
                 let timeout = DispatchWorkItem { [weak self, weak current] in
                     guard let self, let current else { return }
                     self.end(current, type: "error", error: "Video sharing timed out.")
@@ -106,7 +117,22 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
             io.async {
                 do {
                     try current.file.finish(size: size)
+                    #if os(macOS)
+                    if let destination = current.saveURL {
+                        // Stage beside the destination, then atomically replace it.
+                        let staging = destination.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+                        defer { try? FileManager.default.removeItem(at: staging) }
+                        try FileManager.default.copyItem(at: current.file.url, to: staging)
+                        if FileManager.default.fileExists(atPath: destination.path) {
+                            _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging)
+                        } else {
+                            try FileManager.default.moveItem(at: staging, to: destination)
+                        }
+                        DispatchQueue.main.async { self.end(current, type: "complete"); replyHandler(true, nil) }
+                    } else { DispatchQueue.main.async { replyHandler(true, nil) } }
+                    #else
                     DispatchQueue.main.async { replyHandler(true, nil) }
+                    #endif
                 } catch { DispatchQueue.main.async { replyHandler(nil, error.localizedDescription) } }
             }
         case "cancel":
@@ -146,6 +172,22 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
         let file = current.file
         io.asyncAfter(deadline: .now() + (type == "complete" ? 300 : 0)) { file.remove() }
     }
+
+    #if os(macOS)
+    private func presentSave(_ current: Session) throws {
+        guard let window = webView?.window else { throw ShareFile.error("The saving window is unavailable.") }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = current.file.url.lastPathComponent
+        panel.allowedContentTypes = [current.type]
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for: window) { [weak self, weak current] response in
+            guard let self, let current, self.session === current else { return }
+            guard response == .OK, let url = panel.url else { self.end(current, type: "cancelled"); return }
+            current.saveURL = url
+            self.request(current)
+        }
+    }
+    #endif
 
     private func present(_ current: Session) throws {
         guard let webView, webView.window != nil else { throw ShareFile.error("The sharing window is unavailable.") }
