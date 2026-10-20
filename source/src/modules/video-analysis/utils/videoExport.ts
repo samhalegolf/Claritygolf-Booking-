@@ -142,7 +142,7 @@ export async function exportAnalysisVideo(
     options.signal?.throwIfAborted();
     if (blob.type.split(";")[0].toLowerCase() === "video/mp4" && blob.size > 0) {
       options.onProgress?.(1);
-      const label = options.title.trim().replace(/\\.(mp4|mov|webm|m4v)$/i, "")
+      const label = options.title.trim().replace(/\.(mp4|mov|webm|m4v)$/i, "")
         .replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
       return { blob, fileName: (label || "clarity-video") + ".mp4" };
     }
