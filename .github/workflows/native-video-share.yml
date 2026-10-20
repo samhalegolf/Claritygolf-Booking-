@@ -1,0 +1,46 @@
+name: Native video sharing
+on:
+  pull_request:
+    paths:
+      - "source/native/booking-share/**"
+      - "source/src/native/deferredVideoShare*"
+      - ".github/workflows/native-video-share.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test macOS bridge
+        run: swift test --package-path source/native/booking-share
+      - name: Typecheck iOS bridge
+        run: |
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun swiftc -swift-version 5 -typecheck -sdk "$sdk" -target arm64-apple-ios15.0-simulator source/native/booking-share/Sources/ClarityVideoShare/*.swift
+      - name: Build desktop app
+        run: bash source/native/booking-share/script/build_and_run.sh --build-only
+      - name: Archive app with executable permissions
+        run: ditto -c -k --keepParent "source/native/booking-share/dist/Clarity Booking.app" source/native/booking-share/dist/Clarity-Booking-Mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Clarity-Booking-Mac
+          path: source/native/booking-share/dist/Clarity-Booking-Mac.zip
+          retention-days: 14
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx tsx --test src/native/deferredVideoShare.test.ts src/native/nativeFiles.test.ts
+      - run: npm run typecheck
