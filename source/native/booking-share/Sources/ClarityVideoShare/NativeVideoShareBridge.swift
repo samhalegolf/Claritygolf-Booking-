@@ -124,7 +124,7 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
         var detail = ["id": current.id, "type": type]
         if let error { detail["message"] = error }
         webView.callAsyncJavaScript("window.dispatchEvent(new CustomEvent('clarity-video-share', {detail}));",
-            arguments: ["detail": detail], in: nil, contentWorld: .page, completionHandler: nil)
+            arguments: ["detail": detail], in: nil, in: .page, completionHandler: nil)
     }
 
     private func request(_ current: Session) {

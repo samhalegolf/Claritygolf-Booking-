@@ -1,7 +1,5 @@
 name: Native video sharing
 on:
-  push:
-    branches: ["codex/native-deferred-video-share"]
   pull_request:
     paths:
       - "source/native/booking-share/**"
