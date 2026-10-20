@@ -602,7 +602,7 @@ const buildItem = async (
         [input.sourceSide]: savedVideoId,
       },
     },
-    thumbnailDataUrl: await createVideoThumbnail(input.sourceBlob, input.thumbnailDataUrl || existing?.thumbnailDataUrl),
+    thumbnailDataUrl: await createVideoThumbnail(input.sourceBlob, input.thumbnailDataUrl || existing?.thumbnailDataUrl).catch(() => safeVideoThumbnail(input.thumbnailDataUrl || existing?.thumbnailDataUrl)),
     swingAngles: existing?.swingAngles,
   };
 

@@ -4160,6 +4160,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (!notesWorkspaceClient) return [];
     return notificationsForPerson(notesWorkspaceClient, notifications, playerToolAppointments);
   }, [notesWorkspaceClient, notifications, playerToolAppointments]);
+  const libraryAccountRef = useRef(activeAccountId);
+  libraryAccountRef.current = activeAccountId;
+  useEffect(() => {
+    setClarityCloudImports([]);
+  }, [activeAccountId]);
+
   const retiredLibraryIds = useMemo(() => new Set(libraryRetirements.map((entry) => entry.savedVideoId)), [libraryRetirements]);
   useEffect(() => {
     if (!activeAccountId || authStatus !== "authenticated") return;
@@ -6399,11 +6405,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function updateLibraryRetirement(method: "POST" | "DELETE", entry: Partial<RetiredVideoEntry>) {
+    const accountAtStart = activeAccountId;
     const response = await apiFetch("/api/video-transfer/library-retirements", {
       method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry),
     });
     if (!response.ok) throw new Error(t("Could not update the library entry."));
     const data = await response.json() as { entries: RetiredVideoEntry[] };
+    if (libraryAccountRef.current !== accountAtStart) return;
     setLibraryRetirements(data.entries);
     await (await loadSavedVideoLibraryModule()).cacheLibraryRetirements(activeAccountId, data.entries);
   }
@@ -12501,6 +12509,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function refreshClarityCloudImports() {
+    const accountAtStart = activeAccountId;
     // Deliberately does not wait on googleDriveTransfer.connected first --
     // this used to only fire from an effect gated on that flag, chaining
     // behind the Drive status round trip before even starting. The server
@@ -12510,12 +12519,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     try {
       const transfers = await listClarityCloudImportTransfers();
       const module = await loadSavedVideoLibraryModule();
-      setClarityCloudImports(await module.cacheCloudCatalogue(activeAccountId, transfers).catch(() => transfers));
+      const next = await module.cacheCloudCatalogue(accountAtStart, transfers).catch(() => transfers);
+      if (libraryAccountRef.current === accountAtStart) setClarityCloudImports(next);
     } catch {
       // Not connected yet, or the import inbox is temporarily unavailable;
       // the status cards elsewhere show provider health separately.
       const cached = await (await loadSavedVideoLibraryModule()).readCachedCloudCatalogue(activeAccountId);
-      setClarityCloudImports((current) => current.length ? current : cached);
+      if (libraryAccountRef.current === accountAtStart) setClarityCloudImports((current) => current.length ? current : cached);
     }
   }
 
