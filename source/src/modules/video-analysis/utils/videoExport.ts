@@ -112,7 +112,7 @@ async function openSource(url: string, signal?: AbortSignal): Promise<Source> {
     if (!response.ok) throw new Error(t("Could not load the video."));
     return new BlobSource(await response.blob());
   }
-  return new UrlSource(url, { requestInit: { credentials: "same-origin", signal } });
+  return new UrlSource(url, { requestInit: { credentials: "same-origin" } });
 }
 
 // Never shown: a cancelled export just closes.
