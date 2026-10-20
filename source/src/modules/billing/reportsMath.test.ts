@@ -4,6 +4,10 @@ import { financialYearStart, presetRange, buildReportCsv } from "./reportsMath.t
 import type { BillingReportSummary } from "./types.ts";
 
 const utc = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+const localDay = (iso: string) => {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
 
 test("financial year starts 1 April, same year from April onward", () => {
   assert.equal(financialYearStart(utc("2026-07-18")).toISOString().slice(0, 10), "2026-04-01");
@@ -16,24 +20,24 @@ test("financial year rolls back to previous April before April", () => {
 });
 
 test("this-month stops today and last-month spans the whole month", () => {
-  assert.deepEqual(presetRange("this-month", utc("2026-07-18")), { start: "2026-07-01", end: "2026-07-18" });
-  assert.deepEqual(presetRange("last-month", utc("2026-01-15")), { start: "2025-12-01", end: "2025-12-31" });
+  assert.deepEqual(presetRange("this-month", localDay("2026-07-18")), { start: "2026-07-01", end: "2026-07-18" });
+  assert.deepEqual(presetRange("last-month", localDay("2026-01-15")), { start: "2025-12-01", end: "2025-12-31" });
 });
 
 test("this-quarter starts at the quarter boundary and stops today", () => {
-  assert.deepEqual(presetRange("this-quarter", utc("2026-07-18")), { start: "2026-07-01", end: "2026-07-18" });
-  assert.deepEqual(presetRange("this-quarter", utc("2026-02-02")), { start: "2026-01-01", end: "2026-02-02" });
+  assert.deepEqual(presetRange("this-quarter", localDay("2026-07-18")), { start: "2026-07-01", end: "2026-07-18" });
+  assert.deepEqual(presetRange("this-quarter", localDay("2026-02-02")), { start: "2026-01-01", end: "2026-02-02" });
 });
 
 test("this financial year stops today and the previous year stays complete", () => {
-  assert.deepEqual(presetRange("this-financial-year", utc("2026-07-18")), { start: "2026-04-01", end: "2026-07-18" });
-  assert.deepEqual(presetRange("last-financial-year", utc("2026-07-18")), { start: "2025-04-01", end: "2026-03-31" });
+  assert.deepEqual(presetRange("this-financial-year", localDay("2026-07-18")), { start: "2026-04-01", end: "2026-07-18" });
+  assert.deepEqual(presetRange("last-financial-year", localDay("2026-07-18")), { start: "2025-04-01", end: "2026-03-31" });
   // Before April, "this" FY is the one that began the previous April.
-  assert.deepEqual(presetRange("this-financial-year", utc("2026-02-01")), { start: "2025-04-01", end: "2026-02-01" });
+  assert.deepEqual(presetRange("this-financial-year", localDay("2026-02-01")), { start: "2025-04-01", end: "2026-02-01" });
 });
 
 test("custom preset has no computed range", () => {
-  assert.equal(presetRange("custom", utc("2026-07-18")), null);
+  assert.equal(presetRange("custom", localDay("2026-07-18")), null);
 });
 
 function summary(): BillingReportSummary {
@@ -111,11 +115,11 @@ test("CSV annotates the filtered categories when the summary names them", () => 
 });
 
 test("current report presets handle first days, leap day and completed boundaries", () => {
-  assert.deepEqual(presetRange("this-month", utc("2026-01-01")), { start: "2026-01-01", end: "2026-01-01" });
-  assert.deepEqual(presetRange("this-quarter", utc("2026-04-01")), { start: "2026-04-01", end: "2026-04-01" });
-  assert.deepEqual(presetRange("this-financial-year", utc("2026-04-01")), { start: "2026-04-01", end: "2026-04-01" });
-  assert.deepEqual(presetRange("this-month", utc("2024-02-29")), { start: "2024-02-01", end: "2024-02-29" });
-  assert.deepEqual(presetRange("last-month", utc("2024-03-01")), { start: "2024-02-01", end: "2024-02-29" });
+  assert.deepEqual(presetRange("this-month", localDay("2026-01-01")), { start: "2026-01-01", end: "2026-01-01" });
+  assert.deepEqual(presetRange("this-quarter", localDay("2026-04-01")), { start: "2026-04-01", end: "2026-04-01" });
+  assert.deepEqual(presetRange("this-financial-year", localDay("2026-04-01")), { start: "2026-04-01", end: "2026-04-01" });
+  assert.deepEqual(presetRange("this-month", localDay("2024-02-29")), { start: "2024-02-01", end: "2024-02-29" });
+  assert.deepEqual(presetRange("last-month", localDay("2024-03-01")), { start: "2024-02-01", end: "2024-02-29" });
 });
 
 test("report presets follow the local day before and after UTC midnight", () => {
