@@ -2687,9 +2687,10 @@ export const refuseSavedVideoAngles = async (
 
 
 /** Backfill only local files, one at a time. Never download full videos for a card. */
-export async function backfillVideoThumbnails(store: SavedVideoLibraryStore, ids: string[]): Promise<boolean> {
+export async function backfillVideoThumbnails(store: SavedVideoLibraryStore, ids: string[], signal?: AbortSignal): Promise<boolean> {
   let changed = false;
   for (const id of ids) {
+    if (signal?.aborted) break;
     const item = await store.getItem(id);
     if (!item || safeVideoThumbnail(item.thumbnailDataUrl)) continue;
     let thumbnailDataUrl = item.thumbnailDataUrl ? await createVideoThumbnail(new Blob(), item.thumbnailDataUrl) : undefined;
@@ -2700,7 +2701,8 @@ export async function backfillVideoThumbnails(store: SavedVideoLibraryStore, ids
     }
     if (!thumbnailDataUrl) continue;
     const latest = await store.getItem(id);
-    if (!latest || latest.source.checksumSha256 !== item.source.checksumSha256) continue;
+    if (!latest || safeVideoThumbnail(latest.thumbnailDataUrl) || latest.updatedAt !== item.updatedAt ||
+        latest.source.sizeBytes !== item.source.sizeBytes || latest.source.checksumSha256 !== item.source.checksumSha256) continue;
     await store.putItem({ ...latest, thumbnailDataUrl });
     changed = true;
   }

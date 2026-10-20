@@ -4257,10 +4257,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   useEffect(() => {
     if (!notesWorkspaceClient || playerProfileTool !== "videos") return;
     let current = true;
+    const controller = new AbortController();
     void loadSavedVideoLibraryModule().then(async (module) => {
       const store = await ensureSavedVideoLibrary();
       const localIds = playerToolVideos.filter((video) => !safeVideoThumbnail(video.thumbnailDataUrl)).map((video) => video.savedVideoId);
-      if (store && localIds.length && await module.backfillVideoThumbnails(store, localIds)) {
+      if (store && localIds.length && await module.backfillVideoThumbnails(store, localIds, controller.signal)) {
         if (current) refreshSavedVideoLibrary();
       }
       for (const transfer of playerToolCloudVideos) {
@@ -4281,7 +4282,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         } catch { libraryThumbnailAttempts.current.delete(key); }
       }
     }).catch(() => undefined);
-    return () => { current = false; };
+    return () => { current = false; controller.abort(); };
   }, [activeAccountId, notesWorkspaceClient, playerProfileTool, playerToolVideos, playerToolCloudVideos, ensureSavedVideoLibrary, refreshSavedVideoLibrary]);
 
   const playerToolLegacyVideoRecords = useMemo(() => {
