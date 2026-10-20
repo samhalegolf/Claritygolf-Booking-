@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clipTimeAt, exportTimeline, layoutExportPanes } from "./videoExport";
+import { clipTimeAt, exportAnalysisVideo, exportTimeline, layoutExportPanes } from "./videoExport";
 
 test("a single portrait phone clip keeps its own size", () => {
   const layout = layoutExportPanes([{ width: 1080, height: 1920 }]);
@@ -45,4 +45,17 @@ test("a clip holds its first and last frames outside its own length", () => {
   assert.ok(clipTimeAt(10_000, timeline, left) < 5);
   assert.ok(clipTimeAt(10_000, timeline, left) > 4.99);
   assert.equal(clipTimeAt(90, timeline, left), 1);
+});
+
+test("an untouched MP4 shares its original bytes without a video encoder", async () => {
+  const originalFetch = globalThis.fetch;
+  const original = new Blob(["original video bytes"], { type: "video/mp4" });
+  globalThis.fetch = async () => new Response(original, { headers: { "Content-Type": "video/mp4" } });
+  try {
+    const result = await exportAnalysisVideo([{
+      sourceUrl: "blob:original", objects: [], overlayWidth: 640, offsetS: 0,
+    }], { title: "Swing.MP4" });
+    assert.equal(await result.blob.text(), await original.text());
+    assert.equal(result.fileName, "swing.mp4");
+  } finally { globalThis.fetch = originalFetch; }
 });

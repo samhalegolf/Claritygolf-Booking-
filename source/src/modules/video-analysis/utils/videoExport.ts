@@ -104,11 +104,12 @@ export function clipTimeAt(
   return Math.min(Math.max(0, time), Math.max(0, pane.durationS - 0.001));
 }
 
-async function openSource(url: string): Promise<Source> {
+async function openSource(url: string, signal?: AbortSignal): Promise<Source> {
   // A clip loaded from this device is a blob: URL, which is already in memory.
   // Anything else is streamed with range requests rather than downloaded whole.
   if (url.startsWith("blob:") || url.startsWith("data:")) {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(t("Could not load the video."));
     return new BlobSource(await response.blob());
   }
   return new UrlSource(url, { requestInit: { credentials: "same-origin" } });
@@ -131,6 +132,21 @@ export async function exportAnalysisVideo(
   options: { title: string; signal?: AbortSignal; onProgress?: (fraction: number) => void }
 ): Promise<VideoExportResult> {
   if (!panes.length) throw new Error(t("Load a video before exporting."));
+  options.signal?.throwIfAborted();
+  // An untouched single video already is the deliverable. Copy it directly;
+  // re-encoding every frame needlessly blocks sharing and uses large buffers.
+  if (panes.length === 1 && panes[0].objects.length === 0 && panes[0].offsetS === 0) {
+    const response = await fetch(panes[0].sourceUrl, { signal: options.signal, credentials: "same-origin" });
+    if (!response.ok) throw new Error(t("Could not load the video."));
+    const blob = await response.blob();
+    options.signal?.throwIfAborted();
+    if (blob.type.split(";")[0].toLowerCase() === "video/mp4" && blob.size > 0) {
+      options.onProgress?.(1);
+      const label = options.title.trim().replace(/\.(mp4|mov|webm|m4v)$/i, "")
+        .replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
+      return { blob, fileName: (label || "clarity-video") + ".mp4" };
+    }
+  }
   if (typeof VideoEncoder === "undefined") {
     throw new Error(t("This browser can't create video files. Try the latest Chrome or Safari."));
   }
@@ -139,11 +155,23 @@ export async function exportAnalysisVideo(
   const streams: Array<AsyncIterator<WrappedCanvas | null>> = [];
   let output: Output | null = null;
 
+  // Dispose decoders immediately on cancellation, including while metadata or
+  // a frame promise is pending. Never wait for iterator.return before dispose.
+  const disposeInputs = () => inputs.forEach((input) => input.dispose());
+  const cancelOutput = () => {
+    if (output && output.state !== "finalized" && output.state !== "canceled") {
+      void output.cancel().catch(() => undefined);
+    }
+  };
+  const cancel = () => { disposeInputs(); cancelOutput(); };
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
+    signal?.throwIfAborted();
     const opened: OpenedPane[] = [];
     for (const pane of panes) {
-      const input = new Input({ formats: ALL_FORMATS, source: await openSource(pane.sourceUrl) });
+      const input = new Input({ formats: ALL_FORMATS, source: await openSource(pane.sourceUrl, signal) });
       inputs.push(input);
+      signal?.throwIfAborted();
       const track = await input.getPrimaryVideoTrack();
       if (!track || !(await track.canDecode())) {
         throw new Error(t("This video can't be read for export."));
@@ -224,12 +252,13 @@ export async function exportAnalysisVideo(
       fileName: getRecordingFileName(label || "clarity-analysis", "video/mp4"),
     };
   } catch (error) {
-    if (output && output.state !== "finalized" && output.state !== "canceled") {
-      await output.cancel().catch(() => undefined);
-    }
+    cancelOutput();
     throw error;
   } finally {
-    await Promise.all(streams.map((stream) => stream.return?.().catch(() => undefined)));
-    inputs.forEach((input) => input.dispose());
+    signal?.removeEventListener("abort", cancel);
+    disposeInputs();
+    // An iterator waiting on a decoder may never resolve return(). Cleanup
+    // must not prevent the caller from seeing the error or trying again.
+    streams.forEach((stream) => { void stream.return?.().catch(() => undefined); });
   }
 }

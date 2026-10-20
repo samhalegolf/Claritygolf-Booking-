@@ -4393,13 +4393,17 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     };
   }, [openSwingReviewId, playerSwingReviewGroups]);
 
-  const resolveReviewVideoUrl = useCallback(async (savedVideoId: string) => {
+  const resolveReviewVideoUrl = useCallback(async (savedVideoId: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
     const blob = await (await ensureSavedVideoLibrary())?.getBlob(savedVideoId).catch(() => null);
+    signal?.throwIfAborted();
     if (blob) return URL.createObjectURL(blob);
     // Not on this device: stream it out of Clarity Cloud instead.
-    const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`);
+    const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`, { signal });
     if (!response.ok) return null;
-    return URL.createObjectURL(await response.blob());
+    const downloaded = await response.blob();
+    signal?.throwIfAborted();
+    return URL.createObjectURL(downloaded);
   }, [ensureSavedVideoLibrary]);
 
   const linkedLessonVideoIds = useMemo(() => {

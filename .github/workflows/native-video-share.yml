@@ -4,6 +4,9 @@ on:
     paths:
       - "source/native/booking-share/**"
       - "source/src/native/deferredVideoShare*"
+      - "source/src/modules/video-analysis/utils/videoPreparation*"
+      - "source/src/modules/video-analysis/utils/videoExport*"
+      - "source/src/modules/video-analysis/components/VideoFileDialog.tsx"
       - ".github/workflows/native-video-share.yml"
   workflow_dispatch:
 permissions:
@@ -42,5 +45,5 @@ jobs:
           cache: npm
           cache-dependency-path: source/package-lock.json
       - run: npm ci --ignore-scripts
-      - run: npx tsx --test src/native/deferredVideoShare.test.ts src/native/nativeFiles.test.ts
+      - run: npx tsx --test src/native/deferredVideoShare.test.ts src/native/nativeFiles.test.ts src/modules/video-analysis/utils/videoPreparation.test.ts src/modules/video-analysis/utils/videoExport.test.ts
       - run: npm run typecheck
