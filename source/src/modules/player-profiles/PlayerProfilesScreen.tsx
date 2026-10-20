@@ -10,7 +10,7 @@ import { Suspense, lazy } from "react";
 import { AnchoredMenu } from "../shared/AnchoredMenu";
 import { Loading } from "../shared/Loading";
 import { clientMatchesSearchTerm, hasAnyProfileId, preferredVideoPlayerId } from "../clients/clientMatching";
-import { AlertTriangle, Archive, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cloud, CloudOff, CloudUpload, Download, ExternalLink, ImagePlus, LayoutGrid, List, Pause, Pencil, Play, Plus, RefreshCw, Send, Trash2, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cloud, CloudOff, CloudUpload, Download, ExternalLink, ImagePlus, LayoutGrid, List, Pause, Pencil, Play, Plus, RefreshCw, Send, Share2, Trash2, X } from "lucide-react";
 import { formatMoney } from "../../lib/money";
 import { PRIMARY_PLAYER_TOOL_TABS, SECONDARY_PLAYER_TOOLS, SECONDARY_PLAYER_TOOL_TABS, playerToolAllowed } from "./playerTools";
 import { notificationKindLabel, notificationStatusLabel } from "../notifications/notificationModel";
@@ -193,7 +193,7 @@ export type PlayerProfilesScreenProps = {
 };
 
 export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
-  const { begin: beginVideoDelivery, dialog: videoDeliveryDialog } = useVideoFileDelivery();
+  const { begin: beginVideoDelivery, warmShare, dialog: videoDeliveryDialog } = useVideoFileDelivery();
   const {
     notesWorkspaceClient,
     playerProfileTool,
@@ -308,10 +308,10 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
     openPlayerSubmissionOrCloudVideo,
     migrateLegacyVideo,
   } = props;
-  const deliverLibraryVideo = (id: string, title: string, action: "export" | "share") => {
+  const libraryVideoDelivery = (id: string, title: string) => {
     const item = playerToolVideos.find((video) => video.savedVideoId === id);
     const fileName = videoFileName(item?.source.originalFileName || title, item?.source.mimeType);
-    beginVideoDelivery(action, fileName, async (signal) => {
+    return { fileName, key: JSON.stringify([id, item?.updatedAt, fileName]), prepare: async (signal: AbortSignal) => {
       const url = await resolveReviewVideoUrl(id, signal);
       if (!url) throw new Error(t("This video is unavailable. Reconnect its storage and try again."));
       try {
@@ -323,7 +323,15 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
         // The resolver returns a new object URL owned by this request.
         if (url.startsWith("blob:")) URL.revokeObjectURL(url);
       }
-    });
+    } };
+  };
+  const warmLibraryShare = (id: string, title: string) => {
+    const request = libraryVideoDelivery(id, title);
+    warmShare(request.key, request.prepare);
+  };
+  const deliverLibraryVideo = (id: string, title: string, action: "export" | "share") => {
+    const request = libraryVideoDelivery(id, title);
+    beginVideoDelivery(action, request.fileName, request.prepare, request.key);
   };
 
   return (
@@ -1325,7 +1333,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                     <div key={angle.key}>
                                                       {clip.partner ? <span>{t("Angle {value}", { value: index + 1 })}</span> : null}
                                                       {(["export", "share"] as const).map((action) => (
-                                                        <button type="button" role="menuitem" key={action} disabled={!angle.playable} onClick={() => {
+                                                        <button type="button" role="menuitem" key={action} disabled={!angle.playable} onPointerEnter={action === "share" ? () => warmLibraryShare(angle.savedVideoId, angle.title) : undefined} onFocus={action === "share" ? () => warmLibraryShare(angle.savedVideoId, angle.title) : undefined} onClick={() => {
                                                           setOpenSavedVideoMenuId(null);
                                                           deliverLibraryVideo(angle.savedVideoId, angle.title, action);
                                                         }}>{action === "export" ? t("Export") : t("Share")}</button>
@@ -1564,10 +1572,10 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                 >
                                                   <Play size={14} />{t("Play")}</button>
                                                 {(["export", "share"] as const).map((action) => (
-                                                  <button type="button" role="menuitem" key={action} onClick={() => {
+                                                  <button type="button" role="menuitem" key={action} onPointerEnter={action === "share" ? () => warmLibraryShare(video.savedVideoId, videoRawTitle) : undefined} onFocus={action === "share" ? () => warmLibraryShare(video.savedVideoId, videoRawTitle) : undefined} onClick={() => {
                                                     closeMenu();
                                                     deliverLibraryVideo(video.savedVideoId, videoRawTitle, action);
-                                                  }}><Download size={14} />{action === "export" ? t("Export") : t("Share")}</button>
+                                                  }}>{action === "export" ? <Download size={14} /> : <Share2 size={14} />}{action === "export" ? t("Export") : t("Share")}</button>
                                                 ))}
                                                 {cloudOperational && canRetryCloud ? (
                                                   <button

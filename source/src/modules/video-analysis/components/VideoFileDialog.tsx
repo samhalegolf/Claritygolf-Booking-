@@ -5,6 +5,7 @@ import { t } from "../../../lib/i18n";
 import {
   canShareFile, chooseVideoExportDestination, exportFile, hasAppShareSheet, shareFile, writeVideoExport,
 } from "../../../native/nativeFiles";
+import { PreparedVideoCache } from "../utils/preparedVideoCache";
 import { prepareWithProgress } from "../utils/videoPreparation";
 import "./videoFileDialog.css";
 
@@ -30,10 +31,11 @@ export function videoFileName(title: string, mimeType = "video/mp4") {
 export function useVideoFileDelivery() {
   const [state, setState] = useState<DeliveryState | null>(null);
   const operation = useRef<AbortController | null>(null);
+  const shareCache = useRef(new PreparedVideoCache<PreparedVideoFile>());
   const mounted = useRef(true);
   const dialogRef = useRef<HTMLElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
-  const open = Boolean(state && !state.phase.startsWith("native-"));
+  const open = Boolean(state && state.action !== "share" && !state.phase.startsWith("native-"));
   useEffect(() => {
     if (!open) return;
     dialogRef.current?.focus();
@@ -41,15 +43,22 @@ export function useVideoFileDelivery() {
   }, [open]);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; operation.current?.abort(); };
+    return () => { mounted.current = false; operation.current?.abort(); shareCache.current.clear(); };
   }, []);
   const close = useCallback(() => {
     operation.current?.abort();
+    shareCache.current.clear();
     operation.current = null;
     setState(null);
   }, []);
 
-  const begin = useCallback((action: VideoFileAction, suggestedName: string, prepare: PrepareVideo) => {
+  const warmShare = useCallback((key: string, prepare: PrepareVideo) => {
+    if (hasDeferredVideoShare()) return;
+    void shareCache.current.prepare(key, prepare).catch(() => undefined);
+  }, []);
+  const clearPreparedShare = useCallback(() => shareCache.current.clear(), []);
+
+  const begin = useCallback((action: VideoFileAction, suggestedName: string, prepare: PrepareVideo, shareKey = suggestedName) => {
     if (operation.current) return;
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const controller = new AbortController();
@@ -60,6 +69,41 @@ export function useVideoFileDelivery() {
         if (live()) setState({ action, phase: stage === "choosing" ? "native-choosing" : stage === "preparing" ? "native-preparing" : "native-handover", percent: Math.floor(fraction * 100) });
       }, action).then((sent) => { if (live()) setState(sent && action === "export" ? { action, phase: "saved", percent: 100, savedName: suggestedName } : null); }).catch((error: unknown) => {
         if (live()) setState({ action, phase: "error", percent: 0, error: error instanceof Error ? error.message : t("Could not share video.") });
+      }).finally(() => { if (operation.current === controller) operation.current = null; });
+      return;
+    }
+    if (action === "share") {
+      const send = (file: PreparedVideoFile) => {
+        if (!live()) return;
+        if (!file.blob.size) throw new Error(t("The video file is empty."));
+        setState({ action, phase: "sending", percent: 100 });
+        // This call must happen synchronously when a prepared icon is tapped.
+        return shareFile(file.blob, file.fileName).then(() => {
+          if (live()) setState(null);
+        });
+      };
+      const ready = shareCache.current.peek(shareKey);
+      const task = ready ? (() => {
+        try { return Promise.resolve(send(ready)); }
+        catch (error) { return Promise.reject(error); }
+      })() : (() => {
+        setState({ action, phase: "preparing", percent: 0 });
+        return shareCache.current.prepare(shareKey, prepare, (fraction) => {
+          if (live()) setState({ action, phase: "preparing", percent: Math.floor(fraction * 100) });
+        }).then((file) => {
+          if (!live()) return;
+          // The browser may consume the original gesture during a long render.
+          // Keep the prepared file on the original icon; never add a second Share button.
+          if (navigator.userActivation?.isActive === false) {
+            setState({ action, phase: "ready", percent: 100, file });
+            return;
+          }
+          return send(file);
+        });
+      })();
+      void task.catch((error: unknown) => {
+        if (live()) setState({ action, phase: "error", percent: 0,
+          error: error instanceof Error ? error.message : t("Could not share video.") });
       }).finally(() => { if (operation.current === controller) operation.current = null; });
       return;
     }
@@ -122,7 +166,16 @@ export function useVideoFileDelivery() {
   const nativeWorking = state?.phase === "native-preparing" || state?.phase === "native-handover";
   const nativeChoosing = state?.phase === "native-choosing";
   const busy = nativeChoosing || nativeWorking || state?.phase === "choosing" || state?.phase === "preparing" || state?.phase === "sending";
-  const dialog = state && nativeChoosing ? null : state && nativeWorking ? createPortal(
+  const browserShare = state?.action === "share" && !state.phase.startsWith("native-");
+  const dialog = browserShare && state.phase === "sending" ? null : browserShare ? createPortal(
+    <aside className="va-file-working" role={state.phase === "error" ? "alert" : "status"} aria-live="polite">
+      <span>{state.error || (state.phase === "ready"
+        ? t("Video ready. Select the Share icon to open your device’s share sheet.")
+        : t("Working…"))}</span>
+      {state.phase === "preparing" ? <progress max={100} value={state.percent || undefined} aria-label={t("Preparing video")} /> : null}
+      <button type="button" className="upload-button is-subtle" onClick={close}>{state.phase === "preparing" ? t("Cancel") : t("Dismiss")}</button>
+    </aside>, document.body,
+  ) : state && nativeChoosing ? null : state && nativeWorking ? createPortal(
     <aside className="va-file-working" role="status" aria-live="polite">
       <span>{state.phase === "native-handover" ? t("Handing video to app…") : t("Working…")}</span>
       <progress max={100} value={state.phase === "native-handover" ? undefined : state.percent || undefined} aria-label={t("Preparing video")} />
@@ -159,5 +212,5 @@ export function useVideoFileDelivery() {
       </section>
     </div>, document.body,
   ) : null;
-  return { begin, busy: Boolean(busy), dialog };
+  return { begin, warmShare, clearPreparedShare, busy: Boolean(busy), dialog };
 }

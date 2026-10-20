@@ -2449,7 +2449,7 @@ export function VideoWorkspace({
   const analysisRecorderRef = useRef<AnalysisViewRecorder | null>(null);
   const [screenRecordingStatus, setScreenRecordingStatus] = useState<ScreenRecordingStatus>("idle");
   const [screenRecordingMessage, setScreenRecordingMessage] = useState("");
-  const { begin: beginVideoDelivery, busy: videoDeliveryBusy, dialog: videoDeliveryDialog } = useVideoFileDelivery();
+  const { begin: beginVideoDelivery, warmShare, clearPreparedShare, busy: videoDeliveryBusy, dialog: videoDeliveryDialog } = useVideoFileDelivery();
   // The recorder reads this on every frame, so it always draws the current
   // video and drawings without needing to be restarted when they change.
   const recorderFrameRef = useRef<AnalysisRecorderFrame>({
@@ -3525,7 +3525,7 @@ export function VideoWorkspace({
   // What gets exported is what the coach is looking at: both clips when
   // comparing, lined up exactly as they sit on screen right now, otherwise the
   // clip in front of them. Each keeps its own drawings.
-  const startVideoExport = useCallback((action: "export" | "share" = "export") => {
+  const getVideoDelivery = useCallback(() => {
     const paneFor = (side: ComparisonSide, offsetS: number): ExportPane | null => {
       const sourceUrl = side === "left" ? leftMountedSource : rightMountedSource;
       if (!sourceUrl) return null;
@@ -3546,24 +3546,48 @@ export function VideoWorkspace({
       ? `${playerVideoLeft?.title || "clip"} vs ${playerVideoRight?.title || "clip"}`
       : activeVideo?.title || "";
 
-    setSettingsOpen(false);
-    beginVideoDelivery(action, videoFileName(title.replace(/\.(mp4|mov|webm|m4v)$/i, "")), (signal, onProgress) =>
-      exportAnalysisVideo(panes, { title, signal, onProgress })
-    );
+    return {
+      key: JSON.stringify({ title, panes }),
+      panes,
+      fileName: videoFileName(title.replace(/\.(mp4|mov|webm|m4v)$/i, "")),
+      prepare: (signal: AbortSignal, onProgress: (fraction: number) => void) =>
+        exportAnalysisVideo(panes, { title, signal, onProgress }),
+    };
   }, [
-    beginVideoDelivery,
     bothSidesLoaded,
     effectiveActiveSide,
-    leftDrawing,
+    leftDrawing.objects,
     leftMountedSource,
-    leftOverlayDimensions,
+    leftOverlayDimensions.width,
     modeIsCompare,
     playerVideoLeft,
     playerVideoRight,
-    rightDrawing,
+    rightDrawing.objects,
     rightMountedSource,
-    rightOverlayDimensions,
+    rightOverlayDimensions.width,
   ]);
+
+  const warmVideoShare = useCallback(() => {
+    const request = getVideoDelivery();
+    if (request.panes.length) warmShare(request.key, request.prepare);
+  }, [getVideoDelivery, warmShare]);
+
+  useEffect(() => {
+    clearPreparedShare();
+    const request = getVideoDelivery();
+    // Original files are cheap to stage as soon as loaded. Edited analyses
+    // warm on hover/focus so normal drawing doesn't repeatedly encode a clip.
+    if (request.panes.length === 1 && request.panes[0].objects.length === 0) {
+      warmShare(request.key, request.prepare);
+    }
+    return clearPreparedShare;
+  }, [getVideoDelivery, warmShare, clearPreparedShare]);
+
+  const startVideoExport = useCallback((action: "export" | "share" = "export") => {
+    const request = getVideoDelivery();
+    setSettingsOpen(false);
+    beginVideoDelivery(action, request.fileName, request.prepare, request.key);
+  }, [getVideoDelivery, beginVideoDelivery]);
 
   const handleWorkspaceNoteCommit = useCallback(
     async (text: string) => {
@@ -4246,6 +4270,7 @@ export function VideoWorkspace({
             <AnalysisRail
               onExportVideo={() => startVideoExport("export")}
               onShareVideo={() => startVideoExport("share")}
+              onPrepareShareVideo={warmVideoShare}
               fileActionBusy={videoDeliveryBusy}
               onUpload={() => openUpload(effectiveActiveSide)}
               onOpenLibrary={
