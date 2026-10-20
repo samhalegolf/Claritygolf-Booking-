@@ -164,8 +164,12 @@ public final class NativeVideoShareBridge: NSObject, WKScriptMessageHandlerWithR
         current.timeout?.cancel()
         if type != "complete" { current.file.abort(ShareFile.error(error ?? "Sharing cancelled.")) }
         emit(current, type: type, error: error)
-        #if !os(macOS)
+        #if os(macOS)
+        current.picker = nil
+        current.selectedService = nil
+        #else
         if type != "complete" { current.controller?.dismiss(animated: true) }
+        current.controller = nil
         #endif
         session = nil
         // A receiving extension may still be copying after the share callback.
