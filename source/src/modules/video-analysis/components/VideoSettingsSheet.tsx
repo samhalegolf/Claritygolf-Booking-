@@ -57,6 +57,7 @@ export type VideoSettingsSheetProps = {
   onToggleScreenRecording: () => void;
   /** Export the view, drawings included, as a video file to share or save. */
   onExportVideo: () => void;
+  onShareVideo: () => void;
   exportBusy: boolean;
   onMyLibrarySave: () => void;
   saveBusy: boolean;
@@ -99,6 +100,7 @@ export function VideoSettingsSheet({
   screenRecordingMessage,
   onToggleScreenRecording,
   onExportVideo,
+  onShareVideo,
   exportBusy,
   onMyLibrarySave,
   saveBusy,
@@ -364,7 +366,11 @@ export function VideoSettingsSheet({
           disabled={exportBusy || !hasActiveClip}
         >
           <IconExport />
-          <span>{t("Export video to share")}</span>
+          <span>{t("Export")}</span>
+        </button>
+
+        <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onShareVideo} disabled={exportBusy || !hasActiveClip}>
+          <IconExport /><span>{t("Share")}</span>
         </button>
 
         <button
