@@ -100,8 +100,10 @@ export async function shareFileInApp(source: { blob: Blob } | { url: string }, f
 
   try {
     await native.share.share({ files: [uri], title: path });
-  } catch {
-    // Closing the share sheet without picking anything rejects. Not an error.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/cancel|dismiss|abort/i.test(message)) return true;
+    throw error;
   }
   return true;
 }
@@ -132,7 +134,8 @@ export function canShareFile(blob: Blob, fileName: string) {
  * person closed the sheet without picking anything.
  */
 export async function shareFile(blob: Blob, fileName: string): Promise<boolean> {
-  if (await shareFileInApp({ blob }, fileName)) return true;
+  if (plugins()) return shareFileInApp({ blob }, fileName);
+  if (!canShareFile(blob, fileName)) throw new Error("File sharing is unavailable here. Export the video, then open it in the app you want to use.");
   try {
     await navigator.share({ files: [new File([blob], fileName, { type: blob.type })] });
     return true;
@@ -152,4 +155,10 @@ export function downloadFile(blob: Blob, fileName: string) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Save a standalone copy; iOS offers Save to Files in its system sheet. */
+export async function exportFile(blob: Blob, fileName: string): Promise<void> {
+  if (await shareFileInApp({ blob }, fileName)) return;
+  downloadFile(blob, fileName);
 }

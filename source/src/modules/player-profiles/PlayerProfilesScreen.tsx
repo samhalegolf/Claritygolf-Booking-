@@ -1,3 +1,4 @@
+import { VideoFileDialog } from "../video-analysis/components/VideoFileDialog";
 // The Player Profiles screen: the list of people with notes or video, and the
 // tool panel for the selected one (bookings, reviews, emails, transactions,
 // passes, portal access, notes, practice, video). Drawn here; the state and
@@ -5,7 +6,7 @@
 // the view half of the screen. Loaded with the view, not with the shell.
 import { t, tn } from "../../lib/i18n";
 import { ClarityAssessments, ClarityBookingPages, ClarityCalendar, ClarityEmail, ClarityFilesMedia, ClarityIntegrations, ClarityLessonsProgrammes, ClarityMore, ClarityPassesCredits, ClarityPayments, ClarityProfile, ClarityVideoAnalysis } from "../shared/ClarityIcons";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useState } from "react";
 import { AnchoredMenu } from "../shared/AnchoredMenu";
 import { Loading } from "../shared/Loading";
 import { clientMatchesSearchTerm, hasAnyProfileId, preferredVideoPlayerId } from "../clients/clientMatching";
@@ -192,6 +193,7 @@ export type PlayerProfilesScreenProps = {
 };
 
 export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
+  const [fileVideo, setFileVideo] = useState<{ id: string; title: string; action: "export" | "share" } | null>(null);
   const {
     notesWorkspaceClient,
     playerProfileTool,
@@ -1297,6 +1299,24 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                           </button>
                                           <div className="player-video-shelf-body">
                                             <strong>{clip.title}</strong>
+                                            <div className="player-video-menu">
+                                              <button type="button" className="icon-button" aria-label={t("Video options")} aria-haspopup="menu" aria-expanded={openSavedVideoMenuId === clip.key} onClick={() => setOpenSavedVideoMenuId(openSavedVideoMenuId === clip.key ? null : clip.key)}><ClarityMore size={16} /></button>
+                                              {openSavedVideoMenuId === clip.key ? (
+                                                <AnchoredMenu onClose={() => setOpenSavedVideoMenuId(null)} closeLabel={t("Close video options")}>
+                                                  {[clip, ...(clip.partner ? [clip.partner] : [])].map((angle, index) => (
+                                                    <div key={angle.key}>
+                                                      {clip.partner ? <span>{t("Angle {value}", { value: index + 1 })}</span> : null}
+                                                      {(["export", "share"] as const).map((action) => (
+                                                        <button type="button" role="menuitem" key={action} disabled={!angle.playable} onClick={() => {
+                                                          setOpenSavedVideoMenuId(null);
+                                                          setFileVideo({ id: angle.savedVideoId, title: angle.title, action });
+                                                        }}>{action === "export" ? t("Export") : t("Share")}</button>
+                                                      ))}
+                                                    </div>
+                                                  ))}
+                                                </AnchoredMenu>
+                                              ) : null}
+                                            </div>
                                             <span>
                                               {clip.partner
                                                 ? t("Same swing · 2 angles")
@@ -1525,6 +1545,12 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                   }}
                                                 >
                                                   <Play size={14} />{t("Play")}</button>
+                                                {(["export", "share"] as const).map((action) => (
+                                                  <button type="button" role="menuitem" key={action} onClick={() => {
+                                                    closeMenu();
+                                                    setFileVideo({ id: video.savedVideoId, title: videoRawTitle, action });
+                                                  }}><Download size={14} />{action === "export" ? t("Export") : t("Share")}</button>
+                                                ))}
                                                 {cloudOperational && canRetryCloud ? (
                                                   <button
                                                     type="button"
@@ -1809,6 +1835,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
           ) : null}
         </div>
       </div>
+      {fileVideo ? <VideoFileDialog key={fileVideo.id} video={fileVideo} resolveUrl={resolveReviewVideoUrl} onClose={() => setFileVideo(null)} /> : null}
     </section>
   );
 }

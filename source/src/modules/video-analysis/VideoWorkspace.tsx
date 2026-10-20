@@ -21,6 +21,7 @@ import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { VideoCanvas } from "./components/VideoCanvas";
 import {
+  IconExport,
   IconBack,
   IconCamera,
   IconEdit,
@@ -117,7 +118,7 @@ import { DEFAULT_DRAWING_COLOR, DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
 import { activeLocale } from "../../lib/activeCountry";
 import { t } from "../../lib/i18n";
-import { canShareFile, downloadFile, hasAppShareSheet, shareFile, shareFileInApp } from "../../native/nativeFiles";
+import { canShareFile, exportFile, hasAppShareSheet, shareFile, shareFileInApp } from "../../native/nativeFiles";
 import { exportAnalysisVideo, type ExportPane } from "./utils/videoExport";
 
 /**
@@ -2452,6 +2453,7 @@ export function VideoWorkspace({
   const analysisRecorderRef = useRef<AnalysisViewRecorder | null>(null);
   const [screenRecordingStatus, setScreenRecordingStatus] = useState<ScreenRecordingStatus>("idle");
   const [screenRecordingMessage, setScreenRecordingMessage] = useState("");
+  const [videoFileAction, setVideoFileAction] = useState<"export" | "share">("export");
   const [videoExport, setVideoExport] = useState<VideoExportState | null>(null);
   const videoExportAbortRef = useRef<AbortController | null>(null);
   // The recorder reads this on every frame, so it always draws the current
@@ -3529,7 +3531,8 @@ export function VideoWorkspace({
   // What gets exported is what the coach is looking at: both clips when
   // comparing, lined up exactly as they sit on screen right now, otherwise the
   // clip in front of them. Each keeps its own drawings.
-  const startVideoExport = useCallback(async () => {
+  const startVideoExport = useCallback(async (action: "export" | "share" = "export") => {
+    setVideoFileAction(action);
     const paneFor = (side: ComparisonSide, offsetS: number): ExportPane | null => {
       const sourceUrl = side === "left" ? leftMountedSource : rightMountedSource;
       if (!sourceUrl) return null;
@@ -4863,6 +4866,13 @@ export function VideoWorkspace({
       ) : null}
 
       {workspaceHasVideo ? (
+        <div className="save-destination-actions" aria-label={t("Video file actions")}>
+          <button type="button" className="upload-button is-subtle" disabled={videoExport?.status === "exporting"} onClick={() => void startVideoExport("export")}><IconExport />{t("Export")}</button>
+          <button type="button" className="upload-button is-subtle" disabled={videoExport?.status === "exporting"} onClick={() => void startVideoExport("share")}>{t("Share")}</button>
+        </div>
+      ) : null}
+
+      {workspaceHasVideo ? (
         <PlayerActionBar
           isPlaying={activePlayback.isPlaying}
           onTogglePlay={() => playPauseSide(effectiveActiveSide)}
@@ -4938,7 +4948,7 @@ export function VideoWorkspace({
       ) : null}
 
       {videoExport ? (
-        <section className="save-destination-prompt video-export-panel" role="dialog" aria-label={t("Export video to share")}>
+        <section className="save-destination-prompt video-export-panel" role="dialog" aria-label={videoFileAction === "share" ? t("Share") : t("Export")}>
           <div className="save-destination-copy">
             {videoExport.status === "exporting" ? (
               <>
@@ -4950,6 +4960,8 @@ export function VideoWorkspace({
               <>
                 <strong>{t("Video ready")}</strong>
                 <span>{videoExport.fileName}</span>
+                {hasAppShareSheet() ? <span>{t("To export a copy to your device, choose Export, then Save to Files.")}</span> : null}
+                {!videoExport.canShare ? <span>{t("File sharing is unavailable here. Export the video, then open it in another app.")}</span> : null}
               </>
             ) : (
               <>
@@ -4964,14 +4976,14 @@ export function VideoWorkspace({
                 type="button"
                 className="upload-button"
                 onClick={() => void shareExportedVideo(videoExport.blob, videoExport.fileName)}
-              >{hasAppShareSheet() ? t("Share or save") : t("Share")}</button>
+              >{t("Share")}</button>
             ) : null}
-            {videoExport.status === "ready" && !hasAppShareSheet() ? (
+            {videoExport.status === "ready" ? (
               <button
                 type="button"
                 className={`upload-button${videoExport.canShare ? " is-subtle" : ""}`}
-                onClick={() => downloadFile(videoExport.blob, videoExport.fileName)}
-              >{t("Download")}</button>
+                onClick={() => void exportFile(videoExport.blob, videoExport.fileName).catch((error: unknown) => setVideoExport({ status: "error", message: error instanceof Error ? error.message : t("Could not export the video.") }))}
+              >{t("Export")}</button>
             ) : null}
             <button type="button" className="upload-button is-subtle" onClick={closeVideoExport}>
               {videoExport.status === "exporting" ? t("Cancel") : t("Done")}
@@ -4998,7 +5010,8 @@ export function VideoWorkspace({
               ? void stopScreenRecording()
               : void startScreenRecording()
           }
-          onExportVideo={() => void startVideoExport()}
+          onExportVideo={() => void startVideoExport("export")}
+          onShareVideo={() => void startVideoExport("share")}
           exportBusy={videoExport?.status === "exporting"}
           onMyLibrarySave={handleMyLibrarySave}
           saveBusy={saveBusy}
