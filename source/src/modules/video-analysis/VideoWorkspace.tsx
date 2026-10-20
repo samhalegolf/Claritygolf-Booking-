@@ -1,3 +1,4 @@
+import { thumbnailFromFrame } from "./utils/videoThumbnails";
 import { useVideoFileDelivery, videoFileName } from "./components/VideoFileDialog";
 import React, {
   ChangeEvent,
@@ -3072,19 +3073,7 @@ export function VideoWorkspace({
       const video = side === "left" ? leftVideoRef.current : rightVideoRef.current;
       if (!video || !video.videoWidth || !video.videoHeight) return undefined;
 
-      try {
-        const canvas = document.createElement("canvas");
-        const maxWidth = 320;
-        const ratio = Math.min(1, maxWidth / Math.max(1, video.videoWidth));
-        canvas.width = Math.max(1, Math.round(video.videoWidth * ratio));
-        canvas.height = Math.max(1, Math.round(video.videoHeight * ratio));
-        const context = canvas.getContext("2d");
-        if (!context) return undefined;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL("image/jpeg", 0.72);
-      } catch {
-        return undefined;
-      }
+      return thumbnailFromFrame(video, video.videoWidth, video.videoHeight);
     },
     []
   );

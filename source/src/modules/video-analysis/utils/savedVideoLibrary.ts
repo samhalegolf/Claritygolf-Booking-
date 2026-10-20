@@ -1,3 +1,4 @@
+import { createVideoThumbnail, safeVideoThumbnail } from "./videoThumbnails";
 import { apiFetch, clearGuestToken, setGuestToken } from "../../auth/apiFetch";
 import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
@@ -601,7 +602,7 @@ const buildItem = async (
         [input.sourceSide]: savedVideoId,
       },
     },
-    thumbnailDataUrl: input.thumbnailDataUrl || existing?.thumbnailDataUrl,
+    thumbnailDataUrl: await createVideoThumbnail(input.sourceBlob, input.thumbnailDataUrl || existing?.thumbnailDataUrl).catch(() => safeVideoThumbnail(input.thumbnailDataUrl || existing?.thumbnailDataUrl)),
     swingAngles: existing?.swingAngles,
   };
 
@@ -720,6 +721,7 @@ type PublicTransferSession = {
 
 export type ClarityCloudImportTransfer = PublicTransferSession & {
   savedVideo?: {
+    thumbnailDataUrl?: string;
     savedVideoId: string;
     playerId: string;
     lessonId?: string;
@@ -1467,6 +1469,8 @@ export const saveSavedVideoToCloud = async (
           checksumSha256,
           driveFileId: session.driveVideoFileId,
         },
+        source: working.source,
+        thumbnailDataUrl: safeVideoThumbnail(working.thumbnailDataUrl),
         analysisJson: compactSavedVideoAnalysisJson(working),
         snapshotBytes: dataUrlToBase64Size(working.thumbnailDataUrl),
       }),
@@ -1847,6 +1851,7 @@ export const importSavedVideoFromClarityCloud = async (
       height: importPackage.video.height,
     },
     sourceBlob: blob,
+    thumbnailDataUrl: safeVideoThumbnail(importPackage.savedVideo.thumbnailDataUrl),
     analysisSnapshot,
     workspaceSnapshot: workspace,
   });
@@ -2679,3 +2684,64 @@ export const refuseSavedVideoAngles = async (
   if (a) await store.putItem(refuse(a, bId));
   if (b) await store.putItem(refuse(b, aId));
 };
+
+
+/** Backfill only local files, one at a time. Never download full videos for a card. */
+export async function backfillVideoThumbnails(store: SavedVideoLibraryStore, ids: string[], signal?: AbortSignal): Promise<boolean> {
+  let changed = false;
+  for (const id of ids) {
+    if (signal?.aborted) break;
+    const item = await store.getItem(id);
+    if (!item || safeVideoThumbnail(item.thumbnailDataUrl)) continue;
+    let thumbnailDataUrl = item.thumbnailDataUrl ? await createVideoThumbnail(new Blob(), item.thumbnailDataUrl) : undefined;
+    if (!thumbnailDataUrl) {
+      const blob = await store.getBlob(id).catch(() => null);
+      if (!blob) continue;
+      thumbnailDataUrl = await createVideoThumbnail(blob);
+    }
+    if (!thumbnailDataUrl) continue;
+    const latest = await store.getItem(id);
+    if (!latest || safeVideoThumbnail(latest.thumbnailDataUrl) || latest.updatedAt !== item.updatedAt ||
+        latest.source.sizeBytes !== item.source.sizeBytes || latest.source.checksumSha256 !== item.source.checksumSha256) continue;
+    await store.putItem({ ...latest, thumbnailDataUrl });
+    changed = true;
+  }
+  return changed;
+}
+
+/** Last successful cloud catalogue, including its tiny posters, survives outages. */
+export async function readCachedCloudCatalogue(accountId: string): Promise<ClarityCloudImportTransfer[]> {
+  return (await runManagedHandleRequest<ClarityCloudImportTransfer[] | undefined>("readonly",
+    (store) => store.get("cloud-catalogue:" + accountId)).catch(() => undefined)) || [];
+}
+
+export async function cacheCloudCatalogue(accountId: string, transfers: ClarityCloudImportTransfer[]) {
+  const previous = await readCachedCloudCatalogue(accountId);
+  const byId = new Map(previous.map((transfer) => [transfer.savedVideoId, transfer]));
+  const next = transfers.map((transfer) => {
+    const prior = byId.get(transfer.savedVideoId);
+    return { ...transfer, savedVideo: transfer.savedVideo ? {
+      ...transfer.savedVideo,
+      thumbnailDataUrl: safeVideoThumbnail(transfer.savedVideo.thumbnailDataUrl) ||
+        safeVideoThumbnail(prior?.savedVideo?.thumbnailDataUrl),
+    } : transfer.savedVideo };
+  });
+  await runManagedHandleRequest("readwrite", (store) => store.put(next, "cloud-catalogue:" + accountId));
+  return next;
+}
+
+export async function readCachedLibraryRetirements(accountId: string) {
+  return (await runManagedHandleRequest<import("./videoLibraryRetirement").RetiredVideoEntry[] | undefined>(
+    "readonly", (store) => store.get("library-retirements:" + accountId)).catch(() => undefined)) || [];
+}
+export async function cacheLibraryRetirements(accountId: string, entries: import("./videoLibraryRetirement").RetiredVideoEntry[]) {
+  await runManagedHandleRequest("readwrite", (store) => store.put(entries, "library-retirements:" + accountId));
+}
+
+export async function fetchCloudVideoThumbnail(savedVideoId: string): Promise<string | undefined> {
+  const response = await apiFetch(transferUrl("coach", savedVideoId, "thumbnail"), { signal: AbortSignal.timeout(12000) });
+  if (!response.ok) return undefined;
+  const blob = await response.blob();
+  if (blob.size > 64_000 || !blob.type.startsWith("image/")) return undefined;
+  return createVideoThumbnail(new Blob(), await blobToDataUrl(blob));
+}

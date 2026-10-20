@@ -1,3 +1,6 @@
+import { settingsSelectQuery } from "./_shared/settings-scope.mts";
+import { safeVideoThumbnail } from "../../src/modules/video-analysis/utils/videoThumbnailPolicy.ts";
+import { cleanRetiredVideoEntry, retiredEntrySettingKey } from "../../src/modules/video-analysis/utils/videoLibraryRetirement.ts";
 import type { Config } from "@netlify/functions";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
@@ -187,6 +190,7 @@ type ProviderDiagnostics = {
 };
 
 type SafeSavedVideo = {
+  thumbnailDataUrl?: string;
   savedVideoId: string;
   playerId: string;
   lessonId?: string;
@@ -215,6 +219,7 @@ type UploadVideoMetadata = {
 };
 
 type DriveFile = {
+  thumbnailLink?: string;
   id: string;
   name?: string;
   mimeType?: string;
@@ -1039,6 +1044,7 @@ function validateSavedVideo(candidate: any, savedVideoIdFromPath?: string): Safe
     title: cleanText(candidate?.title, "Saved video", 240),
     createdAt: cleanText(candidate?.createdAt, new Date().toISOString(), 80),
     updatedAt: cleanText(candidate?.updatedAt, new Date().toISOString(), 80),
+    ...(safeVideoThumbnail(candidate?.thumbnailDataUrl) ? { thumbnailDataUrl: safeVideoThumbnail(candidate.thumbnailDataUrl) } : {}),
     source: candidate?.source || {},
   };
 }
@@ -1276,7 +1282,7 @@ async function findDriveFile(accessToken: string, props: Record<string, string>,
 async function getDriveFile(accessToken: string, fileId: string, diagnostics: ProviderDiagnostics = {}) {
   return googleJson<DriveFile>(
     accessToken,
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,md5Checksum,parents,appProperties,webViewLink`,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,md5Checksum,parents,appProperties,webViewLink,thumbnailLink`,
     {},
     "DRIVE_TRANSFER_FOLDER_FAILED",
     {
@@ -1612,7 +1618,7 @@ async function startResumableUpload(
 async function uploadedFile(accessToken: string, fileId: string) {
   return googleJson<DriveFile>(
     accessToken,
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,size,md5Checksum,parents,appProperties`,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,size,md5Checksum,parents,appProperties,thumbnailLink`,
     {},
     "DRIVE_UPLOAD_VERIFY_FAILED",
     {
@@ -2034,6 +2040,7 @@ function transferManifest(args: {
     lessonId: args.savedVideo.lessonId,
     analysisId: args.savedVideo.analysisId,
     title: args.savedVideo.title,
+    thumbnailDataUrl: safeVideoThumbnail(args.savedVideo.thumbnailDataUrl),
     createdAt: args.savedVideo.createdAt,
     updatedAt: args.savedVideo.updatedAt,
     uploadedAt,
@@ -2797,6 +2804,7 @@ function importSummaryFromManifest(session: VideoTransferSession, manifest: any)
       lessonId: session.lessonId,
       analysisId: session.analysisId,
       title: cleanText(manifest?.title, "Saved video", 240),
+      thumbnailDataUrl: safeVideoThumbnail(manifest?.thumbnailDataUrl),
       createdAt: cleanText(manifest?.createdAt, session.createdAt, 80),
       updatedAt: cleanText(manifest?.updatedAt, session.updatedAt, 80),
     },
@@ -4633,6 +4641,38 @@ async function routeVideoTransferRequest(
     const actor = options.resolveAccountId ? null : await requireCoachActor(req);
     const accountId = actor ? actor.accountId : await options.resolveAccountId!(req);
     const actorId = actor?.authUserId || (await options.resolveAuthUserId?.(req)) || "";
+    // Catalogue retirement does not need a working Drive connection. It hides
+    // the index entry only, retaining the source, notes and transfer records.
+    if (parts[0] === "library-retirements") {
+      const readRetirements = async (): Promise<Record<string, string>> => {
+        const rows = await supabase("settings", { query: settingsSelectQuery(accountId, {
+          filters: ["key=like.videoLibraryRetiredEntry:*"],
+        }) });
+        return Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
+      };
+      const settings = req.method === "GET" ? await readRetirements() : {};
+      if (req.method === "POST") {
+        const entry = cleanRetiredVideoEntry(await readJson(req));
+        if (!entry) return json({ error: "invalid_retirement", message: "Confirm that the source has been permanently removed." }, 400);
+        await setSettings(accountId, { [retiredEntrySettingKey(entry.savedVideoId)]: JSON.stringify(entry) });
+      } else if (req.method === "DELETE") {
+        const id = cleanString((await readJson(req) as any)?.savedVideoId, "", 160);
+        if (!/^[a-zA-Z0-9_-]{1,160}$/.test(id)) return json({ error: "invalid_video_id" }, 400);
+        await setSettings(accountId, { [retiredEntrySettingKey(id)]: "" });
+      } else if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const current = req.method === "GET" ? settings : await readRetirements();
+      const entries = Object.entries(current).flatMap(([key, value]) => {
+        if (!key.startsWith("videoLibraryRetiredEntry:") || !value) return [];
+        try {
+          const record = JSON.parse(value);
+          const clean = cleanRetiredVideoEntry(record, record.retiredAt);
+          return clean ? [clean] : [];
+        } catch { return []; }
+      });
+      const response = json({ ok: true, entries });
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     // The review's page and the drill library. No Drive in either, so they
     // answer before the Clarity Cloud check below.
     if (parts[0] === "review" && (parts[1] === "doc" || parts[1] === "docs")) {
@@ -4692,6 +4732,43 @@ async function routeVideoTransferRequest(
     if (req.method === "GET" && parts[1] === "download") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
       return await handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
+    }
+    if (req.method === "GET" && parts[1] === "thumbnail") {
+      const session = await readTransferSession(accountId, parts[0]);
+      if (!session?.driveVideoFileId) return json({ error: "not_found" }, 404);
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+      const manifest = await readManifestForSession(provider, session) as any;
+      const stored = safeVideoThumbnail(manifest?.thumbnailDataUrl);
+      if (stored) return new Response(Buffer.from(stored.split(",")[1], "base64"), {
+        headers: { "Content-Type": stored.startsWith("data:image/webp") ? "image/webp" : "image/jpeg", "Cache-Control": "private, max-age=86400" },
+      });
+      // Drive's thumbnail is small and independent of a full video download.
+      // Never expose its temporary credentialed link to the browser.
+      const file = await provider.getFileMetadata({ fileId: session.driveVideoFileId });
+      if (!file.thumbnailLink) return json({ error: "thumbnail_pending" }, 404);
+      const thumbnailUrl = new URL(file.thumbnailLink);
+      if (thumbnailUrl.protocol !== "https:" ||
+          !/(^|\.)(googleusercontent\.com|google\.com)$/.test(thumbnailUrl.hostname)) return json({ error: "thumbnail_unavailable" }, 404);
+      const preview = await fetch(thumbnailUrl, { headers: { Authorization: `Bearer ${accessToken}` }, redirect: "error", signal: AbortSignal.timeout(8000) });
+      if (!preview.ok || !/^image\/(jpeg|webp|png)(;|$)/i.test(preview.headers.get("content-type") || "")) return json({ error: "thumbnail_unavailable" }, 404);
+      if (Number(preview.headers.get("content-length")) > 64_000) return json({ error: "thumbnail_too_large" }, 413);
+      const reader = preview.body?.getReader();
+      if (!reader) return json({ error: "thumbnail_unavailable" }, 404);
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.byteLength;
+          if (size > 64_000) { await reader.cancel(); return json({ error: "thumbnail_too_large" }, 413); }
+          chunks.push(part.value);
+        }
+      } finally { reader.releaseLock(); }
+      return new Response(Buffer.concat(chunks), { headers: {
+        "Content-Type": preview.headers.get("content-type") || "image/jpeg", "Cache-Control": "private, max-age=86400",
+      } });
     }
     if (parts[1] === "snapshots" || (req.method === "PUT" && parts[1] === "analysis")) {
       const session = await readTransferSession(accountId, parts[0]);

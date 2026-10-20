@@ -26,7 +26,9 @@ export const BULK_EXCLUDED_SETTING_KEYS = ["googleCalendarDebugLogJson"];
 // The exclusion on its own, for callers composing it with an account filter
 // (see _shared/settings-scope.mts).
 export const SETTINGS_BULK_EXCLUDE_FILTER =
-  `key=not.in.(${BULK_EXCLUDED_SETTING_KEYS.join(",")})`;
+  `key=not.in.(${BULK_EXCLUDED_SETTING_KEYS.join(",")})&key=not.like.videoLibraryRetiredEntry:*`;
 
 // PostgREST query for a bulk settings read with the heavy keys left behind.
 export const SETTINGS_BULK_SELECT_QUERY = `select=key,value&${SETTINGS_BULK_EXCLUDE_FILTER}`;
+
+// Retired video metadata is private library index data, read only by its own endpoint.

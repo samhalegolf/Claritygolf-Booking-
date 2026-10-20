@@ -1,3 +1,5 @@
+import { safeVideoThumbnail } from "./modules/video-analysis/utils/videoThumbnailPolicy";
+import type { RetiredVideoEntry } from "./modules/video-analysis/utils/videoLibraryRetirement";
 import "./appStyles";
 import {
   AlertCircle,
@@ -1748,6 +1750,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     playerProfilesSourcesReady.portal &&
     playerProfilesSourcesReady.videos;
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
+  const [libraryRetirements, setLibraryRetirements] = useState<RetiredVideoEntry[]>([]);
+  const [retiredEntriesWithLocalCopies, setRetiredEntriesWithLocalCopies] = useState<Set<string>>(() => new Set());
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
   const [openSavedVideoMenuId, setOpenSavedVideoMenuId] = useState<string | null>(null);
@@ -4156,13 +4160,53 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (!notesWorkspaceClient) return [];
     return notificationsForPerson(notesWorkspaceClient, notifications, playerToolAppointments);
   }, [notesWorkspaceClient, notifications, playerToolAppointments]);
+  const libraryAccountRef = useRef(activeAccountId);
+  libraryAccountRef.current = activeAccountId;
+  useEffect(() => {
+    setClarityCloudImports([]);
+  }, [activeAccountId]);
+
+  const retiredLibraryIds = useMemo(() => new Set(libraryRetirements.map((entry) => entry.savedVideoId)), [libraryRetirements]);
+  useEffect(() => {
+    if (!activeAccountId || authStatus !== "authenticated") return;
+    let current = true;
+    setLibraryRetirements([]);
+    void loadSavedVideoLibraryModule().then(async (module) => {
+      const cached = await module.readCachedLibraryRetirements(activeAccountId);
+      if (current) setLibraryRetirements(cached);
+      try {
+        const response = await apiFetch("/api/video-transfer/library-retirements");
+        if (!response.ok) return;
+        const data = await response.json() as { entries?: RetiredVideoEntry[] };
+        if (!current || !Array.isArray(data.entries)) return;
+        setLibraryRetirements(data.entries);
+        await module.cacheLibraryRetirements(activeAccountId, data.entries);
+      } catch { /* Keep the last successful index during an outage. */ }
+    });
+    return () => { current = false; };
+  }, [activeAccountId, authStatus]);
+
+  useEffect(() => {
+    let current = true;
+    void ensureSavedVideoLibrary().then(async (store) => {
+      const usable = new Set<string>();
+      if (store) for (const item of savedVideoItems) {
+        if (!retiredLibraryIds.has(item.savedVideoId)) continue;
+        if (await store.getBlob(item.savedVideoId).catch(() => null)) usable.add(item.savedVideoId);
+      }
+      if (current) setRetiredEntriesWithLocalCopies(usable);
+    });
+    return () => { current = false; };
+  }, [ensureSavedVideoLibrary, retiredLibraryIds, savedVideoItems]);
+
   const playerToolVideos = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
     return savedVideoItems
+      .filter((video) => !retiredLibraryIds.has(video.savedVideoId) || retiredEntriesWithLocalCopies.has(video.savedVideoId))
       .filter((video) => playerIds.has(video.playerId))
       .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
-  }, [notesWorkspaceClient, savedVideoItems]);
+  }, [notesWorkspaceClient, savedVideoItems, retiredLibraryIds, retiredEntriesWithLocalCopies]);
   // Clips that are the same swing from two cameras, packaged together in
   // both library views. See utils/sameSwingAngles.
   const playerVideoAnglePairs = useMemo(() => pairSavedVideoAngles(playerToolVideos), [playerToolVideos]);
@@ -4197,6 +4241,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
         return Boolean(
           savedVideoId &&
+            !retiredLibraryIds.has(savedVideoId) &&
             !savedVideoIds.has(savedVideoId) &&
             transfer.savedVideo?.playerId &&
             playerIds.has(transfer.savedVideo.playerId)
@@ -4207,15 +4252,47 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           String(a.savedVideo?.updatedAt || a.savedVideo?.createdAt || "")
         )
       );
-  }, [clarityCloudImports, notesWorkspaceClient, savedVideoIds]);
+  }, [clarityCloudImports, notesWorkspaceClient, savedVideoIds, retiredLibraryIds]);
+  const libraryThumbnailAttempts = useRef(new Set<string>());
+  useEffect(() => {
+    if (!notesWorkspaceClient || playerProfileTool !== "videos") return;
+    let current = true;
+    const controller = new AbortController();
+    void loadSavedVideoLibraryModule().then(async (module) => {
+      const store = await ensureSavedVideoLibrary();
+      const localIds = playerToolVideos.filter((video) => !safeVideoThumbnail(video.thumbnailDataUrl)).map((video) => video.savedVideoId);
+      if (store && localIds.length && await module.backfillVideoThumbnails(store, localIds, controller.signal)) {
+        if (current) refreshSavedVideoLibrary();
+      }
+      for (const transfer of playerToolCloudVideos) {
+        if (!current) break;
+        if (transfer.savedVideo?.thumbnailDataUrl) continue;
+        const id = transfer.savedVideoId;
+        const key = activeAccountId + ":" + id;
+        if (!id || libraryThumbnailAttempts.current.has(key)) continue;
+        libraryThumbnailAttempts.current.add(key);
+        try {
+          const thumbnailDataUrl = await module.fetchCloudVideoThumbnail(id);
+          if (!thumbnailDataUrl) { libraryThumbnailAttempts.current.delete(key); continue; }
+          const cached = await module.readCachedCloudCatalogue(activeAccountId);
+          await module.cacheCloudCatalogue(activeAccountId, cached.map((entry) => entry.savedVideoId === id && entry.savedVideo
+            ? { ...entry, savedVideo: { ...entry.savedVideo, thumbnailDataUrl } } : entry));
+          if (current) setClarityCloudImports((entries) => entries.map((entry) => entry.savedVideoId === id && entry.savedVideo
+            ? { ...entry, savedVideo: { ...entry.savedVideo, thumbnailDataUrl } } : entry));
+        } catch { libraryThumbnailAttempts.current.delete(key); }
+      }
+    }).catch(() => undefined);
+    return () => { current = false; controller.abort(); };
+  }, [activeAccountId, notesWorkspaceClient, playerProfileTool, playerToolVideos, playerToolCloudVideos, ensureSavedVideoLibrary, refreshSavedVideoLibrary]);
+
   const playerToolLegacyVideoRecords = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
     return legacyVideoRecords
       .filter((record) => playerIds.has(record.video.playerId))
-      .filter((record) => !savedVideoIds.has(record.video.id))
+      .filter((record) => !savedVideoIds.has(record.video.id) && !retiredLibraryIds.has(record.video.id))
       .sort((a, b) => String(b.video.createdAt).localeCompare(String(a.video.createdAt)));
-  }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds]);
+  }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds, retiredLibraryIds]);
   /* The shelf's grouping: clips gathered under the session they came from,
    * newest session first. The ledger answers "what happened and when" from a
    * flat list; the shelf answers "show me that lesson", and a coach thinks of
@@ -4242,11 +4319,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         key: `cloud-${transfer.savedVideoId || transfer.savedVideo?.savedVideoId || ""}`,
         savedVideoId: transfer.savedVideoId || transfer.savedVideo?.savedVideoId || "",
         title: transfer.savedVideo?.title || t("Player submission"),
-        // The transfer's savedVideo summary is a catalogue record, not the
-        // saved video itself: no thumbnail, no duration. The card falls back
-        // to its placeholder, same as any clip that has not been thumbed yet.
-        thumbnail: "",
-        duration: 0,
+        thumbnail: transfer.savedVideo?.thumbnailDataUrl || "",
+        duration: transfer.video?.duration || 0,
         at: transfer.savedVideo?.updatedAt || transfer.savedVideo?.createdAt || "",
         kind: "submission" as const,
         unseen: !transfer.coachSeenAt,
@@ -6329,6 +6403,38 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     } catch {
       setToast({ message: t("Saved video could not be renamed.") });
     }
+  }
+
+  async function updateLibraryRetirement(method: "POST" | "DELETE", entry: Partial<RetiredVideoEntry>) {
+    const accountAtStart = activeAccountId;
+    const response = await apiFetch("/api/video-transfer/library-retirements", {
+      method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry),
+    });
+    if (!response.ok) throw new Error(t("Could not update the library entry."));
+    const data = await response.json() as { entries: RetiredVideoEntry[] };
+    if (libraryAccountRef.current !== accountAtStart) return;
+    setLibraryRetirements(data.entries);
+    await (await loadSavedVideoLibraryModule()).cacheLibraryRetirements(activeAccountId, data.entries);
+  }
+  async function retireLibraryEntry(savedVideoId: string, title: string, playerId: string) {
+    const store = await ensureSavedVideoLibrary();
+    if (!store) { setToast({ message: t("Video library is unavailable.") }); return; }
+    const recovery = legacyVideoRecords.find((record) => record.video.id === savedVideoId);
+    if (recovery?.blob?.size || await store.getBlob(savedVideoId).catch(() => null)) {
+      setToast({ message: t("This video still has a usable copy on this device. Use Delete to remove a video.") });
+      return;
+    }
+    if (!window.confirm(t("Remove this library entry because its storage connection or source has permanently gone away? Do not use this for an offline drive or a temporary connection problem. The original file and notes are kept. You can restore the entry from Removed entries."))) return;
+    try {
+      await updateLibraryRetirement("POST", { savedVideoId, playerId, title, reason: "source-removed" });
+      setToast({ message: t("Unavailable entry removed. Its files and notes are kept.") });
+    } catch (error) { setToast({ message: error instanceof Error ? error.message : t("Could not remove the library entry.") }); }
+  }
+  async function restoreLibraryEntry(savedVideoId: string) {
+    try {
+      await updateLibraryRetirement("DELETE", { savedVideoId });
+      setToast({ message: t("Library entry restored.") });
+    } catch (error) { setToast({ message: error instanceof Error ? error.message : t("Could not restore the library entry.") }); }
   }
 
   async function deleteSavedVideo(item: SavedVideoItem) {
@@ -12405,6 +12511,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function refreshClarityCloudImports() {
+    const accountAtStart = activeAccountId;
     // Deliberately does not wait on googleDriveTransfer.connected first --
     // this used to only fire from an effect gated on that flag, chaining
     // behind the Drive status round trip before even starting. The server
@@ -12412,11 +12519,15 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     // below), so it's safe to run in parallel with the Drive status check
     // instead of waiting for it to resolve.
     try {
-      setClarityCloudImports(await listClarityCloudImportTransfers());
+      const transfers = await listClarityCloudImportTransfers();
+      const module = await loadSavedVideoLibraryModule();
+      const next = await module.cacheCloudCatalogue(accountAtStart, transfers).catch(() => transfers);
+      if (libraryAccountRef.current === accountAtStart) setClarityCloudImports(next);
     } catch {
       // Not connected yet, or the import inbox is temporarily unavailable;
       // the status cards elsewhere show provider health separately.
-      setClarityCloudImports([]);
+      const cached = await (await loadSavedVideoLibraryModule()).readCachedCloudCatalogue(activeAccountId);
+      if (libraryAccountRef.current === accountAtStart) setClarityCloudImports((current) => current.length ? current : cached);
     }
   }
 
@@ -16590,6 +16701,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               removeSavedVideoFromDevice={removeSavedVideoFromDevice}
               renameSavedVideo={renameSavedVideo}
               deleteSavedVideo={deleteSavedVideo}
+              retireLibraryEntry={retireLibraryEntry}
+              restoreLibraryEntry={restoreLibraryEntry}
+              retiredLibraryEntries={libraryRetirements.filter((entry) => notesWorkspaceClient && profileIdsForClient(notesWorkspaceClient).has(entry.playerId))}
               openPlayerSubmissionOrCloudVideo={openPlayerSubmissionOrCloudVideo}
               migrateLegacyVideo={migrateLegacyVideo}
             />
