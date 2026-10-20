@@ -1,3 +1,4 @@
+import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import { safeVideoThumbnail } from "../../src/modules/video-analysis/utils/videoThumbnailPolicy.ts";
 import { cleanRetiredVideoEntry, retiredEntrySettingKey } from "../../src/modules/video-analysis/utils/videoLibraryRetirement.ts";
 import type { Config } from "@netlify/functions";
@@ -4643,7 +4644,13 @@ async function routeVideoTransferRequest(
     // Catalogue retirement does not need a working Drive connection. It hides
     // the index entry only, retaining the source, notes and transfer records.
     if (parts[0] === "library-retirements") {
-      const settings = await readSettings(accountId);
+      const readRetirements = async (): Promise<Record<string, string>> => {
+        const rows = await supabase("settings", { query: settingsSelectQuery(accountId, {
+          filters: ["key=like.videoLibraryRetiredEntry:*"],
+        }) });
+        return Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
+      };
+      const settings = req.method === "GET" ? await readRetirements() : {};
       if (req.method === "POST") {
         const entry = cleanRetiredVideoEntry(await readJson(req));
         if (!entry) return json({ error: "invalid_retirement", message: "Confirm that the source has been permanently removed." }, 400);
@@ -4653,7 +4660,7 @@ async function routeVideoTransferRequest(
         if (!/^[a-zA-Z0-9_-]{1,160}$/.test(id)) return json({ error: "invalid_video_id" }, 400);
         await setSettings(accountId, { [retiredEntrySettingKey(id)]: "" });
       } else if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-      const current = req.method === "GET" ? settings : await readSettings(accountId);
+      const current = req.method === "GET" ? settings : await readRetirements();
       const entries = Object.entries(current).flatMap(([key, value]) => {
         if (!key.startsWith("videoLibraryRetiredEntry:") || !value) return [];
         try {
