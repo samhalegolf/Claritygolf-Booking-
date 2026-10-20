@@ -565,3 +565,43 @@ test("publicTransferSession carries the player's dot but keeps the directions ap
   assert.equal(submission.playerSeenAt, undefined, "a submission must not carry the player's dot");
   assert.equal(submission.coachMessage, undefined);
 });
+
+test("finalized video summaries retain only bounded embedded thumbnail metadata", () => {
+  const thumbnailDataUrl = "data:image/jpeg;base64,YQ==";
+  const finalized = validateFinalizePayload({...compactPayload,thumbnailDataUrl,analysisJson:{}}, "saved-video-1");
+  assert.equal(finalized.savedVideo.thumbnailDataUrl,thumbnailDataUrl);
+  const rejected = validateFinalizePayload({...compactPayload,thumbnailDataUrl:"https://tracking.example/image",analysisJson:{}}, "saved-video-1");
+  assert.equal(rejected.savedVideo.thumbnailDataUrl,undefined);
+});
+
+test("retirement index works without Drive and keeps settings account-scoped", async () => {
+  const restoreEnv = useCloudRuntimeEnv({});
+  const previousFetch = globalThis.fetch;
+  const settings = new Map<string,string>();
+  const accounts: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    assert.ok(url.includes("/rest/v1/settings"), "retirement must not contact Drive or remove transfer assets");
+    if (init?.method === "POST") {
+      const rows = JSON.parse(String(init.body));
+      for (const row of rows) {
+        accounts.push(row.account_id);
+        settings.set(row.key,row.value);
+      }
+      return Response.json(rows);
+    }
+    return Response.json([...settings].map(([key,value])=>({key,value})));
+  };
+  try {
+    const request = (method: string, body?: unknown) => new Request("https://claritygolf.app/api/video-transfer/library-retirements", {
+      method, ...(body ? {headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {}),
+    });
+    const options = {resolveAccountId:async()=>"business-a"};
+    const removed = await videoTransferHandler(request("POST",{savedVideoId:"saved-video-1",playerId:"player-1",title:"Swing",reason:"source-removed"}),undefined,options);
+    assert.equal(removed.status,200);
+    assert.equal((await removed.json()).entries.length,1);
+    assert.ok(accounts.every((id)=>id==="business-a"));
+    const restored = await videoTransferHandler(request("DELETE",{savedVideoId:"saved-video-1"}),options);
+    assert.equal((await restored.json()).entries.length,0);
+  } finally { globalThis.fetch=previousFetch; restoreEnv(); }
+});

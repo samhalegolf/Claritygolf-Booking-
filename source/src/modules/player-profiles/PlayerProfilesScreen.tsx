@@ -1,3 +1,5 @@
+import type { RetiredVideoEntry } from "../video-analysis/utils/videoLibraryRetirement";
+import { VIDEO_THUMBNAIL_PLACEHOLDER } from "../video-analysis/utils/videoThumbnails";
 import { useVideoFileDelivery, videoFileName } from "../video-analysis/components/VideoFileDialog";
 // The Player Profiles screen: the list of people with notes or video, and the
 // tool panel for the selected one (bookings, reviews, emails, transactions,
@@ -188,6 +190,9 @@ export type PlayerProfilesScreenProps = {
   removeSavedVideoFromDevice: (item: SavedVideoItem) => Promise<void>;
   renameSavedVideo: (item: SavedVideoItem) => Promise<void>;
   deleteSavedVideo: (item: SavedVideoItem) => Promise<void>;
+  retireLibraryEntry: (id: string, title: string, playerId: string) => Promise<void>;
+  restoreLibraryEntry: (id: string) => Promise<void>;
+  retiredLibraryEntries: RetiredVideoEntry[];
   openPlayerSubmissionOrCloudVideo: (transfer: ClarityCloudImportTransfer, playerName: string) => Promise<void>;
   migrateLegacyVideo: (record: StoredVideoRecord) => Promise<void>;
 };
@@ -305,6 +310,9 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
     removeSavedVideoFromDevice,
     renameSavedVideo,
     deleteSavedVideo,
+    retireLibraryEntry,
+    restoreLibraryEntry,
+    retiredLibraryEntries,
     openPlayerSubmissionOrCloudVideo,
     migrateLegacyVideo,
   } = props;
@@ -1226,6 +1234,13 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                         </div>
                       ) : playerToolExpanded ? (
                         <div className="player-tool-body">
+                          {retiredLibraryEntries.length ? <details className="player-video-removed">
+                            <summary>{t("Removed entries")} ({retiredLibraryEntries.length})</summary>
+                            {retiredLibraryEntries.map((entry) => <div key={entry.savedVideoId}>
+                              <span>{entry.title}</span>
+                              <button type="button" className="outline-button" onClick={() => void restoreLibraryEntry(entry.savedVideoId)}>{t("Restore entry")}</button>
+                            </div>)}
+                          </details> : null}
                           <div className="player-video-toolbar">
                             <div className="player-video-toolbar-count">
                               <strong>{tn(playerVideoSummary.total, "{count} saved video", "{count} saved videos")}
@@ -1308,11 +1323,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                             }
                                           >
                                             {[clip, ...(clip.partner ? [clip.partner] : [])].map((angle) =>
-                                              angle.thumbnail ? (
-                                                <img key={angle.key} src={angle.thumbnail} alt="" />
-                                              ) : (
-                                                <ClarityVideoAnalysis key={angle.key} size={20} />
-                                              ),
+                                              <img key={angle.key} src={angle.thumbnail || VIDEO_THUMBNAIL_PLACEHOLDER} alt="" loading="lazy" decoding="async" />,
                                             )}
                                             {clip.unseen ? (
                                               <span className="player-video-shelf-badge">{t("New")}</span>
@@ -1338,6 +1349,10 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                           deliverLibraryVideo(angle.savedVideoId, angle.title, action);
                                                         }}>{action === "export" ? t("Export") : t("Share")}</button>
                                                       ))}
+                                                      <button type="button" role="menuitem" onClick={() => {
+                                                        setOpenSavedVideoMenuId(null);
+                                                        void retireLibraryEntry(angle.savedVideoId, angle.title, preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds));
+                                                      }}>{t("Remove unavailable entry")}</button>
                                                     </div>
                                                   ))}
                                                 </AnchoredMenu>
@@ -1506,17 +1521,12 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                         title={t("Play {videoTitle}", { videoTitle })}
                                         aria-label={t("Play {videoTitle}", { videoTitle })}
                                       >
-                                        {video.thumbnailDataUrl ? (
-                                          <img
+                                        <img
                                             className="player-video-thumb"
-                                            src={video.thumbnailDataUrl}
+                                            src={video.thumbnailDataUrl || VIDEO_THUMBNAIL_PLACEHOLDER}
+                                            loading="lazy" decoding="async"
                                             alt=""
                                           />
-                                        ) : (
-                                          <div className="player-video-thumb is-empty">
-                                            <ClarityVideoAnalysis size={16} />
-                                          </div>
-                                        )}
                                         <span className="player-video-thumb-play" aria-hidden="true">
                                           <Play size={14} />
                                         </span>
@@ -1695,6 +1705,10 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                   }}
                                                 >
                                                   <Pencil size={14} />{t("Rename")}</button>
+                                                <button type="button" role="menuitem" onClick={() => {
+                                                  closeMenu();
+                                                  void retireLibraryEntry(video.savedVideoId, video.title, video.playerId);
+                                                }}>{t("Remove unavailable entry")}</button>
                                                 <button
                                                   type="button"
                                                   role="menuitem"
@@ -1766,9 +1780,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                         aria-label={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
                                         onClick={() => void openPlayerSubmissionOrCloudVideo(transfer, notesWorkspaceClient.name)}
                                       >
-                                        <div className="player-video-thumb is-empty">
-                                          <ClarityVideoAnalysis size={16} />
-                                        </div>
+                                        <img className="player-video-thumb" src={transfer.savedVideo?.thumbnailDataUrl || VIDEO_THUMBNAIL_PLACEHOLDER} alt="" loading="lazy" decoding="async" />
                                         <span className="player-video-thumb-play" aria-hidden="true">
                                           {isDownloading ? <Download size={14} /> : <Play size={14} />}
                                         </span>
@@ -1798,6 +1810,8 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                         )}
                                       </div>
                                       <div className="player-video-card-actions">
+                                          <button type="button" className="outline-button" onClick={() => void retireLibraryEntry(savedVideoId, cloudVideoRawTitle, savedVideo?.playerId || preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds))}>{t("Remove unavailable entry")}</button>
+
                                         <span
                                           className="player-video-cloud-badge is-saved"
                                           title={t("Saved in Clarity Cloud")}

@@ -8,6 +8,10 @@ on:
       - "source/src/modules/video-analysis/utils/preparedVideoCache*"
       - "source/src/modules/video-analysis/utils/videoExport*"
       - "source/src/modules/video-analysis/components/VideoFileDialog.tsx"
+      - "source/src/modules/video-analysis/utils/videoThumbnail*"
+      - "source/src/modules/video-analysis/utils/videoLibrary*"
+      - "source/src/modules/video-analysis/utils/savedVideoLibrary*"
+      - "source/netlify/functions/video-transfer.mts"
       - ".github/workflows/native-video-share.yml"
   workflow_dispatch:
 permissions:
@@ -47,4 +51,6 @@ jobs:
           cache-dependency-path: source/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npx tsx --test src/native/deferredVideoShare.test.ts src/native/nativeFiles.test.ts src/modules/video-analysis/utils/videoPreparation.test.ts src/modules/video-analysis/utils/videoExport.test.ts src/modules/video-analysis/utils/preparedVideoCache.test.ts
+      - run: npx tsx --test src/modules/video-analysis/utils/videoLibraryAssets.test.ts src/modules/video-analysis/utils/savedVideoLibrary.test.ts netlify/functions/_shared/video-transfer.test.mts
       - run: npm run typecheck
+      - run: npm run typecheck:functions
