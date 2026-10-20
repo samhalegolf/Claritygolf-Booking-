@@ -148,7 +148,7 @@ export type PlayerProfilesScreenProps = {
   addVideoToReview: (lessonId: string, client: Pick<Person, "id" | "name" | "email" | "phone">, index: number) => void;
   reviewInsertRef: RefObject<{ lessonId: string; index: number; drillBlockId?: string; } | null>;
   reviewLessonTitle: (lessonId: string) => string;
-  resolveReviewVideoUrl: (savedVideoId: string) => Promise<string | null>;
+  resolveReviewVideoUrl: (savedVideoId: string, signal?: AbortSignal) => Promise<string | null>;
   billingWorkspaceEnabled: boolean;
   openPosCheckoutForClient: (client: ClientSummary) => void;
   portalPlayerBusyId: string;
@@ -312,7 +312,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
     const item = playerToolVideos.find((video) => video.savedVideoId === id);
     const fileName = videoFileName(item?.source.originalFileName || title, item?.source.mimeType);
     beginVideoDelivery(action, fileName, async (signal) => {
-      const url = await resolveReviewVideoUrl(id);
+      const url = await resolveReviewVideoUrl(id, signal);
       if (!url) throw new Error(t("This video is unavailable. Reconnect its storage and try again."));
       try {
         signal.throwIfAborted();

@@ -5,6 +5,7 @@ import { t } from "../../../lib/i18n";
 import {
   canShareFile, chooseVideoExportDestination, exportFile, hasAppShareSheet, shareFile, writeVideoExport,
 } from "../../../native/nativeFiles";
+import { prepareWithProgress } from "../utils/videoPreparation";
 import "./videoFileDialog.css";
 
 export type VideoFileAction = "export" | "share";
@@ -76,7 +77,7 @@ export function useVideoFileDelivery() {
       const handle = await destination;
       if (!live()) return;
       setState({ action, phase: "preparing", percent: 0 });
-      const file = await prepare(controller.signal, (fraction) => {
+      const file = await prepareWithProgress(prepare, controller.signal, (fraction) => {
         if (live()) setState({ action, phase: "preparing", percent: Math.floor(fraction * 100) });
       });
       if (!live()) return;
