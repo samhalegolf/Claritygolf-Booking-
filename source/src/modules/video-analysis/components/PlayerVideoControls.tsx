@@ -310,6 +310,7 @@ const phaseTitle = (state: PhaseDetectionState) => {
 export type AnalysisRailProps = {
   onExportVideo?: () => void;
   onShareVideo?: () => void;
+  onPrepareShareVideo?: () => void;
   fileActionBusy?: boolean;
   /** Choose a file to put on this panel, replacing the clip on it. */
   onUpload: () => void;
@@ -342,6 +343,7 @@ export type AnalysisRailProps = {
 export function AnalysisRail({
   onExportVideo,
   onShareVideo,
+  onPrepareShareVideo,
   fileActionBusy,
   onUpload,
   onOpenLibrary,
@@ -379,7 +381,7 @@ export function AnalysisRail({
   return (
     <div className="va-analysis-rail" role="toolbar" aria-label={t("Body analysis")}>
       {onExportVideo ? <button type="button" className="va-rail-btn" aria-label={t("Export")} title={t("Export")} disabled={fileActionBusy} onClick={onExportVideo}><Download /></button> : null}
-      {onShareVideo ? <button type="button" className="va-rail-btn" aria-label={t("Share")} title={t("Share")} disabled={fileActionBusy} onClick={onShareVideo}><Share2 /></button> : null}
+      {onShareVideo ? <button type="button" className="va-rail-btn" aria-label={t("Share")} title={t("Share")} disabled={fileActionBusy} onPointerEnter={onPrepareShareVideo} onFocus={onPrepareShareVideo} onClick={onShareVideo}><Share2 /></button> : null}
       {onExportVideo || onShareVideo ? <span className="va-rail-rule" aria-hidden="true" /> : null}
       {/* The other way in to a new clip: with a video already up, whatever
           comes in through here replaces it. */}
