@@ -11,7 +11,6 @@ import {
   IconOrientation,
   IconLibrary,
   IconLinked,
-  IconExport,
   IconRecord,
   IconSync,
   IconTrash,
@@ -55,10 +54,6 @@ export type VideoSettingsSheetProps = {
   screenRecordingBusy: boolean;
   screenRecordingMessage: string;
   onToggleScreenRecording: () => void;
-  /** Export the view, drawings included, as a video file to share or save. */
-  onExportVideo: () => void;
-  onShareVideo: () => void;
-  exportBusy: boolean;
   onMyLibrarySave: () => void;
   saveBusy: boolean;
   showDiagnostics: boolean;
@@ -99,9 +94,6 @@ export function VideoSettingsSheet({
   screenRecordingBusy,
   screenRecordingMessage,
   onToggleScreenRecording,
-  onExportVideo,
-  onShareVideo,
-  exportBusy,
   onMyLibrarySave,
   saveBusy,
   showDiagnostics,
@@ -358,20 +350,6 @@ export function VideoSettingsSheet({
           <span>{isRecordingScreen ? t("Stop screen recording") : t("Screen record")}</span>
         </button>
         {screenRecordingMessage ? <p className="va-sheet-note">{screenRecordingMessage}</p> : null}
-
-        <button
-          type="button"
-          className="va-sheet-row va-sheet-row-btn"
-          onClick={onExportVideo}
-          disabled={exportBusy || !hasActiveClip}
-        >
-          <IconExport />
-          <span>{t("Export")}</span>
-        </button>
-
-        <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onShareVideo} disabled={exportBusy || !hasActiveClip}>
-          <IconExport /><span>{t("Share")}</span>
-        </button>
 
         <button
           type="button"

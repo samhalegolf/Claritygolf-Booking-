@@ -162,3 +162,38 @@ export async function exportFile(blob: Blob, fileName: string): Promise<void> {
   if (await shareFileInApp({ blob }, fileName)) return;
   downloadFile(blob, fileName);
 }
+
+export type VideoSaveHandle = {
+  name: string;
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>;
+    close: () => Promise<void>;
+    abort: () => Promise<void>;
+  }>;
+};
+
+/** Request Save As on the original tap, before loading or rendering a video. */
+export function chooseVideoExportDestination(fileName: string): Promise<VideoSaveHandle | null> {
+  const picker = (globalThis as { showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<VideoSaveHandle> }).showSaveFilePicker;
+  if (!picker || hasAppShareSheet()) return Promise.resolve(null);
+  return picker.call(globalThis, {
+    suggestedName: safeName(fileName),
+    types: [{ description: "Video", accept: {
+      "video/mp4": [".mp4"], "video/webm": [".webm"], "video/quicktime": [".mov"],
+    } }],
+  });
+}
+
+export async function writeVideoExport(handle: VideoSaveHandle, blob: Blob): Promise<void> {
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(blob);
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch(() => undefined);
+    throw error;
+  }
+}
