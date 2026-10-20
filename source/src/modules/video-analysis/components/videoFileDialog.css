@@ -4,3 +4,6 @@
 .va-file-dialog span { overflow-wrap: anywhere; }
 .va-file-dialog progress { width: 100%; }
 .va-file-dialog-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+.va-file-working { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 1200; display: flex; align-items: center; gap: 14px; width: min(580px, calc(100vw - 32px)); padding: 14px 18px; border-radius: 12px; color: #18231d; background: #fff; box-shadow: 0 6px 30px rgb(0 0 0 / 22%); }
+.va-file-working progress { flex: 1; min-width: 40px; }

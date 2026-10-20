@@ -1,3 +1,4 @@
+import { hasDeferredVideoShare, shareVideoDeferred } from "../../../native/deferredVideoShare";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../../../lib/i18n";
@@ -11,7 +12,7 @@ export type PreparedVideoFile = { blob: Blob; fileName: string };
 type PrepareVideo = (signal: AbortSignal, progress: (value: number) => void) => Promise<PreparedVideoFile>;
 type DeliveryState = {
   action: VideoFileAction;
-  phase: "choosing" | "preparing" | "ready" | "sending" | "saved" | "error";
+  phase: "choosing" | "preparing" | "ready" | "sending" | "saved" | "error" | "native-choosing" | "native-preparing" | "native-handover";
   percent: number;
   file?: PreparedVideoFile;
   savedName?: string;
@@ -31,7 +32,7 @@ export function useVideoFileDelivery() {
   const mounted = useRef(true);
   const dialogRef = useRef<HTMLElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
-  const open = Boolean(state);
+  const open = Boolean(state && !state.phase.startsWith("native-"));
   useEffect(() => {
     if (!open) return;
     dialogRef.current?.focus();
@@ -53,6 +54,14 @@ export function useVideoFileDelivery() {
     const controller = new AbortController();
     operation.current = controller;
     const live = () => mounted.current && operation.current === controller && !controller.signal.aborted;
+    if (action === "share" && hasDeferredVideoShare()) {
+      void shareVideoDeferred(suggestedName, prepare, controller.signal, (stage, fraction) => {
+        if (live()) setState({ action, phase: stage === "choosing" ? "native-choosing" : stage === "preparing" ? "native-preparing" : "native-handover", percent: Math.floor(fraction * 100) });
+      }).then(() => { if (live()) setState(null); }).catch((error: unknown) => {
+        if (live()) setState({ action, phase: "error", percent: 0, error: error instanceof Error ? error.message : t("Could not share video.") });
+      }).finally(() => { if (operation.current === controller) operation.current = null; });
+      return;
+    }
     // No await, fetch, encoding or render before asking for a destination.
     let destination;
     try {
@@ -109,8 +118,16 @@ export function useVideoFileDelivery() {
     } finally { if (operation.current === controller) operation.current = null; }
   };
 
-  const busy = state?.phase === "choosing" || state?.phase === "preparing" || state?.phase === "sending";
-  const dialog = state ? createPortal(
+  const nativeWorking = state?.phase === "native-preparing" || state?.phase === "native-handover";
+  const nativeChoosing = state?.phase === "native-choosing";
+  const busy = nativeChoosing || nativeWorking || state?.phase === "choosing" || state?.phase === "preparing" || state?.phase === "sending";
+  const dialog = state && nativeChoosing ? null : state && nativeWorking ? createPortal(
+    <aside className="va-file-working" role="status" aria-live="polite">
+      <span>{state.phase === "native-handover" ? t("Handing video to app…") : t("Working…")}</span>
+      <progress max={100} value={state.phase === "native-handover" ? undefined : state.percent || undefined} aria-label={t("Preparing video")} />
+      <button type="button" className="upload-button is-subtle" onClick={close}>{t("Cancel")}</button>
+    </aside>, document.body,
+  ) : state ? createPortal(
     <div className="va-file-dialog-backdrop" onClick={() => { if (!busy) close(); }}>
       <section className="va-file-dialog" role="dialog" aria-modal="true" aria-label={state.action === "export" ? t("Export") : t("Share")}
         tabIndex={-1} ref={dialogRef}
