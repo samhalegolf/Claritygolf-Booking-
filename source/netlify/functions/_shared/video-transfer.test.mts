@@ -601,7 +601,7 @@ test("retirement index works without Drive and keeps settings account-scoped", a
     assert.equal(removed.status,200);
     assert.equal((await removed.json()).entries.length,1);
     assert.ok(accounts.every((id)=>id==="business-a"));
-    const restored = await videoTransferHandler(request("DELETE",{savedVideoId:"saved-video-1"}),options);
+    const restored = await videoTransferHandler(request("DELETE",{savedVideoId:"saved-video-1"}),undefined,options);
     assert.equal((await restored.json()).entries.length,0);
   } finally { globalThis.fetch=previousFetch; restoreEnv(); }
 });

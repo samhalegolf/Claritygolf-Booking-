@@ -1043,7 +1043,7 @@ function validateSavedVideo(candidate: any, savedVideoIdFromPath?: string): Safe
     title: cleanText(candidate?.title, "Saved video", 240),
     createdAt: cleanText(candidate?.createdAt, new Date().toISOString(), 80),
     updatedAt: cleanText(candidate?.updatedAt, new Date().toISOString(), 80),
-    thumbnailDataUrl: safeVideoThumbnail(candidate?.thumbnailDataUrl),
+    ...(safeVideoThumbnail(candidate?.thumbnailDataUrl) ? { thumbnailDataUrl: safeVideoThumbnail(candidate.thumbnailDataUrl) } : {}),
     source: candidate?.source || {},
   };
 }
