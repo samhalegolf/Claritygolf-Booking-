@@ -1,4 +1,4 @@
-import { VideoFileDialog } from "../video-analysis/components/VideoFileDialog";
+import { useVideoFileDelivery, videoFileName } from "../video-analysis/components/VideoFileDialog";
 // The Player Profiles screen: the list of people with notes or video, and the
 // tool panel for the selected one (bookings, reviews, emails, transactions,
 // passes, portal access, notes, practice, video). Drawn here; the state and
@@ -6,7 +6,7 @@ import { VideoFileDialog } from "../video-analysis/components/VideoFileDialog";
 // the view half of the screen. Loaded with the view, not with the shell.
 import { t, tn } from "../../lib/i18n";
 import { ClarityAssessments, ClarityBookingPages, ClarityCalendar, ClarityEmail, ClarityFilesMedia, ClarityIntegrations, ClarityLessonsProgrammes, ClarityMore, ClarityPassesCredits, ClarityPayments, ClarityProfile, ClarityVideoAnalysis } from "../shared/ClarityIcons";
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy } from "react";
 import { AnchoredMenu } from "../shared/AnchoredMenu";
 import { Loading } from "../shared/Loading";
 import { clientMatchesSearchTerm, hasAnyProfileId, preferredVideoPlayerId } from "../clients/clientMatching";
@@ -193,7 +193,7 @@ export type PlayerProfilesScreenProps = {
 };
 
 export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
-  const [fileVideo, setFileVideo] = useState<{ id: string; title: string; action: "export" | "share" } | null>(null);
+  const { begin: beginVideoDelivery, dialog: videoDeliveryDialog } = useVideoFileDelivery();
   const {
     notesWorkspaceClient,
     playerProfileTool,
@@ -308,6 +308,24 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
     openPlayerSubmissionOrCloudVideo,
     migrateLegacyVideo,
   } = props;
+  const deliverLibraryVideo = (id: string, title: string, action: "export" | "share") => {
+    const item = playerToolVideos.find((video) => video.savedVideoId === id);
+    const fileName = videoFileName(item?.source.originalFileName || title, item?.source.mimeType);
+    beginVideoDelivery(action, fileName, async (signal) => {
+      const url = await resolveReviewVideoUrl(id);
+      if (!url) throw new Error(t("This video is unavailable. Reconnect its storage and try again."));
+      try {
+        signal.throwIfAborted();
+        const response = await fetch(url, { signal });
+        if (!response.ok) throw new Error(t("Could not load the video."));
+        return { blob: await response.blob(), fileName };
+      } finally {
+        // The resolver returns a new object URL owned by this request.
+        if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+      }
+    });
+  };
+
   return (
     <section className={`module-page player-profiles-page${phonePlayerOpen ? " is-phone-detail" : ""}`}>
       <div className="player-profiles-toolbar">
@@ -1309,7 +1327,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                       {(["export", "share"] as const).map((action) => (
                                                         <button type="button" role="menuitem" key={action} disabled={!angle.playable} onClick={() => {
                                                           setOpenSavedVideoMenuId(null);
-                                                          setFileVideo({ id: angle.savedVideoId, title: angle.title, action });
+                                                          deliverLibraryVideo(angle.savedVideoId, angle.title, action);
                                                         }}>{action === "export" ? t("Export") : t("Share")}</button>
                                                       ))}
                                                     </div>
@@ -1548,7 +1566,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                 {(["export", "share"] as const).map((action) => (
                                                   <button type="button" role="menuitem" key={action} onClick={() => {
                                                     closeMenu();
-                                                    setFileVideo({ id: video.savedVideoId, title: videoRawTitle, action });
+                                                    deliverLibraryVideo(video.savedVideoId, videoRawTitle, action);
                                                   }}><Download size={14} />{action === "export" ? t("Export") : t("Share")}</button>
                                                 ))}
                                                 {cloudOperational && canRetryCloud ? (
@@ -1835,7 +1853,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
           ) : null}
         </div>
       </div>
-      {fileVideo ? <VideoFileDialog key={fileVideo.id} video={fileVideo} resolveUrl={resolveReviewVideoUrl} onClose={() => setFileVideo(null)} /> : null}
+      {videoDeliveryDialog}
     </section>
   );
 }
