@@ -24,7 +24,7 @@ final class ShareFileTests: XCTestCase {
         defer { file.remove() }
         let done = expectation(description: "provider cancelled")
         DispatchQueue.global().async {
-            XCTAssertThrowsError(try file.wait(timeout: 2))
+            do { _ = try file.wait(timeout: 2); XCTFail("Cancelled provider returned a file.") } catch {}
             done.fulfill()
         }
         file.abort()
