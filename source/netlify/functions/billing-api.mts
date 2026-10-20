@@ -69,6 +69,7 @@ import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 import {
   computeDashboardMetric,
+  dashboardToday,
   isDashboardMetricId,
   metricSources,
   normalizeDashboardConfig,
@@ -1805,7 +1806,7 @@ async function readSettingValue(accountId: string, key: string) {
 async function dashboardReport(accountId: string, url: URL) {
   const periodParam = String(url.searchParams.get("period"));
   const period: DashboardPeriod = periodParam === "week" || periodParam === "year" ? periodParam : "month";
-  const today = formatDateOnly(new Date());
+  const today = dashboardToday(url.searchParams.get("timeZone"));
   const refDate = parseDateOnly(url.searchParams.get("date")) || parseDateOnly(today) || new Date();
   const metrics = [...new Set((url.searchParams.get("metrics") || "").split(",").map((id) => id.trim()))]
     .filter(isDashboardMetricId)
