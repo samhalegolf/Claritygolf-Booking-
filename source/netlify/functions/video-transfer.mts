@@ -1,5 +1,5 @@
-import { safeVideoThumbnail } from "../../src/modules/video-analysis/utils/videoThumbnailPolicy";
-import { cleanRetiredVideoEntry, retiredEntrySettingKey } from "../../src/modules/video-analysis/utils/videoLibraryRetirement";
+import { safeVideoThumbnail } from "../../src/modules/video-analysis/utils/videoThumbnailPolicy.ts";
+import { cleanRetiredVideoEntry, retiredEntrySettingKey } from "../../src/modules/video-analysis/utils/videoLibraryRetirement.ts";
 import type { Config } from "@netlify/functions";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
