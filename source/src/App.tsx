@@ -4290,9 +4290,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     const playerIds = profileIdsForClient(notesWorkspaceClient);
     return legacyVideoRecords
       .filter((record) => playerIds.has(record.video.playerId))
-      .filter((record) => !savedVideoIds.has(record.video.id))
+      .filter((record) => !savedVideoIds.has(record.video.id) && !retiredLibraryIds.has(record.video.id))
       .sort((a, b) => String(b.video.createdAt).localeCompare(String(a.video.createdAt)));
-  }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds]);
+  }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds, retiredLibraryIds]);
   /* The shelf's grouping: clips gathered under the session they came from,
    * newest session first. The ledger answers "what happened and when" from a
    * flat list; the shelf answers "show me that lesson", and a coach thinks of
@@ -6419,7 +6419,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   async function retireLibraryEntry(savedVideoId: string, title: string, playerId: string) {
     const store = await ensureSavedVideoLibrary();
     if (!store) { setToast({ message: t("Video library is unavailable.") }); return; }
-    if (await store.getBlob(savedVideoId).catch(() => null)) {
+    const recovery = legacyVideoRecords.find((record) => record.video.id === savedVideoId);
+    if (recovery?.blob?.size || await store.getBlob(savedVideoId).catch(() => null)) {
       setToast({ message: t("This video still has a usable copy on this device. Use Delete to remove a video.") });
       return;
     }
