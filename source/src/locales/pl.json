@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "Odświeżanie trenerów w tle nie powiodło się.",
   "Admin settings background refresh failed.": "Odświeżanie ustawień administratora w tle nie powiodło się.",
   "Sign in again before editing. The calendar is not connected to the live database.": "Zaloguj się ponownie przed edycją. Kalendarz nie jest połączony z bieżącą bazą danych.",
-  "Calendar is not connected to the live database.": "Kalendarz nie jest połączony z bieżącą bazą danych.",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "Nie można wykonać akcji ({action}): bieżąca baza danych nie jest połączona. Odśwież i zaloguj się ponownie.",
   "Video file": "Plik wideo",
   "Player submission": "Zgłoszenie gracza",
   "Recovery record": "Rekord odzyskiwania",
@@ -4715,5 +4713,6 @@
   "White": "Biały",
   "Yellow": "Żółty",
   "Red": "Czerwony",
-  "Blue": "Niebieski"
+  "Blue": "Niebieski",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "Nie można jeszcze wykonać akcji ({action}): kalendarz wciąż się synchronizuje. Spróbuj ponownie za chwilę."
 }

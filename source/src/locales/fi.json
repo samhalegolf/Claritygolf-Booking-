@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "Valmentajien taustapäivitys epäonnistui.",
   "Admin settings background refresh failed.": "Ylläpitoasetusten taustapäivitys epäonnistui.",
   "Sign in again before editing. The calendar is not connected to the live database.": "Kirjaudu uudelleen ennen muokkaamista. Kalenteria ei ole yhdistetty ajantasaiseen tietokantaan.",
-  "Calendar is not connected to the live database.": "Kalenteria ei ole yhdistetty ajantasaiseen tietokantaan.",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "Toiminto epäonnistui ({action}): ajantasaista tietokantaa ei ole yhdistetty. Lataa uudelleen ja kirjaudu sisään.",
   "Video file": "Videotiedosto",
   "Player submission": "Pelaajan lähetys",
   "Recovery record": "Palautustietue",
@@ -4715,5 +4713,6 @@
   "White": "Valkoinen",
   "Yellow": "Keltainen",
   "Red": "Punainen",
-  "Blue": "Sininen"
+  "Blue": "Sininen",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "Toiminto ei ole vielä mahdollinen ({action}): kalenteria synkronoidaan yhä. Yritä hetken kuluttua uudelleen."
 }

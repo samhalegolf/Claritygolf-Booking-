@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "Vernieuwen van coaches op de achtergrond mislukt.",
   "Admin settings background refresh failed.": "Vernieuwen van beheerinstellingen op de achtergrond mislukt.",
   "Sign in again before editing. The calendar is not connected to the live database.": "Log opnieuw in voordat je gaat bewerken. De agenda is niet verbonden met de live database.",
-  "Calendar is not connected to the live database.": "De agenda is niet verbonden met de live database.",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "Kan niet {action}: de live database is niet verbonden. Laad opnieuw en log opnieuw in.",
   "Video file": "Videobestand",
   "Player submission": "Inzending van speler",
   "Recovery record": "Herstelrecord",
@@ -4715,5 +4713,6 @@
   "White": "Wit",
   "Yellow": "Geel",
   "Red": "Rood",
-  "Blue": "Blauw"
+  "Blue": "Blauw",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "Kan nog niet {action}: de agenda wordt nog gesynchroniseerd. Probeer het zo opnieuw."
 }

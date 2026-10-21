@@ -178,6 +178,13 @@ export function useWorkspaceSync({
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const hasLoadedCalendarApiRef = useRef(false);
   const adminHydrationRunIdRef = useRef(0);
+  // Live calendar reads currently out, and the timer waiting to start one once
+  // saves finish. Together they make sure the calendar never sits without its
+  // live read and with nothing on the way to fetch it.
+  const liveCalendarLoadsInFlightRef = useRef(0);
+  const liveCalendarRetryTimerRef = useRef<number | null>(null);
+  // When the page was last hidden (app backgrounded, phone locked).
+  const hiddenSinceRef = useRef<number | null>(null);
   const calendarSaveVersionRef = useRef(0);
   const locationSaveVersionRef = useRef(0);
   const coachSaveVersionRef = useRef(0);
@@ -222,6 +229,32 @@ export function useWorkspaceSync({
   // asked /api/auth/session, so the calendar shell starts at once.
   useEffect(() => {
     void startAdminWorkspaceHydration();
+  }, []);
+
+  // Timers and the visibility listener outlive the render that set them up, so
+  // they call through this to get functions that see the current state.
+  const latestRef = useRef({ startAdminWorkspaceHydration, refreshCalendarOnResume, authStatus });
+  latestRef.current = { startAdminWorkspaceHydration, refreshCalendarOnResume, authStatus };
+
+  // A phone left in a pocket comes back to whatever it showed when it was
+  // locked. After more than a minute away, fetch the live calendar again.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenSinceRef.current = Date.now();
+        return;
+      }
+      const hiddenSince = hiddenSinceRef.current;
+      hiddenSinceRef.current = null;
+      if (hiddenSince !== null && Date.now() - hiddenSince >= 60_000) {
+        void latestRef.current.refreshCalendarOnResume();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (liveCalendarRetryTimerRef.current !== null) window.clearTimeout(liveCalendarRetryTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -688,7 +721,90 @@ export function useWorkspaceSync({
   }
 
   async function startAdminWorkspaceHydration() {
-    if (hasActiveAdminSave()) return;
+    if (hasActiveAdminSave()) {
+      reloadLiveCalendarAfterSaves();
+      return;
+    }
+    liveCalendarLoadsInFlightRef.current += 1;
+    let outcome: "applied" | "failed" | "set_aside";
+    try {
+      outcome = await hydrateAdminWorkspace();
+    } finally {
+      liveCalendarLoadsInFlightRef.current -= 1;
+    }
+    // A save that started while the live read was out sets its answer aside,
+    // and nothing else would ask again: edits would stay blocked until a
+    // reload. Ask again once the save is done, unless another read is already
+    // out or has landed.
+    if (outcome === "set_aside" && !hasLoadedCalendarApiRef.current && liveCalendarLoadsInFlightRef.current === 0) {
+      reloadLiveCalendarAfterSaves();
+    }
+  }
+
+  /** Starts the live calendar read as soon as no save is in progress. */
+  function reloadLiveCalendarAfterSaves() {
+    if (liveCalendarRetryTimerRef.current !== null) return;
+    const check = () => {
+      if (hasActiveAdminSave()) {
+        liveCalendarRetryTimerRef.current = window.setTimeout(check, 250);
+        return;
+      }
+      liveCalendarRetryTimerRef.current = null;
+      const latest = latestRef.current;
+      if (latest.authStatus !== "authenticated") return;
+      if (hasLoadedCalendarApiRef.current || liveCalendarLoadsInFlightRef.current > 0) return;
+      void latest.startAdminWorkspaceHydration();
+    };
+    liveCalendarRetryTimerRef.current = window.setTimeout(check, 0);
+  }
+
+  /**
+   * Back from the background: bring the calendar up to date without blocking
+   * edits while it does. Anything the coach does meanwhile wins; the fresh
+   * answer is simply dropped and the save's own conflict check takes over.
+   */
+  async function refreshCalendarOnResume() {
+    if (authStatus !== "authenticated") return;
+    if (!hasLoadedCalendarApiRef.current) {
+      // Still without the live calendar (it failed, or was set aside): try again.
+      if (liveCalendarLoadsInFlightRef.current === 0) reloadLiveCalendarAfterSaves();
+      return;
+    }
+    if (liveCalendarLoadsInFlightRef.current > 0 || hasActiveAdminSave()) return;
+    const itemsBefore = itemsRef.current;
+    // An edit not yet saved: leave it to the autosave.
+    if (calendarStateFingerprint(itemsBefore, calendarSyncKey) !== lastPersistedCalendarFingerprintRef.current) return;
+    const runId = adminHydrationRunIdRef.current;
+    let response: Response;
+    try {
+      response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" }, cache: "no-store" });
+    } catch {
+      return; // Offline for now; what is on screen still saves with its conflict check.
+    }
+    if (response.status === 401) {
+      hasLoadedCalendarApiRef.current = false;
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) return;
+    const data = (await response.json().catch(() => null)) as CalendarStateData | null;
+    if (!data) return;
+    const changedMeanwhile =
+      adminHydrationRunIdRef.current !== runId ||
+      hasActiveAdminSave() ||
+      itemsRef.current !== itemsBefore ||
+      !hasLoadedCalendarApiRef.current;
+    if (changedMeanwhile) return;
+    const { accountItems, loadedAccountId, loadedSyncKey } = applyCalendarStateData(data);
+    lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(accountItems, loadedSyncKey);
+    lastPersistedCalendarItemsRef.current = accountItems;
+    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+    if (Array.isArray(data.items)) setItems(accountItems);
+    lastLiveCalendarDataRef.current = { accountId: loadedAccountId, data: { ...data, items: accountItems } };
+    writeCachedCalendar(loadedAccountId, lastLiveCalendarDataRef.current.data);
+  }
+
+  async function hydrateAdminWorkspace(): Promise<"applied" | "failed" | "set_aside"> {
     const runId = ++adminHydrationRunIdRef.current;
     adminBootStartedAtRef.current = performance.now();
     calendarFrameRenderedRef.current = false;
@@ -749,7 +865,7 @@ export function useWorkspaceSync({
       // A true answer was checked as current just before it applied. Not
       // re-checked against runId here: with the cached calendar on screen, a
       // save made meanwhile moves runId on, and the live calendar still applies.
-      if (!applied) return;
+      if (!applied) return "set_aside";
       setAdminWorkspaceLoadStatus("loaded");
       setAdminWorkspaceLoadError("");
       setCalendarFeedStatus("connected");
@@ -773,10 +889,11 @@ export function useWorkspaceSync({
           nonCriticalRefreshDeferred: true,
         },
       });
+      return "applied";
     } catch (error) {
       // Over the cached calendar there is nothing else to fall back to: a
       // picture that can never save must not stay on screen looking live.
-      if (adminHydrationRunIdRef.current !== runId && cachedCalendarItemsRef.current === null) return;
+      if (adminHydrationRunIdRef.current !== runId && cachedCalendarItemsRef.current === null) return "set_aside";
       cachedCalendarItemsRef.current = null;
       finishDiagnosticTimer(timer, "failed", {
         errorCode: "SUPABASE_READ_FAILED",
@@ -797,6 +914,7 @@ export function useWorkspaceSync({
       setAdminWorkspaceLoadStatus("error");
       setAdminWorkspaceLoadError(adminWorkspaceLoadMessage(error));
       setCalendarFeedStatus("offline");
+      return "failed";
     }
   }
 
@@ -1262,21 +1380,19 @@ export function useWorkspaceSync({
       return false;
     }
     if (!hasLoadedCalendarApiRef.current) {
-      setCalendarSaveStatus("failed");
-      setCalendarSaveFailureKind("change");
-      setCalendarSaveError(t("Calendar is not connected to the live database."));
-      setToast({ message: t("Cannot {action}: the live database is not connected. Reload and sign in again.", { action }) });
+      // The calendar on screen is this device's saved copy and the live one
+      // has not landed yet (usually a second or two after opening the app).
+      // Make sure a read is on its way, and say so plainly.
+      if (liveCalendarLoadsInFlightRef.current === 0) reloadLiveCalendarAfterSaves();
+      setToast({ message: t("Can't {action} yet: the calendar is still syncing. Try again in a moment.", { action }) });
       return false;
     }
     if (calendarFeedStatus !== "connected") {
       setCalendarFeedStatus("connected");
     }
-    if (calendarSaveStatus === "failed" && calendarSaveError === "Calendar is not connected to the live database.") {
-      setCalendarSaveStatus("idle");
-      setCalendarSaveError("");
-    }
     return true;
   }
+
 
   async function persistUpsertItem(item: CalendarItem, previousItems: CalendarItem[], optimisticItems: CalendarItem[]) {
     beginAdminSave("upsert_item");
