@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "Det gick inte att uppdatera tränare i bakgrunden.",
   "Admin settings background refresh failed.": "Det gick inte att uppdatera admininställningar i bakgrunden.",
   "Sign in again before editing. The calendar is not connected to the live database.": "Logga in igen innan du redigerar. Kalendern är inte ansluten till livedatabasen.",
-  "Calendar is not connected to the live database.": "Kalendern är inte ansluten till livedatabasen.",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "Det går inte att {action}: livedatabasen är inte ansluten. Ladda om och logga in igen.",
   "Video file": "Videofil",
   "Player submission": "Inskickat av spelare",
   "Recovery record": "Återställningspost",
@@ -4715,5 +4713,6 @@
   "White": "Vit",
   "Yellow": "Gul",
   "Red": "Röd",
-  "Blue": "Blå"
+  "Blue": "Blå",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "Det går inte att {action} ännu: kalendern synkroniseras fortfarande. Försök igen om en stund."
 }

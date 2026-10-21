@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "Falha ao atualizar os treinadores em segundo plano.",
   "Admin settings background refresh failed.": "Falha ao atualizar as definições de administrador em segundo plano.",
   "Sign in again before editing. The calendar is not connected to the live database.": "Inicie sessão novamente antes de editar. O calendário não está ligado à base de dados em direto.",
-  "Calendar is not connected to the live database.": "O calendário não está ligado à base de dados em direto.",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "Não é possível {action}: a base de dados em direto não está ligada. Recarregue e inicie sessão novamente.",
   "Video file": "Ficheiro de vídeo",
   "Player submission": "Envio do jogador",
   "Recovery record": "Registo de recuperação",
@@ -4715,5 +4713,6 @@
   "White": "Branco",
   "Yellow": "Amarelo",
   "Red": "Vermelho",
-  "Blue": "Azul"
+  "Blue": "Azul",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "Ainda não é possível {action}: o calendário ainda está a sincronizar. Tente novamente dentro de momentos."
 }

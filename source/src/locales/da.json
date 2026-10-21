@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "Opdatering af trænere i baggrunden mislykkedes.",
   "Admin settings background refresh failed.": "Opdatering af adminindstillinger i baggrunden mislykkedes.",
   "Sign in again before editing. The calendar is not connected to the live database.": "Log ind igen, før du redigerer. Kalenderen er ikke forbundet til livedatabasen.",
-  "Calendar is not connected to the live database.": "Kalenderen er ikke forbundet til livedatabasen.",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "Kan ikke {action}: livedatabasen er ikke forbundet. Genindlæs, og log ind igen.",
   "Video file": "Videofil",
   "Player submission": "Spillerindsendelse",
   "Recovery record": "Gendannelsespost",
@@ -4715,5 +4713,6 @@
   "White": "Hvid",
   "Yellow": "Gul",
   "Red": "Rød",
-  "Blue": "Blå"
+  "Blue": "Blå",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "Kan ikke {action} endnu: kalenderen synkroniserer stadig. Prøv igen om et øjeblik."
 }

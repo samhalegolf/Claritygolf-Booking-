@@ -248,8 +248,6 @@
   "Coaches background refresh failed.": "コーチのバックグラウンド更新に失敗しました。",
   "Admin settings background refresh failed.": "管理者設定のバックグラウンド更新に失敗しました。",
   "Sign in again before editing. The calendar is not connected to the live database.": "編集する前に再度サインインしてください。カレンダーが本番データベースに接続されていません。",
-  "Calendar is not connected to the live database.": "カレンダーが本番データベースに接続されていません。",
-  "Cannot {action}: the live database is not connected. Reload and sign in again.": "{action}できません：本番データベースに接続されていません。再読み込みして再度サインインしてください。",
   "Video file": "動画ファイル",
   "Player submission": "プレーヤーの投稿",
   "Recovery record": "復元用レコード",
@@ -4715,5 +4713,6 @@
   "White": "白",
   "Yellow": "黄",
   "Red": "赤",
-  "Blue": "青"
+  "Blue": "青",
+  "Can't {action} yet: the calendar is still syncing. Try again in a moment.": "まだ{action}できません：カレンダーを同期中です。少し待ってからもう一度お試しください。"
 }
