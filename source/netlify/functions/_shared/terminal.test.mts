@@ -149,6 +149,8 @@ function fakeHosts(options: { intentStatus?: string; sessionPaid?: boolean } = {
     billing_terminal_payments: [],
     billing_terminal_locations: [],
     billing_payment_tenders: [],
+    // A paid sale reads back the voucher codes it issued; this one sold none.
+    billing_coupons: [],
   };
   const counts = { intentCreates: 0, paidTransitions: 0, sessionExpires: 0 };
   const intents = new Map<string, Row>();
@@ -162,6 +164,7 @@ function fakeHosts(options: { intentStatus?: string; sessionPaid?: boolean } = {
       const cell = row[column];
       if (op === "eq") return String(cell ?? "") === value;
       if (op === "is") return value === "null" ? cell === null || cell === undefined : String(cell === true) === value;
+      if (op === "like") return String(cell ?? "").startsWith(value.replace(/\*$/, ""));
       if (op === "in") {
         const list = value.replace(/^\(|\)$/g, "").split(",").map((entry) => entry.replace(/^"|"$/g, ""));
         return list.includes(String(cell ?? ""));

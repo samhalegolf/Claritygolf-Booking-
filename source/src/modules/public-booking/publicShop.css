@@ -1,0 +1,37 @@
+/* The shop beside the booking page. Everything else it draws with is the
+   booking page's own markup and rules; these are the two things it has that
+   the booking page does not. */
+
+/* A voucher code on the thank-you card: big enough to read out over a
+   counter, and selectable so it can be copied. */
+.public-booking .shop-voucher {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  margin: 8px 0;
+  padding: 14px 18px;
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+.public-booking .shop-voucher strong {
+  font-size: var(--c-size-page-title);
+  letter-spacing: 0.06em;
+  user-select: all;
+}
+
+.public-booking .shop-voucher small,
+.public-booking .shop-fine-print {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.public-booking .shop-fine-print {
+  margin: 0;
+}
+
+.public-booking .service-picker strong svg {
+  margin-right: 6px;
+  vertical-align: -2px;
+}

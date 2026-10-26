@@ -31,6 +31,21 @@ export function publicBookingRoute(pathname = window.location.pathname): { busin
   return { business: first, screenId: SCREEN_SEGMENTS.has(second) ? second : "main" };
 }
 
+/**
+ * The business whose shop this path is, or "". The shop sits beside the
+ * booking page at /<business>/shop. It needs the business named: it takes
+ * money, and there is no "the only business" guess for that.
+ */
+export function publicShopBusiness(pathname = window.location.pathname) {
+  const [first = "", second = "", third = ""] = pathSegments(pathname);
+  return first && !SCREEN_SEGMENTS.has(first) && second === "shop" && !third ? first : "";
+}
+
+/** The shop's path, keeping whatever query the page was opened with (?embed=booking). */
+export function publicShopHref(business: string, search = typeof window === "undefined" ? "" : window.location.search) {
+  return `/${business}/shop${search}`;
+}
+
 /** The path a business's booking screen lives at. */
 export function publicBookingPath(business: string, screenId: string) {
   const base = business ? `/${business}` : "";

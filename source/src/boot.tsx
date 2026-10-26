@@ -10,6 +10,7 @@ import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { isTerminalPath } from "./modules/clarity-terminal/terminalApi";
+import { publicShopBusiness } from "./modules/public-booking/bookingScreen";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { prefetchCalendarState } from "./modules/workspace/calendarStatePrefetch";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
@@ -39,6 +40,7 @@ const loadLoginScreen = () => import("./modules/auth/LoginScreen");
 const LoginScreen = lazy(loadLoginScreen);
 const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBookingApp"));
 const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBookingManage"));
+const PublicShop = lazy(() => import("./modules/public-booking/PublicShop"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
 const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingReviewSharePage"));
@@ -61,6 +63,8 @@ const bookingEmbed = isBookingEmbedMode();
 const playerBooking = isPlayerBookingMode();
 const publicBookingOnly = bookingEmbed && !playerBooking;
 const publicReschedule = publicBookingOnly && new URLSearchParams(window.location.search).get("mode") === "reschedule";
+// The shop beside a business's booking page: /<business>/shop.
+const publicShop = publicBookingOnly && Boolean(publicShopBusiness());
 // The coach's emailed link to a video a guest sent them. Like the booking
 // embed it wins over everything below, including any session -- the token is
 // the credential, and asking a coach to log in to watch one video is exactly
@@ -229,7 +233,7 @@ function Root() {
   if (publicBookingOnly) {
     return (
       <Suspense fallback={<Loading size="screen" what={t("booking")} />}>
-        {publicReschedule ? <PublicBookingManage /> : <PublicBookingApp />}
+        {publicReschedule ? <PublicBookingManage /> : publicShop ? <PublicShop /> : <PublicBookingApp />}
       </Suspense>
     );
   }

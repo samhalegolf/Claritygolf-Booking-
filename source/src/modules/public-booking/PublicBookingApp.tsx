@@ -1,13 +1,12 @@
 import "../../appStyles";
 import { Loading, loadingLabel } from "../shared/Loading";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Mail, Plus, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
-import { appearsOnCurrentPublicBookingScreen, publicApi, withBusiness } from "./bookingScreen";
+import { appearsOnCurrentPublicBookingScreen, publicApi, publicBookingRoute, publicShopHref, withBusiness } from "./bookingScreen";
 import { WeekSlots } from "./WeekSlots";
+import { BookingFrame, money, type Account, type Brand } from "./BookingFrame";
 import { forgetRememberedBooker, readRememberedBooker, saveRememberedBooker, type RememberedBooker } from "./rememberedBooker";
-import { currencyForAccountSettings, localeForCountry } from "../../../netlify/functions/_shared/locale.mts";
-import type { BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 import { resolvedMarketFromWire } from "../../../netlify/functions/_shared/market-profile.mts";
 import { t, tn, readerLocale } from "../../lib/i18n";
 import { calculateCustomGroupPrice, customGroupMaxParticipants, customGroupMinParticipants, type Service as ModelService } from "../services/serviceModel";
@@ -18,8 +17,6 @@ type Coach = { id: string; name: string; photoUrl?: string };
 /** Someone the booker is bringing to a custom group. The email is only asked for, and only sent, when they tick the invite. */
 type Attendee = { name: string; email: string; invite: boolean };
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
-type Brand = { logoPreview?: string; showLogo?: boolean; neutral?: string; primary?: string; secondary?: string; accent?: string; bookingTheme?: string };
-type Account = { businessName?: string; coachName?: string; venueShortName?: string; country?: string; terminology?: BusinessTerminology; market?: unknown; invoiceSettings?: { currency?: string; taxName?: string; taxRate?: number; taxInclusive?: boolean } };
 type Form = { firstName: string; lastName: string; phone: string; email: string };
 export type PublicBookingCustomer = { name?: string; email?: string; phone?: string };
 export type PublicBookingAppProps = {
@@ -41,20 +38,6 @@ function currentWeek() {
 }
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
-/** An amount in the business's own currency. */
-function money(value: number, account: Account) {
-  const currency = currencyForAccountSettings(account.invoiceSettings?.currency, account.country);
-  try {
-    return new Intl.NumberFormat(localeForCountry(account.country), {
-      style: "currency",
-      currency,
-      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `${currency} ${value}`;
-  }
-}
 /** The lesson's price in the business's own currency, with its tax named when
  *  prices are quoted before it ("$80 + GST"). */
 function price(service: Service, account: Account) {
@@ -80,20 +63,6 @@ const handednessOptions: Array<{ value: Handedness; label: string; explainer: st
   { value: "right", label: t("Right handed"), explainer: t("You stand on the left side of the ball, with your left shoulder closest to the target. Most players swing this way.") },
   { value: "left", label: t("Left handed"), explainer: t("You stand on the right side of the ball, with your right shoulder closest to the target. We'll book you into one of our left-handed-friendly bays.") },
 ];
-/** The frame the coach app's Booking page preview gives this same markup:
- *  .app-shell for the compatibility variables every booking rule reads
- *  (--coach-primary, --panel, --border ...), the business's brand colours from
- *  the catalogue, and the booking theme the coach chose. Without it the page
- *  rendered with those variables unset, so every colour-mix of them was
- *  dropped -- selected lessons, days and times showed no fill and the brand
- *  header lost its gradient. */
-function BookingFrame({ brand, children }: { brand: Brand; children: ReactNode }) {
-  const style = Object.fromEntries(
-    ([["--coach-neutral", brand.neutral], ["--coach-primary", brand.primary], ["--coach-secondary", brand.secondary], ["--coach-accent", brand.accent]] as const)
-      .filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{3,8}$/i.test(value)),
-  ) as CSSProperties;
-  return <div className="app-shell embed-mode public-booking-frame" style={style}>{children}</div>;
-}
 function manageBookingUrl() { const url = new URL(location.href); url.searchParams.set("embed", "booking"); url.searchParams.set("mode", "reschedule"); return url.toString(); }
 
 /** Customer-only booking surface.  It intentionally owns no coach session,
@@ -155,7 +124,7 @@ function GroupAttendees({ service, account, bookerName, attendees, onChange }: {
 
 export default function PublicBookingApp({ customer, onBookingComplete, accountId }: PublicBookingAppProps) {
   const api = (path: string) => (accountId ? withBusiness(path, accountId) : publicApi(path));
-  const [catalogue, setCatalogue] = useState<{ services: Service[]; coaches: Coach[]; brand: Brand; account: Account }>({ services: [], coaches: [], brand: {}, account: {} });
+  const [catalogue, setCatalogue] = useState<{ services: Service[]; coaches: Coach[]; brand: Brand; account: Account; shopLinked: boolean }>({ services: [], coaches: [], brand: {}, account: {}, shopLinked: false });
   const [catalogueState, setCatalogueState] = useState<"loading" | "ready" | "error">("loading");
   const [week, setWeek] = useState(currentWeek);
   const [slotsByService, setSlotsByService] = useState<Record<string, Slot[]>>({});
@@ -185,7 +154,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
     let cancelled = false;
     apiFetch(api("/api/public-booking-catalog"))
       .then(async (response) => { if (!response.ok) throw new Error(t("Booking is unavailable.")); return response.json(); })
-      .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], coaches: Array.isArray(data.coaches) ? data.coaches : [], brand: data.brand ?? {}, account: data.account ?? {} }); setCatalogueState("ready"); } })
+      .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], coaches: Array.isArray(data.coaches) ? data.coaches : [], brand: data.brand ?? {}, account: data.account ?? {}, shopLinked: data.shopLinked === true }); setCatalogueState("ready"); } })
       .catch(() => { if (!cancelled) setCatalogueState("error"); });
     return () => { cancelled = true; };
   }, []);
@@ -288,12 +257,16 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const brandName = catalogue.account.businessName || catalogue.account.coachName || market.product.name;
   const terms = market.terminology;
   const askHandedness = market.capabilities.handedness;
+  // The shop needs the business named in the path; a bare legacy link has none
+  // to send it to. Not offered inside the Player Portal, which has its own shop.
+  const shopBusiness = publicBookingRoute().business;
+  const shopHref = catalogue.shopLinked && shopBusiness && !customer ? publicShopHref(shopBusiness) : "";
   if (catalogueState === "ready" && !market.capabilities.publicBooking) return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><h1>{t("This booking page is not available.")}</h1></div></main></BookingFrame>;
   if (submitState === "done") return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><Check size={24} /><h1>{t("Booking confirmed")}</h1><p>{videoReview ? t("Your confirmation is on its way by email. Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.", { customerSingular: terms.customerSingular.toLowerCase(), staffSingular: terms.staffSingular.toLowerCase() }) : t("Your confirmation is on its way by email.")}</p><button className="primary-button" onClick={() => { setSubmitState("idle"); setSlot(null); setNotes(""); setAttendees(blankAttendees(service)); }} type="button">{t("Book another {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</button></div></main></BookingFrame>;
 
   return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}>
     <div className="booking-brand">{catalogue.brand.showLogo && catalogue.brand.logoPreview ? <img src={catalogue.brand.logoPreview} alt={t("{brandName} logo", { brandName })} /> : <strong>{brandName}</strong>}<em>{catalogue.account.venueShortName}</em></div>
-    <div className="booking-toolbar"><a className="booking-login-trigger" href={manageBookingUrl()}>{t("Manage / reschedule a booking")}</a></div>
+    <div className="booking-toolbar">{shopHref ? <a className="booking-login-trigger" href={shopHref}>{t("Gift vouchers & packages")}</a> : null}<a className="booking-login-trigger" href={manageBookingUrl()}>{t("Manage / reschedule a booking")}</a></div>
     <div className="booking-columns booking-progressive-flow">
       <section className="booking-progressive-section is-open"><div className="booking-progressive-title"><span className="booking-progressive-title-label">1. {terms.serviceSingular}</span><span className="booking-progressive-title-state">{catalogueState === "loading" ? loadingLabel() : service ? changeButton(() => chooseService("")) : t("In progress")}</span></div><div className="booking-progressive-body"><div className="service-picker">{catalogueState === "error" ? <p role="alert">{t("Booking is unavailable. Please try again shortly.")}</p> : catalogueState === "loading" ? <Loading what={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular.toLowerCase() })} /> : services.length ? (service ? [service] : services).map((candidate) => <button className={candidate.id === serviceId ? "selected-service" : ""} key={candidate.id} onClick={() => chooseService(candidate.id === serviceId ? "" : candidate.id)} type="button"><strong>{candidate.name}</strong><em>{t("{duration} minutes @ {candidate}", { duration: candidate.duration, candidate: price(candidate, catalogue.account) })}</em>{candidate.description ? <small>{candidate.description}</small> : null}{candidate.lessonNote || candidate.location ? <small>{candidate.lessonNote || candidate.location}</small> : null}</button>) : <p>{t("No public {serviceSingular} types are active.", { serviceSingular: terms.serviceSingular.toLowerCase() })}</p>}</div></div></section>
       <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{videoReview ? t("2. Turnaround") : t("2. Date & Time")}</span><span className="booking-progressive-title-state">{!service ? t("Locked") : videoReview ? t("No time needed") : slot ? changeButton(() => setSlot(null)) : slotsState === "loading" ? loadingLabel() : t("In progress")}</span></div>{service && videoReview ? <div className="booking-progressive-body"><div className="booking-review-turnaround"><p>{t("Send your swing from the player portal once you have booked. There is no appointment to attend.")}</p><p><strong>{t("Back with you by {label}", { label: reviewDueDate(service).label })}</strong>{" "}{reviewDueDate(service).days === 1 ? t("— within 1 day.") : t("— within {days} days.", { days: reviewDueDate(service).days })}</p></div></div> : service && slot ? <div className="booking-progressive-body"><WeekSlots week={week} slots={[slot]} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => time(candidate.start)} isSelected={() => true} onSelect={() => setSlot(null)} emptyLabel="" />{slotCoach ? <p className="booking-slot-coach">{t("With {name}", { name: slotCoach.name })}</p> : null}</div> : service ? <div className="booking-progressive-body">{coachChoices.length > 1 ? <fieldset className="booking-handedness booking-coach-picker"><legend>{t("Who would you like?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={terms.staffSingular}><button aria-checked={!coachId} className={!coachId ? "selected-handedness" : ""} onClick={() => chooseCoach("")} role="radio" type="button">{t("Anyone available")}</button>{coachChoices.map((coach) => <button aria-checked={coachId === coach.id} className={coachId === coach.id ? "selected-handedness" : ""} key={coach.id} onClick={() => chooseCoach(coach.id)} role="radio" type="button">{coach.name}</button>)}</div></fieldset> : null}<div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>{t("Previous week")}</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>{t("Next week")}</span><ArrowRight size={15} /></button></div><WeekSlots week={week} placeholder={slotsState === "loading" ? <Loading what={t("available times")} /> : slotsState === "error" ? <p role="alert">{t("Available times could not be loaded.")}</p> : null} slots={availableSlots} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => `${time(candidate.start)}${candidate.remainingSpots ? t(" · {remainingSpots} spots left", { remainingSpots: candidate.remainingSpots }) : ""}`} isSelected={(candidate) => slot?.week === candidate.week && slot?.day === candidate.day && slot?.start === candidate.start} onSelect={(candidate) => { setSlot(candidate); setError((current) => (current === NO_BAY_FOR_SWING ? "" : current)); }} emptyLabel={t("No public times available this week.")} /></div> : null}</section>

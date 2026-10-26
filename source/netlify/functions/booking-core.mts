@@ -47,6 +47,7 @@ import {
   findPlayerShopItem,
   playerShopItems,
 } from "./_shared/player-shop.mts";
+import { ONLINE_SHOP_SETTING, onlineShopSwitchedOn } from "./_shared/online-shop.mts";
 import {
   createCardCheckout,
   enrolMembership,
@@ -3007,6 +3008,12 @@ export async function readPublicCatalogState(accountId: string) {
     syncKey,
     updatedAt,
     ...stateFromSettings(settingsMap, accountId),
+    // Whether the booking page links to the shop. Only the switch and the card
+    // route: the shop page itself says "closed" if there is nothing to sell,
+    // which is not worth a products read on every booking page load.
+    shopLinked:
+      onlineShopSwitchedOn(settingsMap[ONLINE_SHOP_SETTING]) &&
+      stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]).features.portal,
   };
 }
 
@@ -4235,6 +4242,7 @@ export function publicBookingCatalog(state) {
     locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
     brand: state.brand,
     account: publicCoachAccount(state.account),
+    shopLinked: state.shopLinked === true,
   };
 }
 
