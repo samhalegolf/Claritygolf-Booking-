@@ -1,16 +1,17 @@
-// Billing › Settings: Clarity Pay, payment history re-read, defaults for new
+// Billing › Settings: Clarity Pay, the online shop, payment history re-read, defaults for new
 // invoices, payment methods, discounts and expense categories. Drawn here;
 // the editors and their save handlers still live in App.tsx and arrive as
 // props. Loaded with the section, not with the shell.
 import { t } from "../../lib/i18n";
 import { EditableSettingsBlock, SettingsGroup, SettingsGroups } from "../settings/SettingsLayout";
 import { Nfc, Percent, Plus, RefreshCw } from "lucide-react";
-import { ClarityInvoices, ClarityPayments, ClaritySettings } from "../shared/ClarityIcons";
+import { ClarityInvoices, ClarityPayments, ClaritySettings, ClarityStore } from "../shared/ClarityIcons";
 import { clarityPayFeeLabel, formatMoney, parseMoneyInput, parseQuantityInput } from "../../lib/money";
 import { Suspense, lazy } from "react";
 import { Loading } from "../shared/Loading";
 import { tapToPayName } from "./terminal";
 import { ClarityPayReturnBanner } from "./ClarityPayReturnBanner";
+import { OnlineShopSetup } from "./OnlineShopSetup";
 import type { ProfileTarget } from "../business-hub/BusinessHubPanel";
 import type { EditableBlockStatus } from "../settings/SettingsLayout";
 import type { View, WorkspaceOverlay } from "../shared/appView";
@@ -67,6 +68,8 @@ export type BillingSettingsPanelProps = {
   toggleDiscountActive: (discount: BillingDiscount) => Promise<void>;
   addExpenseCategory: () => Promise<void>;
   toggleExpenseCategoryActive: (category: BillingExpenseCategory) => Promise<void>;
+  /** The business as its public pages name it, for the shop's link. */
+  publicBusinessSlug: string;
 };
 
 export function BillingSettingsPanel(props: BillingSettingsPanelProps) {
@@ -114,6 +117,7 @@ export function BillingSettingsPanel(props: BillingSettingsPanelProps) {
     toggleDiscountActive,
     addExpenseCategory,
     toggleExpenseCategoryActive,
+    publicBusinessSlug,
   } = props;
   return (
     <SettingsGroups>
@@ -192,6 +196,10 @@ export function BillingSettingsPanel(props: BillingSettingsPanelProps) {
           />
         </Suspense>
       )}
+
+      <SettingsGroup id="billing-online-shop" section="billing" icon={ClarityStore} title={t("Online shop")}>
+        <OnlineShopSetup business={publicBusinessSlug} />
+      </SettingsGroup>
 
       {/* Repair, not import. Everything here has already been
           pulled once; what this fixes is what was kept of it. */}

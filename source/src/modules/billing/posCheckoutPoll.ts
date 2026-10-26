@@ -11,7 +11,7 @@
 
 import { useEffect, useRef } from "react";
 import qrcode from "qrcode-generator";
-import type { PosTransaction } from "./types";
+import type { BillingCoupon, PosTransaction } from "./types";
 import { t } from "../../lib/i18n";
 
 // Stripe checkout sessions live for 24h, but a customer standing at a counter
@@ -30,7 +30,7 @@ const POLL_TIMEOUT_MS = 5 * 60 * 1000;
  */
 export function usePosPaymentPoll(
   transactionId: string,
-  onPaid: (transaction: PosTransaction) => void,
+  onPaid: (transaction: PosTransaction, issuedCoupons: BillingCoupon[]) => void,
   onTimeout: () => void,
 ) {
   const onPaidRef = useRef(onPaid);
@@ -57,10 +57,16 @@ export function usePosPaymentPoll(
           { credentials: "same-origin", cache: "no-store" },
         );
         if (!response.ok) return;
-        const data = (await response.json()) as { transaction?: PosTransaction; paid?: boolean };
+        const data = (await response.json()) as {
+          transaction?: PosTransaction;
+          paid?: boolean;
+          issuedCoupons?: BillingCoupon[];
+        };
         if (cancelled || !data.paid || !data.transaction) return;
         clearInterval(timer);
-        onPaidRef.current(data.transaction);
+        // A voucher's code is issued when the card clears, not when the sale
+        // was rung up, so this is the first moment the till can show it.
+        onPaidRef.current(data.transaction, data.issuedCoupons || []);
       } catch {
         // Transient network blips are expected on a till; the next tick retries.
       }

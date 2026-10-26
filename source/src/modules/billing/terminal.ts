@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { installConnectionTokenBridge, nativeTerminal, onAndroid, type CollectOutcome } from "../../native/clarityTerminal";
-import type { PosTransaction } from "./types";
+import type { BillingCoupon, PosTransaction } from "./types";
 import { t } from "../../lib/i18n";
 
 export type PosTender = {
@@ -25,7 +25,13 @@ export type PosTender = {
 };
 
 export type TerminalServerState =
-  | { state: "succeeded"; transaction: PosTransaction; tenders: PosTender[]; issuedPasses?: string[] }
+  | {
+      state: "succeeded";
+      transaction: PosTransaction;
+      tenders: PosTender[];
+      issuedPasses?: string[];
+      issuedCoupons?: BillingCoupon[];
+    }
   | { state: "open"; paymentIntentId?: string; clientSecret?: string; amount?: number; currency?: string }
   | { state: "processing" }
   | { state: "declined"; message?: string }
@@ -41,7 +47,13 @@ export type TapState =
   | { kind: "reading"; message: string }
   | { kind: "processing" }
   | { kind: "unknown" }
-  | { kind: "succeeded"; transaction: PosTransaction; tenders: PosTender[]; issuedPasses: string[] }
+  | {
+      kind: "succeeded";
+      transaction: PosTransaction;
+      tenders: PosTender[];
+      issuedPasses: string[];
+      issuedCoupons: BillingCoupon[];
+    }
   | { kind: "declined"; message: string }
   | { kind: "cancelled" }
   | { kind: "failed"; message: string };
@@ -84,6 +96,7 @@ export function stateFromServer(answer: TerminalServerState, openCount: number):
         transaction: answer.transaction,
         tenders: answer.tenders || [],
         issuedPasses: answer.issuedPasses || [],
+        issuedCoupons: answer.issuedCoupons || [],
       };
     case "declined":
       return { kind: "declined", message: answer.message || t("The card was declined.") };

@@ -4,7 +4,11 @@ import { accountsForClarityPayAccount, syncClarityPay } from "./_shared/clarity-
 import { accountsForStripeAccount } from "./_shared/integration-credentials.mts";
 import { stripePlatform, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts";
 import { getDatabase } from "./_shared/database.mts";
-import { refundPosSaleFromStripeCharge, settleTerminalPaymentFromWebhook } from "./billing-api.mts";
+import {
+  refundPosSaleFromStripeCharge,
+  settlePosCheckoutFromWebhook,
+  settleTerminalPaymentFromWebhook,
+} from "./billing-api.mts";
 import {
   deleteStripeInvoice,
   syncStripeCharge,
@@ -47,6 +51,10 @@ import { json } from "./_shared/http.mts";
 // renewal's payment_intent.succeeded settles a charge whose off-session
 // confirm timed out. Both carry clarity_membership_* metadata, which is how
 // they are told apart from till sales and portal purchases.
+//
+// The same checkout.session.completed settles a till sale paid through Stripe
+// Checkout -- an online shop order, or a counter QR nobody stayed to watch.
+// Those carry pos_transaction_id metadata.
 
 /** Both modes' secrets: the live and test endpoints are signed separately. */
 function webhookSecrets() {
@@ -168,6 +176,8 @@ async function handleEvent(event: Record<string, any>, object: Record<string, an
       };
     case "payment_intent.succeeded":
       return settleTerminalPaymentFromWebhook(accountId, String(object?.id || ""));
+    case "checkout.session.completed":
+      return (await settlePosCheckoutFromWebhook(accountId, object)) || { ignored: "not_a_pos_sale" };
     default:
       // Unhandled event types are acknowledged so Stripe doesn't retry them.
       return { ignored: event?.type || "unknown" };

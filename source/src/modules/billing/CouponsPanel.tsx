@@ -70,6 +70,7 @@ const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
   stripe: "Stripe",
   pos: t("Sold at the till"),
   manual: t("Issued by hand"),
+  online: t("Bought online"),
 };
 
 function emptyIssueForm() {

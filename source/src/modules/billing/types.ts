@@ -319,7 +319,9 @@ export type PosTransactionStatus = "pending" | "paid" | "refunded" | "void";
 // sale opened from a client profile; "counter" is a walk-up sale. "optix" is a
 // read-only record merged in from Optix product sales — money Optix already
 // took, so it has no POS receipt number and no Mark paid / Refund actions.
-export type PosTransactionSource = "lesson" | "client" | "counter" | "optix";
+// "online" is a customer buying a package or gift voucher from the public shop;
+// only the server sets it.
+export type PosTransactionSource = "lesson" | "client" | "counter" | "optix" | "online";
 
 // A product line on a counter sale. Name, SKU and unit price are snapshots
 // taken when the sale was rung up, so an old receipt still reads correctly
@@ -472,8 +474,9 @@ export type BillingExpense = {
 export type CouponStatus = "active" | "redeemed" | "void";
 
 // Where the coupon came from. "stripe" = imported from a synced Stripe
-// purchase, "pos" = a voucher product sold at the till, "manual" = issued by hand.
-export type CouponSource = "stripe" | "pos" | "manual";
+// purchase, "pos" = a voucher product sold at the till, "manual" = issued by hand,
+// "online" = bought in the public shop.
+export type CouponSource = "stripe" | "pos" | "manual" | "online";
 
 export type BillingCoupon = {
   id: string;

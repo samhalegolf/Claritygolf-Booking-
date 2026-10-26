@@ -586,14 +586,16 @@ export function SellScreen({
     setSale(paid.transaction);
     setTenders(paid.tenders);
     if (paid.issuedPasses.length) setIssuedPasses(paid.issuedPasses);
+    if (paid.issuedCoupons.length) setIssuedCoupons(paid.issuedCoupons);
     setPayStage("done");
     onSaleCompleted(paid.transaction);
   }
 
   usePosPaymentPoll(
     payStage === "qr" ? sale?.id || "" : "",
-    (paid) => {
+    (paid, coupons) => {
       setSale(paid);
+      if (coupons.length) setIssuedCoupons(coupons);
       setPayStage("done");
       onSaleCompleted(paid);
     },
