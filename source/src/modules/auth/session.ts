@@ -37,6 +37,11 @@ export type Session = {
    * it, can never quietly read as a sandbox.
    */
   accountKind: AccountKind;
+  /**
+   * Player sessions: the business the player belongs to. The portal's booking
+   * widget names it on every request, because the portal's URL does not.
+   */
+  accountId?: string;
   /** Sandbox sessions only: the live business the sandbox belongs to. */
   liveAccountId?: string;
   /**
@@ -69,6 +74,7 @@ function toSession(data: SessionResponse | null | undefined): Session {
     name: data.name || "",
     accountKind: data.accountKind === "sandbox" ? "sandbox" : "live",
   };
+  if (role === "player" && data.accountId) session.accountId = data.accountId;
   if (data.liveAccountId) session.liveAccountId = data.liveAccountId;
   if (data.viewingAs) session.viewingAs = data.viewingAs;
   if (role === "coach" && data.workspace) session.workspace = data.workspace;

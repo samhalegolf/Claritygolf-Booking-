@@ -55,7 +55,15 @@ export function appearsOnCurrentPublicBookingScreen(service: { bookingScreenIds?
 export function publicApi(path: string, pathname = typeof window === "undefined" ? "/" : window.location.pathname) {
   if (typeof window === "undefined" || !isBookingEmbedMode()) return path;
   const { business } = publicBookingRoute(pathname);
-  if (!business) return path;
+  return business ? withBusiness(path, business) : path;
+}
+
+/**
+ * A public API path naming its business outright. The Player Portal uses this:
+ * it is not on a business's booking URL, but its session already knows which
+ * business the player belongs to.
+ */
+export function withBusiness(path: string, business: string) {
   const [base, query = ""] = path.split("?");
   const params = new URLSearchParams(query);
   params.set("business", business);

@@ -5910,6 +5910,7 @@ async function playerSessionResponse(player, req) {
       role: "player",
       email: player.email,
       name: player.name,
+      accountId: player.accountId,
       expiresAt: session.expiresAt,
       // Only to a client that has said it cannot hold the cookie. The cookie is
       // still set either way, so the web is unchanged.
@@ -9238,6 +9239,7 @@ async function routeBookingApiRequest(
           authenticated: true,
           role: "player",
           email: player.email,
+          accountId: player.accountId,
         });
       }
       return json({ authenticated: false, role: "guest" });
@@ -10063,7 +10065,13 @@ async function routeBookingApiRequest(
     if (req.method === "POST" && pathname === "/api/sandbox/return") {
       const token = playerSessionTokenFromRequest(req);
       const player = await readPlayerSession(token);
-      if (!player?.sandboxActorAuthUser) {
+      // Already gone -- expired, or ended in another tab. There is nothing
+      // left to end, so clear the cookie and let the coach out rather than
+      // leave them stuck on a portal with no way back.
+      if (!player) {
+        return json({ ok: true }, 200, { "Set-Cookie": clearPlayerCookieHeader() });
+      }
+      if (!player.sandboxActorAuthUser) {
         return json({ error: "not_impersonating", message: "This is not a sandbox handoff." }, 400);
       }
       await destroyPlayerSession(token);

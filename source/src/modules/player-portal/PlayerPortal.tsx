@@ -25,6 +25,7 @@ import {
 } from "../shared/ClarityIcons";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
+import { returnToCoach } from "../sandbox/sandboxApi";
 import { hasGuestToken, NATIVE } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import { useBackNavigation } from "../shared/backNavigation";
@@ -693,6 +694,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   );
 
   async function handleSignOut() {
+    // Viewing as a sandbox player: signing out means going back to the coach.
+    // A real sign-out here would end the coach's own login too.
+    if (session.viewingAs) {
+      await returnToCoach();
+      return;
+    }
     await signOut();
     onSignedOut();
   }
@@ -2135,6 +2142,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         <div className="player-portal-inline-booking">
                           <Suspense fallback={<Loading what={t("booking")} className="player-portal-empty" />}>
                             <BookingWidget
+                              accountId={session.accountId}
                               customer={{ name: playerName, email: playerEmail, phone: playerPhone }}
                               onBookingComplete={() => void loadProfile()}
                             />

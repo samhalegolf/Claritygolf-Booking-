@@ -3,7 +3,7 @@ import { Loading, loadingLabel } from "../shared/Loading";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, Mail, Plus, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
-import { appearsOnCurrentPublicBookingScreen, publicApi } from "./bookingScreen";
+import { appearsOnCurrentPublicBookingScreen, publicApi, withBusiness } from "./bookingScreen";
 import { WeekSlots } from "./WeekSlots";
 import { forgetRememberedBooker, readRememberedBooker, saveRememberedBooker, type RememberedBooker } from "./rememberedBooker";
 import { currencyForAccountSettings, localeForCountry } from "../../../netlify/functions/_shared/locale.mts";
@@ -22,7 +22,12 @@ type Brand = { logoPreview?: string; showLogo?: boolean; neutral?: string; prima
 type Account = { businessName?: string; coachName?: string; venueShortName?: string; country?: string; terminology?: BusinessTerminology; market?: unknown; invoiceSettings?: { currency?: string; taxName?: string; taxRate?: number; taxInclusive?: boolean } };
 type Form = { firstName: string; lastName: string; phone: string; email: string };
 export type PublicBookingCustomer = { name?: string; email?: string; phone?: string };
-export type PublicBookingAppProps = { customer?: PublicBookingCustomer; onBookingComplete?: () => void };
+export type PublicBookingAppProps = {
+  customer?: PublicBookingCustomer;
+  onBookingComplete?: () => void;
+  /** The Player Portal's business. The public page reads it from its URL instead. */
+  accountId?: string;
+};
 
 const BASE_WEEK_START = new Date(2026, 5, 1);
 
@@ -148,7 +153,8 @@ function GroupAttendees({ service, account, bookerName, attendees, onChange }: {
   </div>;
 }
 
-export default function PublicBookingApp({ customer, onBookingComplete }: PublicBookingAppProps) {
+export default function PublicBookingApp({ customer, onBookingComplete, accountId }: PublicBookingAppProps) {
+  const api = (path: string) => (accountId ? withBusiness(path, accountId) : publicApi(path));
   const [catalogue, setCatalogue] = useState<{ services: Service[]; coaches: Coach[]; brand: Brand; account: Account }>({ services: [], coaches: [], brand: {}, account: {} });
   const [catalogueState, setCatalogueState] = useState<"loading" | "ready" | "error">("loading");
   const [week, setWeek] = useState(currentWeek);
@@ -177,7 +183,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch(publicApi("/api/public-booking-catalog"))
+    apiFetch(api("/api/public-booking-catalog"))
       .then(async (response) => { if (!response.ok) throw new Error(t("Booking is unavailable.")); return response.json(); })
       .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], coaches: Array.isArray(data.coaches) ? data.coaches : [], brand: data.brand ?? {}, account: data.account ?? {} }); setCatalogueState("ready"); } })
       .catch(() => { if (!cancelled) setCatalogueState("error"); });
@@ -200,7 +206,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
     // Handedness decides which bays count as free where a business has
     // left- or right-handed-only bays, so a change re-asks for the week. So
     // does picking a coach: their times are asked for, not anyone's.
-    apiFetch(publicApi(`/api/public-booking-slots?week=${week}&handedness=${handedness}${coachId ? `&coachId=${encodeURIComponent(coachId)}` : ""}`))
+    apiFetch(api(`/api/public-booking-slots?week=${week}&handedness=${handedness}${coachId ? `&coachId=${encodeURIComponent(coachId)}` : ""}`))
       .then(async (response) => { if (!response.ok) throw new Error(t("Availability is unavailable.")); return response.json(); })
       .then((data) => {
         if (cancelled) return;
@@ -263,7 +269,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
     if (missingInviteEmail) { setError(t("Add an email for {name}, or untick their invite.", { name: missingInviteEmail.name.trim() })); return; }
     setSubmitState("saving"); setError("");
     try {
-      const response = await apiFetch(publicApi("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), email: attendee.invite ? attendee.email.trim() : "" })) : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
+      const response = await apiFetch(api("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), email: attendee.invite ? attendee.email.trim() : "" })) : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.appointment?.id) throw new Error(data.message || t("That time is no longer available."));
       if (typeof data.rememberToken === "string" && data.rememberToken) {
