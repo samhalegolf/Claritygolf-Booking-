@@ -12,6 +12,14 @@ import {
 } from "./_shared/stripe-voucher-scan.mts";
 import type { ChargeWording } from "./_shared/stripe-voucher-scan.mts";
 import { matchVoucherRule, parseVoucherRules } from "./_shared/voucher-rules.mts";
+import {
+  LESSON_ITEM_PREFIX,
+  ONLINE_SHOP_SETTING,
+  onlineBuyerPersonId,
+  onlineShopItems,
+  onlineShopSwitchedOn,
+  readOnlineOrder,
+} from "./_shared/online-shop.mts";
 
 // The same human-scaled order number the billing sync stamps on a card charge,
 // so a voucher and the invoice row beside it name the sale identically.
@@ -285,8 +293,8 @@ function rethrowProductConflict(error: unknown, sku: string | null): never {
 
 // Catalog ids for lesson types are prefixed so the till can tell at a glance
 // whether an id names a row in the products table or a lesson type. Nothing
-// else in the system produces an id starting "lesson:".
-const LESSON_ITEM_PREFIX = "lesson:";
+// else in the system produces an id starting "lesson:". Declared beside the
+// online shop, which puts packages into a basket the same way.
 
 // What one booking of this lesson type costs, which is not always `price`.
 //
@@ -348,25 +356,26 @@ function lessonTypeToCatalogItem(service: Record<string, unknown>, taxRate: numb
   };
 }
 
-async function lessonTypeItems(accountId: string, taxRate: number) {
-  const rows = await supabase("settings", {
-    query: settingsSelectQuery(accountId, {
-      select: "value",
-      filters: [`key=eq.${encodeFilter("servicesJson")}`, "limit=1"],
-    }),
-  });
-  let parsed: unknown = null;
+/**
+ * servicesJson, parsed: the lesson types, packages included. An empty list for
+ * a missing or corrupt setting -- the till, the shop and pass issuing all read
+ * it, and none of them should 500 on a bad value.
+ */
+async function readServiceList(accountId: string): Promise<Array<Record<string, unknown>>> {
+  const raw = await readSettingValue(accountId, "servicesJson");
   try {
-    parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed)
+      ? parsed.filter((service): service is Record<string, unknown> => Boolean(service) && typeof service === "object")
+      : [];
   } catch {
-    // A corrupt setting must not take the till down - better an empty lesson
-    // list than a 500 on every catalog read.
     console.error("billing_api:services_json_unparseable");
     return [];
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed
-    .filter((service): service is Record<string, unknown> => Boolean(service) && typeof service === "object")
+}
+
+async function lessonTypeItems(accountId: string, taxRate: number) {
+  return (await readServiceList(accountId))
     .filter((service) => service.active !== false && service.archived !== true)
     .map((service) => lessonTypeToCatalogItem(service, taxRate))
     .filter((item) => item.name)
@@ -381,42 +390,18 @@ async function lessonTypeItems(accountId: string, taxRate: number) {
  * still has to issue the pass somebody paid for.
  */
 async function passTemplatesForAccount(accountId: string): Promise<PassTemplate[]> {
-  const rows = await supabase("settings", {
-    query: settingsSelectQuery(accountId, {
-      select: "value",
-      filters: [`key=eq.${encodeFilter("servicesJson")}`, "limit=1"],
-    }),
-  });
-  try {
-    return passTemplatesFromServices(rows[0]?.value ? JSON.parse(rows[0].value) : null);
-  } catch {
-    console.error("billing_api:services_json_unparseable_for_passes");
-    return [];
-  }
+  return passTemplatesFromServices(await readServiceList(accountId));
 }
 
 async function serviceForPassSettlement(accountId: string, serviceId: string) {
   if (!serviceId) return null;
-  const rows = await supabase("settings", {
-    query: settingsSelectQuery(accountId, {
-      select: "value",
-      filters: [`key=eq.${encodeFilter("servicesJson")}`, "limit=1"],
-    }),
-  });
-  try {
-    const services = rows[0]?.value ? JSON.parse(rows[0].value) : [];
-    const service = Array.isArray(services)
-      ? services.find((entry) => String(entry?.id || "") === serviceId)
-      : null;
-    if (!service || service.lessonFormat === "package" || service.active === false) return null;
-    return {
-      id: serviceId,
-      valueCents: Math.max(0, Math.round(lessonTypeUnitPrice(service) * 100)),
-      acceptsCrossRedemption: service.acceptsCrossRedemption !== false,
-    };
-  } catch {
-    return null;
-  }
+  const service = (await readServiceList(accountId)).find((entry) => String(entry?.id || "") === serviceId);
+  if (!service || service.lessonFormat === "package" || service.active === false) return null;
+  return {
+    id: serviceId,
+    valueCents: Math.max(0, Math.round(lessonTypeUnitPrice(service) * 100)),
+    acceptsCrossRedemption: service.acceptsCrossRedemption !== false,
+  };
 }
 
 /**
@@ -3711,31 +3696,50 @@ async function getPosTransaction(accountId: string, id: string) {
 // Selling a voucher product issues a coupon for it, so a voucher bought over
 // the counter is the same object as one bought on Squarespace. The code is
 // generated here and handed back for the till to read out or print.
+//
+// Only once the sale is paid. It used to run when the sale was recorded, which
+// for a Clarity Pay sale meant before the card had been charged: a QR nobody
+// scanned still left a spendable code behind, and an online checkout abandoned
+// on Stripe's page would have done the same for anyone who pressed Buy. Passes
+// already waited for the money; a voucher is money, so it waits too.
+//
+// Paid effects can run more than once for one sale (the QR poll, the webhook,
+// a retry), so each unit carries a reference the unique index on
+// (account_id, source_line_id) holds to one code. Counted per product rather
+// than per line, so the reference does not depend on the order lines are read
+// back in.
+function saleCouponRef(transactionId: string, productId = "", unit = 0) {
+  return productId ? `pos:${transactionId}:${productId}:${unit}` : `pos:${transactionId}:`;
+}
+
 async function issueCouponsForSale(
   accountId: string,
   row: Record<string, unknown>,
-  items: ResolvedPosItem[],
+  items: Array<StockLine & { isVoucher?: boolean; unitPrice?: number; lineTotal?: number }>,
 ) {
-  const voucherItems = items.filter((item) => item.isVoucher && item.lineTotal > 0);
-  if (!voucherItems.length) return [] as unknown[];
-
-  const issued: unknown[] = [];
+  const voucherItems = items.filter((item) => item.isVoucher && (Number(item.lineTotal) || 0) > 0);
+  const transactionId = String(row.id ?? "");
+  const units = new Map<string, number>();
   for (const item of voucherItems) {
     // One coupon per unit, not one per line: two vouchers bought together are
     // two gifts, and they need two codes.
     for (let copy = 0; copy < item.quantity; copy += 1) {
+      const unit = units.get(item.productId) || 0;
+      units.set(item.productId, unit + 1);
       try {
-        const coupon = await issueCoupon(accountId, {
-          value: item.unitPrice,
+        await issueCoupon(accountId, {
+          value: Number(item.unitPrice) || round2((Number(item.lineTotal) || 0) / Math.max(1, item.quantity)),
           currency: String(row.currency ?? ""),
-          issuedToName: String(row.customer_name ?? ""),
+          // A gift bought online names who it is for; the buyer is still on the
+          // sale and on the coupon's client.
+          issuedToName: String(row.gift_recipient_name || row.customer_name || ""),
           issuedToEmail: String(row.customer_email ?? ""),
           customerId: String(row.customer_id ?? ""),
-          source: "pos",
+          source: row.source === "online" ? "online" : "pos",
           productId: item.productId,
+          sourceLineId: saleCouponRef(transactionId, item.productId, unit),
           note: `Sold on ${row.receipt_number}`,
         });
-        if (coupon) issued.push(coupon);
       } catch (error) {
         // The money is already taken; a failed coupon write must not undo the
         // sale. It shows up as a sale with no voucher, which is fixable by hand.
@@ -3743,7 +3747,16 @@ async function issueCouponsForSale(
       }
     }
   }
-  return issued;
+}
+
+/** Every code a sale has issued, however many times its paid effects ran. */
+async function couponsForSale(accountId: string, transactionId: string) {
+  const rows = (await supabase("billing_coupons", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}` +
+      `&source_line_id=like.${encodeFilter(`${saleCouponRef(transactionId)}*`)}&order=created_at.asc`,
+  })) as Array<Record<string, unknown>>;
+  return rows.map(couponRowToApi);
 }
 
 // Refunding or voiding a sale puts the voucher value back; re-paying it takes
@@ -3793,7 +3806,16 @@ async function syncPosCoupon(accountId: string, row: Record<string, unknown>, st
   });
 }
 
-export async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
+/** What only the server may say about a sale: the till cannot ring one up as "online". */
+type PosSaleOrigin = {
+  online?: { giftRecipientName?: string; giftMessage?: string };
+};
+
+export async function createPosTransaction(
+  accountId: string,
+  body: Record<string, unknown>,
+  origin: PosSaleOrigin = {},
+) {
   // Everything here depends only on the account and the request, so it is read
   // in one go rather than one after another: at ~200 ms a round trip, the
   // serial version was most of why recording an Eftpos sale took two seconds.
@@ -3848,7 +3870,11 @@ export async function createPosTransaction(accountId: string, body: Record<strin
   // paid on creation - except "On account", which is money still owed.
   const status = method.kind === "clarity_pay" ? "pending" : method.settlesImmediately ? "paid" : "pending";
   const listedAmountRaw = body?.listedAmount;
-  const source = ["lesson", "client", "counter"].includes(String(body?.source)) ? String(body.source) : "counter";
+  const source = origin.online
+    ? "online"
+    : ["lesson", "client", "counter"].includes(String(body?.source))
+      ? String(body.source)
+      : "counter";
 
   // Reserve the coupon BEFORE the sale row exists. The reservation is the part
   // that can legitimately fail (someone else just spent it, it expired between
@@ -3946,6 +3972,8 @@ export async function createPosTransaction(accountId: string, body: Record<strin
     stripe_session_id: null as string | null,
     stripe_payment_intent_id: null as string | null,
     note: cleanString(body?.note, "", 600) || null,
+    gift_recipient_name: cleanString(origin.online?.giftRecipientName, "", 140) || null,
+    gift_message: cleanString(origin.online?.giftMessage, "", 500) || null,
     paid_at: status === "paid" ? nowIso() : null,
     created_at: nowIso(),
     updated_at: nowIso(),
@@ -4009,14 +4037,13 @@ export async function createPosTransaction(accountId: string, body: Record<strin
   }
 
   await insertPosItems(accountId, String(row.id), items);
-  // Selling a voucher product is what creates a voucher. Done after the sale
-  // exists so a coupon can never outlive a receipt that failed to write.
-  const issuedCoupons = await issueCouponsForSale(accountId, row, items);
   // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
-  // the shelf and the passes are issued now. Clarity Pay and On account wait
-  // for their status change: a pending Clarity Pay payment is not a purchase,
-  // and credits handed out before it clears are credits handed out for nothing.
+  // the shelf and the passes and voucher codes are issued now. Clarity Pay and
+  // On account wait for their status change: a pending Clarity Pay payment is
+  // not a purchase, and credits or codes handed out before it clears are
+  // handed out for nothing.
   const { issuedPasses } = status === "paid" ? await applyPosPaidEffects(accountId, row, items) : { issuedPasses: [] };
+  const issuedCoupons = status === "paid" ? await couponsForSale(accountId, String(row.id)) : [];
 
   return {
     issuedCoupons,
@@ -4266,7 +4293,22 @@ async function applyPosPaidEffects(
   const items = knownItems || (await posItemsForTransactions(accountId, [id]))[id] || [];
   await syncPosStock(accountId, id, "paid", items);
   await syncPosCoupon(accountId, row, "paid");
+  await issueCouponsForSale(accountId, row, await withVoucherFlags(accountId, items));
   return { issuedPasses: await issuePassesForPosSale(accountId, row, items) };
+}
+
+// A basket the caller just resolved knows which lines are vouchers; one read
+// back from the items table does not, so the flag comes off the product rows.
+async function withVoucherFlags<T extends StockLine & { isVoucher?: boolean }>(accountId: string, items: T[]) {
+  if (items.every((item) => typeof item.isVoucher === "boolean")) return items;
+  const ids = [...new Set(items.map((item) => item.productId).filter((id) => id && !id.startsWith(LESSON_ITEM_PREFIX)))];
+  if (!ids.length) return items;
+  const list = ids.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+  const rows = (await supabase("billing_products_services", {
+    query: `select=id,is_voucher&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+  })) as Array<Record<string, unknown>>;
+  const vouchers = new Set(rows.filter((entry) => entry.is_voucher === true).map((entry) => String(entry.id)));
+  return items.map((item) => ({ ...item, isVoucher: vouchers.has(item.productId) }));
 }
 
 async function posCardDueCentsFor(accountId: string, id: string) {
@@ -4388,7 +4430,9 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
 async function syncPosCheckout(accountId: string, id: string) {
   const transaction = await getPosTransaction(accountId, id);
   if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
-  if (transaction.status === "paid") return { transaction, paid: true };
+  // Settled already -- by the webhook, or an earlier poll -- still shows the
+  // codes, or a till that missed the moment would never see them.
+  if (transaction.status === "paid") return { transaction, paid: true, issuedCoupons: await couponsForSale(accountId, id) };
 
   const rows = await supabase("billing_pos_transactions", {
     query: `select=stripe_session_id&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
@@ -4407,7 +4451,12 @@ async function syncPosCheckout(accountId: string, id: string) {
     paymentIntentId: session.paymentIntentId || sessionId,
     amountCents: session.amountTotal,
   });
-  return { transaction: settled.transaction, paid: true, issuedPasses: settled.issuedPasses };
+  return {
+    transaction: settled.transaction,
+    paid: true,
+    issuedPasses: settled.issuedPasses,
+    issuedCoupons: await couponsForSale(accountId, id),
+  };
 }
 
 // --- Tap to Pay (Stripe Terminal) --------------------------------------------
@@ -4475,7 +4524,13 @@ async function posTendersFor(accountId: string, transactionId: string) {
 async function terminalPaidResponse(accountId: string, transactionId: string, issuedPasses: string[] = []) {
   const transaction = await getPosTransaction(accountId, transactionId);
   if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
-  return { state: "succeeded" as const, transaction, tenders: await posTendersFor(accountId, transactionId), issuedPasses };
+  return {
+    state: "succeeded" as const,
+    transaction,
+    tenders: await posTendersFor(accountId, transactionId),
+    issuedPasses,
+    issuedCoupons: await couponsForSale(accountId, transactionId),
+  };
 }
 
 /** A Terminal intent Stripe says succeeded: settle the sale it belongs to. */
@@ -5181,8 +5236,17 @@ async function insertCouponRow(row: Record<string, unknown>) {
       if (status !== 409) throw error;
       // A 409 is either a duplicate code (retry with a new one) or a duplicate
       // source line, which means this purchase already has a coupon and must
-      // not get a second.
-      if (row.source_line_id) return null;
+      // not get a second. Which one is asked rather than assumed: every till
+      // voucher carries a source line now, and taking a clash of random codes
+      // for "already issued" would leave a paid-for voucher with no code.
+      if (row.source_line_id) {
+        const existing = (await supabase("billing_coupons", {
+          query:
+            `select=id&account_id=eq.${encodeFilter(String(row.account_id ?? ""))}` +
+            `&source_line_id=eq.${encodeFilter(String(row.source_line_id))}&limit=1`,
+        })) as unknown[];
+        if (existing.length) return null;
+      }
       if (attempt >= 5) throw error;
       row.code = generateCouponCode();
     }
@@ -5220,7 +5284,7 @@ async function issueCoupon(
     issued_to_name: cleanString(input.issuedToName, "", 140) || null,
     issued_to_email: cleanString(input.issuedToEmail, "", 180) || null,
     customer_id: cleanString(input.customerId, "", 160) || null,
-    source: ["stripe", "pos", "manual"].includes(String(input.source)) ? String(input.source) : "manual",
+    source: ["stripe", "pos", "manual", "online"].includes(String(input.source)) ? String(input.source) : "manual",
     product_id: cleanString(input.productId, "", 160) || null,
     source_line_id: cleanString(input.sourceLineId, "", 200) || null,
     source_invoice_id: cleanString(input.sourceInvoiceId, "", 200) || null,
@@ -5634,11 +5698,39 @@ async function stripeChargesSince(accountId: string, sinceEpoch: number) {
   return all;
 }
 
+/**
+ * The card payments Clarity itself took for a sale: the till's QR, Tap to Pay,
+ * the online shop, a portal purchase. Each is recorded as a tender against the
+ * payment intent, and none of them is a voucher waiting for a code -- a voucher
+ * sold through Clarity got its code when the sale was paid. Without this an
+ * online voucher sale, which names "Gift Voucher" on Stripe's page, is exactly
+ * what the scan looks for, and importing it would mint a second code.
+ */
+async function paymentIntentsSettledByClarity(accountId: string) {
+  const rows = (await supabase("billing_payment_tenders", {
+    query:
+      `select=external_payment_ref&account_id=eq.${encodeFilter(accountId)}` +
+      `&tender_kind=eq.card&external_payment_ref=not.is.null&limit=10000`,
+  }).catch(() => [])) as Array<{ external_payment_ref?: string }>;
+  return new Set(rows.map((row) => String(row.external_payment_ref ?? "")).filter(Boolean));
+}
+
+function chargePaymentIntentId(charge: Record<string, any>) {
+  const intent = charge?.payment_intent;
+  return String((intent && typeof intent === "object" ? intent.id : intent) || "");
+}
+
 async function stripeVoucherCandidates(accountId: string, url: URL) {
   const days = Math.max(1, Math.min(1825, cleanNumber(url.searchParams.get("days"), VOUCHER_SCAN_DEFAULT_DAYS)));
   const sinceEpoch = Math.floor(Date.now() / 1000) - days * 86400;
 
-  const charges = (await stripeChargesSince(accountId, sinceEpoch)).filter(chargeIsClaimable);
+  const [fetched, settledByClarity] = await Promise.all([
+    stripeChargesSince(accountId, sinceEpoch),
+    paymentIntentsSettledByClarity(accountId),
+  ]);
+  const charges = fetched.filter(
+    (charge) => chargeIsClaimable(charge) && !settledByClarity.has(chargePaymentIntentId(charge)),
+  );
 
   /* What was in the basket, for the charges that named nothing themselves.
    *
@@ -5754,13 +5846,14 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
   const issued: unknown[] = [];
   const skipped: string[] = [];
   let clientsAdded = 0;
+  const settledByClarity = await paymentIntentsSettledByClarity(accountId);
   for (const chargeId of wanted) {
     const params = new URLSearchParams();
     params.append("expand[]", "payment_intent");
     const charge = (await stripeRequest(accountId, `charges/${encodeURIComponent(chargeId)}`, {
       params,
     })) as Record<string, any>;
-    if (!chargeIsClaimable(charge)) {
+    if (!chargeIsClaimable(charge) || settledByClarity.has(chargePaymentIntentId(charge))) {
       skipped.push(chargeId);
       continue;
     }
@@ -5822,6 +5915,438 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
     else skipped.push(chargeId);
   }
   return { issued, issuedCount: issued.length, skipped: skipped.length, clientsAdded };
+}
+
+// --- Online shop -------------------------------------------------------------
+// Packages and gift vouchers bought from the public shop page. An order is a
+// pending till sale with source 'online', paid through Stripe Checkout and
+// settled by settlePosCardPayment like the counter's QR -- see
+// _shared/online-shop.mts for why. What lives here is only what is different
+// about a stranger doing the ringing up: who they are, when an abandoned order
+// is given up on, and the email that carries their code.
+
+// Stripe Checkout closes after this; an unpaid online order older than
+// ABANDONED_AFTER can therefore never be paid, and is voided.
+const ONLINE_CHECKOUT_MINUTES = 60;
+const ONLINE_ORDER_ABANDONED_AFTER_MS = 2 * 60 * 60 * 1000;
+// Starting a checkout is open to anyone, so the number of unpaid orders an
+// account can be handed in an hour is capped. Far above a real shop's hour.
+const ONLINE_ORDERS_PER_HOUR = 30;
+
+type OnlineShopState = {
+  /** The coach's switch. */
+  enabled: boolean;
+  /** Whether a customer can actually buy right now. */
+  open: boolean;
+  /** Why not, when the switch is on and it still cannot sell. */
+  blocker: "" | "card_payments" | "nothing_for_sale";
+  businessName: string;
+  currency: string;
+  items: ReturnType<typeof onlineShopItems>;
+  paymentMethodId: string;
+};
+
+async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
+  const [switchValue, connection, services, products, currency, methods, branding] = await Promise.all([
+    readSettingValue(accountId, ONLINE_SHOP_SETTING),
+    accountStripeConnection(accountId),
+    readServiceList(accountId),
+    supabase("billing_products_services", {
+      query: `select=id,name,description,default_price,active,is_voucher&account_id=eq.${encodeFilter(accountId)}&is_voucher=is.true`,
+    }),
+    resolveDefaultCurrency(accountId),
+    listPaymentMethodRows(accountId),
+    resolveInvoiceBranding(accountId),
+  ]);
+  const enabled = onlineShopSwitchedOn(switchValue);
+  // Clarity Pay only, like the player portal: a business on its own Stripe
+  // takes invoice payments and nothing else.
+  const method = methods.find((entry) => entry.kind === "clarity_pay" && entry.active);
+  const canTakeCards = stripeCredentialStatus(connection).features.portal && Boolean(method);
+  const items = onlineShopItems(services, products, currency);
+  const blocker = !canTakeCards ? "card_payments" : !items.length ? "nothing_for_sale" : "";
+  return {
+    enabled,
+    open: enabled && !blocker,
+    blocker,
+    businessName: branding.businessName,
+    currency,
+    items,
+    paymentMethodId: method?.id || "",
+  };
+}
+
+/** The shop as the public page sees it. Closed means no items at all. */
+export async function publicOnlineShop(accountId: string) {
+  const shop = await readOnlineShop(accountId);
+  return {
+    open: shop.open,
+    businessName: shop.businessName,
+    currency: shop.currency,
+    items: shop.open ? shop.items : [],
+  };
+}
+
+/** The coach's view: the switch, and what a customer would see. */
+async function coachOnlineShop(accountId: string) {
+  const shop = await readOnlineShop(accountId);
+  return { enabled: shop.enabled, open: shop.open, blocker: shop.blocker, items: shop.items };
+}
+
+async function writeOnlineShop(accountId: string, body: Record<string, unknown>) {
+  await supabase("settings", {
+    method: "POST",
+    query: SETTINGS_UPSERT_QUERY,
+    prefer: "resolution=merge-duplicates",
+    body: settingsUpsertRows(accountId, { [ONLINE_SHOP_SETTING]: body?.enabled === true ? "true" : "false" }, nowIso()),
+  });
+  return coachOnlineShop(accountId);
+}
+
+/**
+ * Void the online orders nobody paid for.
+ *
+ * Their Checkout pages closed an hour after they opened, so Stripe can no
+ * longer take money for them, and a pending sale that will never be paid only
+ * clutters the sales list. Nothing was reserved for a pending online sale --
+ * no stock, no voucher value, no credit -- so voiding is just the status.
+ * Runs whenever somebody starts a new order, which is when the clutter grows.
+ */
+async function voidAbandonedOnlineOrders(accountId: string) {
+  const before = new Date(Date.now() - ONLINE_ORDER_ABANDONED_AFTER_MS).toISOString();
+  await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query:
+      `account_id=eq.${encodeFilter(accountId)}&source=eq.online&status=eq.pending` +
+      `&created_at=lt.${encodeFilter(before)}`,
+    body: { status: "void", updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+}
+
+/** Start an order: a pending sale, and the Stripe page that pays for it. */
+export async function startOnlineOrder(
+  accountId: string,
+  body: Record<string, unknown>,
+  page: { origin: string; business: string },
+) {
+  const shop = await readOnlineShop(accountId);
+  if (!shop.open) throw Object.assign(new Error("This shop is not open."), { status: 409, code: "SHOP_CLOSED" });
+  const read = readOnlineOrder(body, shop.items);
+  if ("error" in read) throw Object.assign(new Error(read.error), { status: 400, code: "INVALID_ORDER" });
+  const { order, item } = read;
+
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recent = (await supabase("billing_pos_transactions", {
+    query:
+      `select=id&account_id=eq.${encodeFilter(accountId)}&source=eq.online` +
+      `&created_at=gte.${encodeFilter(hourAgo)}&limit=${ONLINE_ORDERS_PER_HOUR}`,
+  })) as unknown[];
+  if (recent.length >= ONLINE_ORDERS_PER_HOUR) {
+    throw Object.assign(new Error("The shop is busy. Try again in a little while."), { status: 429, code: "SHOP_BUSY" });
+  }
+  await voidAbandonedOnlineOrders(accountId).catch((error) =>
+    console.error("billing_api:online_sweep_failed", accountId, error),
+  );
+
+  const { transaction } = await createPosTransaction(
+    accountId,
+    {
+      items: [{ productId: item.id, quantity: 1 }],
+      paymentMethodId: shop.paymentMethodId,
+      customerName: order.name,
+      customerEmail: order.email,
+    },
+    { online: { giftRecipientName: order.recipientName, giftMessage: order.message } },
+  );
+
+  const branding = await resolveInvoiceBranding(accountId);
+  const mt = messageText(branding.messageLanguage);
+  const shopPath = `${page.origin}/${encodeURIComponent(page.business)}/shop`;
+  let session;
+  try {
+    session = await createStripeCheckoutSessionWith(await stripeFor(accountId), {
+      // The whole sale: an online order has no voucher or credit paying part of it.
+      amount: transaction.amount,
+      currency: transaction.currency,
+      productName: `${item.name} - ${branding.businessName}`,
+      productDescription: order.recipientName ? mt("For {name}", { name: order.recipientName }) : "",
+      customerEmail: order.email,
+      clientReferenceId: transaction.id,
+      metadata: { pos_transaction_id: transaction.id, account_id: accountId, receipt_number: transaction.receiptNumber },
+      successUrl: `${shopPath}?order=${encodeURIComponent(transaction.id)}`,
+      cancelUrl: `${shopPath}?cancelled=${encodeURIComponent(transaction.id)}`,
+      expiresInMinutes: ONLINE_CHECKOUT_MINUTES,
+    });
+  } catch (error) {
+    // No page to pay on means no order. Voided rather than left pending, so the
+    // sales list does not show a sale nobody could have paid.
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(transaction.id)}&account_id=eq.${encodeFilter(accountId)}&status=eq.pending`,
+      body: { status: "void", updated_at: nowIso() },
+      prefer: "return=minimal",
+    }).catch(() => null);
+    throw error;
+  }
+  await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(transaction.id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { stripe_session_id: session.sessionId, updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+  return { url: session.url, orderId: transaction.id };
+}
+
+async function onlineOrderRow(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, cleanString(id, "", 160));
+  // Only the shop's own sales answer to the public routes. A till sale's id
+  // must not become something a stranger can poll.
+  return row && row.source === "online" ? row : null;
+}
+
+/**
+ * File an online buyer under a client before their purchase is settled.
+ *
+ * A package's pass and a voucher's coupon are issued to the sale's customer,
+ * so this runs first. One existing client with that email is them. Several is
+ * ambiguous and is left alone: the pass is issued unassigned and waits in the
+ * Pass inbox, where a person picks, which beats guessing between two people.
+ * None, and a client is added under a key derived from the sale -- see
+ * onlineBuyerPersonId for why two callers at once cannot make two.
+ */
+async function ensureOnlineBuyer(accountId: string, row: Record<string, unknown>) {
+  if (cleanString(row.customer_id, "", 160)) return;
+  const id = String(row.id ?? "");
+  const email = cleanString(row.customer_email, "", 180).toLowerCase();
+  const matches = email
+    ? ((await supabase("people", {
+        query: `select=id,email&account_id=eq.${encodeFilter(accountId)}&email=ilike.${encodeFilter(email)}&limit=10`,
+      })) as Array<{ id?: unknown; email?: unknown }>)
+        .filter((person) => String(person.email ?? "").toLowerCase() === email)
+        .map((person) => String(person.id ?? ""))
+    : [];
+  if (matches.length > 1) return;
+  let personId = matches[0] || "";
+  if (!personId) {
+    personId = onlineBuyerPersonId(id);
+    await supabase("people", {
+      method: "POST",
+      query: "on_conflict=id",
+      prefer: "resolution=ignore-duplicates,return=minimal",
+      body: [
+        {
+          id: personId,
+          account_id: accountId,
+          name: cleanString(row.customer_name, "", 140) || email || "Online customer",
+          email: email || null,
+          source: "online_shop",
+          external: false,
+        },
+      ],
+    });
+  }
+  await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&customer_id=is.null`,
+    body: { customer_id: personId, updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+}
+
+/**
+ * Settle an online order Stripe says is paid. Safe to call any number of times;
+ * only the call that wins the paid transition sends the email.
+ */
+async function settleOnlineOrder(accountId: string, row: Record<string, unknown>, card: CardPayment) {
+  const id = String(row.id ?? "");
+  await ensureOnlineBuyer(accountId, row);
+  const settled = await settlePosCardPayment(accountId, id, card);
+  if (!settled.alreadyPaid) {
+    await emailOnlineOrder(accountId, id).catch((error) =>
+      console.error("billing_api:online_order_email_failed", accountId, id, error),
+    );
+  }
+  return settled;
+}
+
+/** What the return page shows. The codes are the buyer's: they hold the order id. */
+async function onlineOrderSummary(accountId: string, row: Record<string, unknown>) {
+  const id = String(row.id ?? "");
+  const paid = row.status === "paid";
+  const coupons = paid ? await couponsForSale(accountId, id) : [];
+  return {
+    status: String(row.status ?? ""),
+    receiptNumber: String(row.receipt_number ?? ""),
+    description: String(row.description ?? ""),
+    amount: Number(row.amount) || 0,
+    currency: String(row.currency ?? ""),
+    email: String(row.customer_email ?? ""),
+    recipientName: String(row.gift_recipient_name ?? ""),
+    vouchers: coupons.map((coupon) => ({ code: coupon.code, value: coupon.originalValue, currency: coupon.currency })),
+  };
+}
+
+/** The return page's poll: has this order been paid yet? */
+export async function confirmOnlineOrder(accountId: string, orderId: unknown) {
+  let row = await onlineOrderRow(accountId, String(orderId ?? ""));
+  if (!row) throw Object.assign(new Error("That order was not found."), { status: 404, code: "ORDER_NOT_FOUND" });
+  const sessionId = cleanString(row.stripe_session_id, "", 200);
+  if (row.status === "pending" && sessionId) {
+    const session = await retrieveStripeCheckoutSession(accountId, sessionId);
+    if (session.paid) {
+      await settleOnlineOrder(accountId, row, {
+        channel: "stripe_checkout",
+        paymentIntentId: session.paymentIntentId || sessionId,
+        amountCents: session.amountTotal,
+      });
+    } else if (session.expired) {
+      await cancelOnlineOrder(accountId, String(row.id ?? ""));
+    }
+    row = (await onlineOrderRow(accountId, String(row.id ?? ""))) || row;
+  }
+  return onlineOrderSummary(accountId, row);
+}
+
+/**
+ * The buyer came back from Stripe without paying. The order is voided unless
+ * Stripe says it was paid after all -- a back button pressed after paying is
+ * a paid order, not a cancelled one.
+ */
+export async function cancelOnlineOrder(accountId: string, orderId: unknown) {
+  const row = await onlineOrderRow(accountId, String(orderId ?? ""));
+  if (!row || row.status !== "pending") return { ok: true };
+  const sessionId = cleanString(row.stripe_session_id, "", 200);
+  if (sessionId && (await retrieveStripeCheckoutSession(accountId, sessionId)).paid) {
+    return confirmOnlineOrder(accountId, row.id);
+  }
+  await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(String(row.id ?? ""))}&account_id=eq.${encodeFilter(accountId)}&status=eq.pending`,
+    body: { status: "void", updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+  return { ok: true };
+}
+
+/**
+ * Stripe's checkout.session.completed for a sale: an online order, or a till
+ * QR the counter stopped watching before the customer paid. The poll settles
+ * either when someone is looking; this settles it when nobody is.
+ *
+ * A sale that does not add up (wrong amount, voided first) is reported, not
+ * thrown: settlePosTransaction refuses those for a person to sort out, and a
+ * webhook that fails would only have Stripe retry it for three days.
+ */
+export async function settlePosCheckoutFromWebhook(accountId: string, session: Record<string, unknown>) {
+  const metadata = (session?.metadata || {}) as Record<string, string>;
+  const id = cleanString(metadata.pos_transaction_id, "", 160);
+  if (!id || metadata.account_id !== accountId) return null;
+  if (session.payment_status !== "paid") return { ignored: "not_paid", sale: id };
+  const row = await posTransactionRow(accountId, id);
+  if (!row) return { ignored: "unknown_sale", sale: id };
+  const card: CardPayment = {
+    channel: "stripe_checkout",
+    paymentIntentId: String(session.payment_intent || session.id || ""),
+    amountCents: Number(session.amount_total) || 0,
+  };
+  try {
+    const settled =
+      row.source === "online" ? await settleOnlineOrder(accountId, row, card) : await settlePosCardPayment(accountId, id, card);
+    return { settled: id, alreadyPaid: settled.alreadyPaid };
+  } catch (error) {
+    if ((error as { status?: number })?.status !== 409) throw error;
+    console.error("billing_api:checkout_webhook_needs_attention", accountId, id, (error as Error).message);
+    return { needsAttention: (error as { code?: string }).code || "conflict", sale: id };
+  }
+}
+
+/** The buyer's receipt, with their voucher code or a word about their package. */
+async function emailOnlineOrder(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, id);
+  const to = cleanString(row?.customer_email, "", 180);
+  if (!row || !to) return;
+  const branding = await resolveInvoiceBranding(accountId);
+  const mt = messageText(branding.messageLanguage);
+  const currency = String(row.currency || "NZD");
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  const coupons = await couponsForSale(accountId, id);
+  const recipient = cleanString(row.gift_recipient_name, "", 140);
+  const message = cleanString(row.gift_message, "", 500);
+  const packages = items.filter((item) => item.productId.startsWith(LESSON_ITEM_PREFIX)).map((item) => item.name);
+
+  const greeting = row.customer_name ? mt("Hi {name},", { name: String(row.customer_name) }) : mt("Hi there,");
+  const lines = items.map((item) => ({ label: item.name, amount: formatMoney(item.lineTotal, currency) }));
+  const total = formatMoney(row.amount, currency);
+  const voucherLines = coupons.map((coupon) => ({
+    code: mt("Gift voucher code: {code}", { code: coupon.code }),
+    worth: mt("Worth {amount}", { amount: formatMoney(coupon.originalValue, coupon.currency) }),
+  }));
+  const packageLines = packages.map((name) => mt("{item} is on your account.", { item: name }));
+
+  const text = [
+    greeting,
+    "",
+    mt("Thanks for your purchase. Here is your receipt."),
+    "",
+    mt("Receipt: {number}", { number: String(row.receipt_number ?? "") }),
+    ...lines.map((line) => `${line.label}: ${line.amount}`),
+    mt("Total: {amount}", { amount: total }),
+    mt("Paid by card"),
+    "",
+    ...voucherLines.flatMap((line) => [line.code, line.worth]),
+    recipient ? mt("For {name}", { name: recipient }) : "",
+    message ? `"${message}"` : "",
+    voucherLines.length ? mt("Show this code when you pay and its value comes off the bill.") : "",
+    ...packageLines,
+    "",
+    mt("Thanks,"),
+    branding.businessName,
+  ]
+    .filter((line, index, all) => line !== "" || all[index - 1] !== "")
+    .join("\n");
+
+  const row2 = (label: string, amount: string, bold = false) =>
+    `<tr><td style="padding:4px 0;${bold ? "font-weight:600;" : ""}">${escapeHtml(label)}</td>` +
+    `<td style="padding:4px 0;text-align:right;${bold ? "font-weight:600;" : ""}">${escapeHtml(amount)}</td></tr>`;
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f;max-width:480px">` +
+    `<p style="margin:0 0 8px">${escapeHtml(greeting)}</p>` +
+    `<p style="margin:0 0 16px">${escapeHtml(mt("Thanks for your purchase. Here is your receipt."))}</p>` +
+    voucherLines
+      .map(
+        (line) =>
+          `<div style="margin:0 0 16px;padding:12px 16px;border:1px solid #d9dce1;border-radius:8px">` +
+          `<p style="margin:0;font-size:18px;font-weight:600;letter-spacing:0.04em">${escapeHtml(line.code)}</p>` +
+          `<p style="margin:4px 0 0;color:#5b6068">${escapeHtml(line.worth)}</p>` +
+          (recipient ? `<p style="margin:4px 0 0">${escapeHtml(mt("For {name}", { name: recipient }))}</p>` : "") +
+          (message ? `<p style="margin:8px 0 0;font-style:italic">${escapeHtml(message)}</p>` : "") +
+          `</div>`,
+      )
+      .join("") +
+    (voucherLines.length
+      ? `<p style="margin:0 0 16px">${escapeHtml(mt("Show this code when you pay and its value comes off the bill."))}</p>`
+      : "") +
+    packageLines.map((line) => `<p style="margin:0 0 16px">${escapeHtml(line)}</p>`).join("") +
+    `<p style="margin:0 0 8px;color:#5b6068">${escapeHtml(String(row.receipt_number ?? ""))}</p>` +
+    `<table style="width:100%;border-collapse:collapse;border-top:1px solid #d9dce1;border-bottom:1px solid #d9dce1">` +
+    lines.map((line) => row2(line.label, line.amount)).join("") +
+    row2(mt("Total"), total, true) +
+    row2(mt("Paid by card"), total) +
+    `</table>` +
+    `<p style="margin:16px 0 0">${escapeHtml(mt("Thanks,"))}<br/>${escapeHtml(branding.businessName)}</p>` +
+    `</div>`;
+
+  const result = await deliverEmail({
+    accountId,
+    to,
+    subject: mt("Your purchase from {businessName}", { businessName: branding.businessName }),
+    text,
+    html,
+    replyTo: branding.contactEmail || undefined,
+    idempotencyKey: `online-order-${id}`,
+  });
+  if (!result.sent) console.error("billing_api:online_order_email_not_sent", accountId, id, result.reason);
 }
 
 // --- Router ------------------------------------------------------------------
@@ -5947,6 +6472,11 @@ export default async function handler(req: Request) {
 
     // POS. Its own namespace and its own tables - nothing under pos/ touches
     // billing_invoices, and nothing above this line reads billing_pos_transactions.
+    if (action === "online-shop" && req.method === "GET") return json(await coachOnlineShop(accountId));
+    if (action === "online-shop" && (req.method === "PUT" || req.method === "POST")) {
+      return json(await writeOnlineShop(accountId, await parseBody(req)));
+    }
+
     if (action === "pos/payment-methods" && req.method === "GET") return json(await listPaymentMethods(accountId));
     if (action === "pos/payment-methods" && req.method === "POST") {
       return json(await createPaymentMethod(accountId, await parseBody(req)), 201);

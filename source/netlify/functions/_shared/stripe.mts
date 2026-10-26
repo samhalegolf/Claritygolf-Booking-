@@ -284,6 +284,12 @@ export type StripeCheckoutInput = {
   metadata?: Record<string, string>;
   successUrl: string;
   cancelUrl: string;
+  /**
+   * Close the page after this long instead of Stripe's 24 hours. Stripe allows
+   * 30 minutes at the least. Used where an unpaid session holds something open
+   * -- an online order -- so "nobody can pay this any more" has a known time.
+   */
+  expiresInMinutes?: number;
 };
 
 export async function createStripeCheckoutSession(
@@ -306,6 +312,10 @@ export async function createStripeCheckoutSession(
     if (value) params.set(`metadata[${key}]`, value);
   }
   if (input.customerEmail) params.set("customer_email", input.customerEmail);
+  if (input.expiresInMinutes) {
+    const minutes = Math.max(30, Math.min(24 * 60, Math.round(input.expiresInMinutes)));
+    params.set("expires_at", String(Math.floor(Date.now() / 1000) + minutes * 60));
+  }
   // A single line for the whole total keeps the charged amount identical to our
   // record (no per-line rounding drift; tax is already reflected in the total).
   params.set("line_items[0][quantity]", "1");

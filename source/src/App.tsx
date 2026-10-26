@@ -17651,6 +17651,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             {billingSection === "settings" && (
               <Suspense fallback={<Loading what={t("billing settings")} />}>
                 <BillingSettingsPanel
+                  publicBusinessSlug={publicBusinessSlug}
                   stripeStatus={stripeStatus}
                   invoiceSettingsDraft={invoiceSettingsDraft}
                   billingSettingsIsLocked={billingSettingsIsLocked}
