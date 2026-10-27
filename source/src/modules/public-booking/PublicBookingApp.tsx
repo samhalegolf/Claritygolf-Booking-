@@ -1,6 +1,6 @@
 import "../../appStyles";
 import { Loading, loadingLabel } from "../shared/Loading";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, Mail, Plus, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen, publicApi, publicBookingRoute, publicShopHref, withBusiness } from "./bookingScreen";
@@ -15,7 +15,7 @@ type Service = { id: string; name: string; duration: number; price: number; pric
 /** A coach as the public catalogue names them: no contact details. */
 type Coach = { id: string; name: string; photoUrl?: string };
 /** Someone the booker is bringing to a custom group. The email is only asked for, and only sent, when they tick the invite. */
-type Attendee = { name: string; email: string; invite: boolean };
+type Attendee = { name: string; email: string; invite: boolean; handedness: Handedness };
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
 type Form = { firstName: string; lastName: string; phone: string; email: string };
 export type PublicBookingCustomer = { name?: string; email?: string; phone?: string };
@@ -59,9 +59,9 @@ type Handedness = "right" | "left";
  *  and read out as the option's description. */
 const NO_BAY_FOR_SWING = t("No bay is free at that time for your swing. Please pick another time above.");
 
-const handednessOptions: Array<{ value: Handedness; label: string; explainer: string }> = [
-  { value: "right", label: t("Right handed"), explainer: t("You stand on the left side of the ball, with your left shoulder closest to the target. Most players swing this way.") },
-  { value: "left", label: t("Left handed"), explainer: t("You stand on the right side of the ball, with your right shoulder closest to the target. We'll book you into one of our left-handed-friendly bays.") },
+const handednessOptions: Array<{ value: Handedness; label: string; short: string; explainer: string }> = [
+  { value: "right", label: t("Right handed"), short: t("R"), explainer: t("You stand on the left side of the ball, with your left shoulder closest to the target. Most players swing this way.") },
+  { value: "left", label: t("Left handed"), short: t("L"), explainer: t("You stand on the right side of the ball, with your right shoulder closest to the target. We'll book you into one of our left-handed-friendly bays.") },
 ];
 function manageBookingUrl() { const url = new URL(location.href); url.searchParams.set("embed", "booking"); url.searchParams.set("mode", "reschedule"); return url.toString(); }
 
@@ -84,16 +84,27 @@ const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function blankAttendees(service: Service | null): Attendee[] {
   if (!service || !(service.customGroup || service.customGroupEnabled)) return [];
   // One row per person still needed to make the group up.
-  return Array.from({ length: Math.max(1, customGroupMinParticipants(groupModel(service)) - 1) }, () => ({ name: "", email: "", invite: false }));
+  return Array.from({ length: Math.max(1, customGroupMinParticipants(groupModel(service)) - 1) }, () => blankAttendee());
+}
+function blankAttendee(): Attendee { return { name: "", email: "", invite: false, handedness: "right" }; }
+
+/** A player's swing as a small R / L toggle, for a row in the group list. The
+ *  initials keep it narrow; the full label and explainer are its name and tip. */
+function SwingToggle({ value, onChange, label }: { value: Handedness; onChange: (next: Handedness) => void; label: string }) {
+  return <div aria-label={label} className="booking-handedness booking-swing" role="radiogroup">
+    {handednessOptions.map((option) => <button aria-checked={value === option.value} aria-label={option.label} className={value === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => onChange(option.value)} role="radio" title={`${option.label}. ${option.explainer}`} type="button">{option.short}</button>)}
+  </div>;
 }
 
 /**
- * Who else is coming to a custom group. A row per person: their name, and an
- * envelope to send them an invite, which asks for their email only once it is
- * ticked. The booker is the first row and is not edited here. The price for the
- * group as it stands, and each person's share, sit underneath.
+ * Who is coming to a custom group. The booker is the first place in the list,
+ * and their details (or the fields for them) live there rather than above it,
+ * so a signed-in player sees their name once. Then a row per other person:
+ * their name, their swing where the business asks, and an envelope to send
+ * them an invite, which asks for their email only once it is ticked. The price
+ * for the group as it stands, and each person's share, sit underneath.
  */
-function GroupAttendees({ service, account, bookerName, attendees, onChange }: { service: Service; account: Account; bookerName: string; attendees: Attendee[]; onChange: (next: Attendee[]) => void }) {
+function GroupAttendees({ service, account, booker, bookerSwing, askHandedness, attendees, onChange }: { service: Service; account: Account; booker: ReactNode; bookerSwing: ReactNode; askHandedness: boolean; attendees: Attendee[]; onChange: (next: Attendee[]) => void }) {
   const model = groupModel(service);
   const min = customGroupMinParticipants(model);
   const max = customGroupMaxParticipants(model);
@@ -101,19 +112,23 @@ function GroupAttendees({ service, account, bookerName, attendees, onChange }: {
   const total = calculateCustomGroupPrice(model, size);
   const share = Math.round((total / size) * 100) / 100;
   const update = (index: number, patch: Partial<Attendee>) => onChange(attendees.map((attendee, position) => (position === index ? { ...attendee, ...patch } : attendee)));
-  return <div className="booking-form booking-group">
-    <div className="booking-group-head"><span>{t("Who's coming")}</span><span className="booking-group-invite-head">{t("Send optional invite")}</span></div>
-    <div className="booking-group-row is-booker"><span className="booking-group-name">{bookerName.trim() || t("You")}</span><small>{t("You")}</small></div>
+  return <div className={`booking-form booking-group${askHandedness ? " has-swing" : ""}`}>
+    <div className="booking-group-head"><span>{t("Who's coming")}</span>{askHandedness ? <span className="booking-group-col-head">{t("Swing")}</span> : null}<span className="booking-group-invite-head">{t("Send optional invite")}</span></div>
+    <div className="booking-group-booker">
+      <div className="booking-group-row"><strong className="booking-group-name">{t("You")}</strong>{bookerSwing}</div>
+      {booker}
+    </div>
     {attendees.map((attendee, index) => {
       const label = attendee.name.trim() || t("Person {number}", { number: index + 2 });
       return <div className={`booking-group-row${attendee.invite ? " is-inviting" : ""}`} key={index}>
         <input aria-label={t("Name of person {number}", { number: index + 2 })} autoComplete="off" className="booking-group-name" onChange={(event) => update(index, { name: event.target.value })} placeholder={t("Name")} value={attendee.name} />
+        {askHandedness ? <SwingToggle onChange={(handedness) => update(index, { handedness })} value={attendee.handedness} label={t("Which way {name} swings", { name: label })} /> : null}
         <button aria-label={attendee.invite ? t("Don't send {name} an invite", { name: label }) : t("Send {name} an invite", { name: label })} aria-pressed={attendee.invite} className="booking-group-invite" onClick={() => update(index, { invite: !attendee.invite })} title={attendee.invite ? t("Invite on") : t("Send optional invite")} type="button"><Mail size={16} /></button>
         <button aria-label={t("Remove {name}", { name: label })} className="booking-group-remove" disabled={attendees.length <= 1} onClick={() => onChange(attendees.filter((_, position) => position !== index))} type="button"><X size={15} /></button>
         {attendee.invite ? <input aria-label={t("Email for {name}", { name: label })} autoComplete="off" className="booking-group-email" onChange={(event) => update(index, { email: event.target.value })} placeholder={t("Their email, for the invite")} type="email" value={attendee.email} /> : null}
       </div>;
     })}
-    <button className="booking-group-add" disabled={1 + attendees.length >= max} onClick={() => onChange([...attendees, { name: "", email: "", invite: false }])} type="button"><Plus size={15} />{t("Add another person")}</button>
+    <button className="booking-group-add" disabled={1 + attendees.length >= max} onClick={() => onChange([...attendees, blankAttendee()])} type="button"><Plus size={15} />{t("Add another person")}</button>
     <p className="booking-group-summary">
       <strong>{tn(size, "{count} person", "{count} people")} · {money(total, account)}</strong>
       <span>{size > 1 ? t("{share} each if you split it evenly", { share: money(share, account) }) : null}</span>
@@ -144,6 +159,9 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   // player stays remembered, and this booking is not remembered over them.
   const [forSomeoneElse, setForSomeoneElse] = useState(false);
   const [form, setForm] = useState<Form>(() => (remembered ? rememberedForm(remembered) : customerForm(customer)));
+  // A Player Portal customer whose name and email are already on file is shown
+  // as a card, like a remembered player, rather than as prefilled fields.
+  const signedInComplete = Boolean(customer?.name?.trim() && customer?.email?.trim());
   const [handedness, setHandedness] = useState<Handedness>(() => remembered?.handedness ?? "right");
   const [notes, setNotes] = useState("");
   const [attendees, setAttendees] = useState<Attendee[]>([]);
@@ -238,7 +256,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
     if (missingInviteEmail) { setError(t("Add an email for {name}, or untick their invite.", { name: missingInviteEmail.name.trim() })); return; }
     setSubmitState("saving"); setError("");
     try {
-      const response = await apiFetch(api("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), email: attendee.invite ? attendee.email.trim() : "" })) : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
+      const response = await apiFetch(api("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), email: attendee.invite ? attendee.email.trim() : "", ...(market.capabilities.handedness ? { handedness: attendee.handedness } : {}) })) : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.appointment?.id) throw new Error(data.message || t("That time is no longer available."));
       if (typeof data.rememberToken === "string" && data.rememberToken) {
@@ -257,6 +275,12 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const brandName = catalogue.account.businessName || catalogue.account.coachName || market.product.name;
   const terms = market.terminology;
   const askHandedness = market.capabilities.handedness;
+  // The booker's details: a card when they are known (remembered, or signed in
+  // to the Player Portal), the fields otherwise. A custom group shows them as
+  // the first place in its list of who's coming, everything else above notes.
+  const bookerDetails = <>{remembered && forSomeoneElse ? <div className="booking-remembered"><p><strong>{t("Booking for someone else")}</strong></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookAsRemembered} type="button">{t("Book as {name} instead", { name: remembered.firstName })}</button></div></div> : null}{(remembered && !forSomeoneElse || signedInComplete) && !editingDetails ? <div className="booking-remembered"><p><strong>{t("Booking as {name}", { name: `${form.firstName} ${form.lastName}`.trim() })}</strong><small>{form.email}</small></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={() => setEditingDetails(true)} type="button">{t("Edit details")}</button>{remembered ? <><button className="booking-progressive-change" onClick={bookForSomeoneElse} type="button">{t("Book for someone else")}</button><button className="booking-progressive-change" onClick={forgetMe} type="button">{t("Forget me")}</button></> : null}</div></div> : (["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? t("First name *") : key === "lastName" ? t("Last name *") : key === "phone" ? t("Phone") : t("Email *")} />)}{!customer && !remembered ? <label className="booking-remember"><input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />{t("Remember me on this device")}</label> : null}</>;
+  const swingChoice = askHandedness ? <fieldset className="booking-handedness"><legend>{t("Which way do you swing?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={t("Handedness")}>{handednessOptions.map((option) => <button aria-checked={handedness === option.value} aria-describedby={`handedness-tip-${option.value}`} className={handedness === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => setHandedness(option.value)} role="radio" type="button">{option.label}<span className="booking-handedness-tip" id={`handedness-tip-${option.value}`} role="tooltip">{option.explainer}</span></button>)}</div></fieldset> : null;
+  const notesBox = <textarea aria-label={t("Notes for your {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })} className="booking-notes" maxLength={800} onChange={(event) => setNotes(event.target.value)} placeholder={t("Notes for your {staffSingular} (optional) — anything useful before the booking", { staffSingular: terms.staffSingular.toLowerCase() })} value={notes} />;
   // The shop needs the business named in the path; a bare legacy link has none
   // to send it to. Not offered inside the Player Portal, which has its own shop.
   const shopBusiness = publicBookingRoute().business;
@@ -270,7 +294,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
     <div className="booking-columns booking-progressive-flow">
       <section className="booking-progressive-section is-open"><div className="booking-progressive-title"><span className="booking-progressive-title-label">1. {terms.serviceSingular}</span><span className="booking-progressive-title-state">{catalogueState === "loading" ? loadingLabel() : service ? changeButton(() => chooseService("")) : t("In progress")}</span></div><div className="booking-progressive-body"><div className="service-picker">{catalogueState === "error" ? <p role="alert">{t("Booking is unavailable. Please try again shortly.")}</p> : catalogueState === "loading" ? <Loading what={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular.toLowerCase() })} /> : services.length ? (service ? [service] : services).map((candidate) => <button className={candidate.id === serviceId ? "selected-service" : ""} key={candidate.id} onClick={() => chooseService(candidate.id === serviceId ? "" : candidate.id)} type="button"><strong>{candidate.name}</strong><em>{t("{duration} minutes @ {candidate}", { duration: candidate.duration, candidate: price(candidate, catalogue.account) })}</em>{candidate.description ? <small>{candidate.description}</small> : null}{candidate.lessonNote || candidate.location ? <small>{candidate.lessonNote || candidate.location}</small> : null}</button>) : <p>{t("No public {serviceSingular} types are active.", { serviceSingular: terms.serviceSingular.toLowerCase() })}</p>}</div></div></section>
       <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{videoReview ? t("2. Turnaround") : t("2. Date & Time")}</span><span className="booking-progressive-title-state">{!service ? t("Locked") : videoReview ? t("No time needed") : slot ? changeButton(() => setSlot(null)) : slotsState === "loading" ? loadingLabel() : t("In progress")}</span></div>{service && videoReview ? <div className="booking-progressive-body"><div className="booking-review-turnaround"><p>{t("Send your swing from the player portal once you have booked. There is no appointment to attend.")}</p><p><strong>{t("Back with you by {label}", { label: reviewDueDate(service).label })}</strong>{" "}{reviewDueDate(service).days === 1 ? t("— within 1 day.") : t("— within {days} days.", { days: reviewDueDate(service).days })}</p></div></div> : service && slot ? <div className="booking-progressive-body"><WeekSlots week={week} slots={[slot]} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => time(candidate.start)} isSelected={() => true} onSelect={() => setSlot(null)} emptyLabel="" />{slotCoach ? <p className="booking-slot-coach">{t("With {name}", { name: slotCoach.name })}</p> : null}</div> : service ? <div className="booking-progressive-body">{coachChoices.length > 1 ? <fieldset className="booking-handedness booking-coach-picker"><legend>{t("Who would you like?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={terms.staffSingular}><button aria-checked={!coachId} className={!coachId ? "selected-handedness" : ""} onClick={() => chooseCoach("")} role="radio" type="button">{t("Anyone available")}</button>{coachChoices.map((coach) => <button aria-checked={coachId === coach.id} className={coachId === coach.id ? "selected-handedness" : ""} key={coach.id} onClick={() => chooseCoach(coach.id)} role="radio" type="button">{coach.name}</button>)}</div></fieldset> : null}<div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>{t("Previous week")}</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>{t("Next week")}</span><ArrowRight size={15} /></button></div><WeekSlots week={week} placeholder={slotsState === "loading" ? <Loading what={t("available times")} /> : slotsState === "error" ? <p role="alert">{t("Available times could not be loaded.")}</p> : null} slots={availableSlots} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => `${time(candidate.start)}${candidate.remainingSpots ? t(" · {remainingSpots} spots left", { remainingSpots: candidate.remainingSpots }) : ""}`} isSelected={(candidate) => slot?.week === candidate.week && slot?.day === candidate.day && slot?.start === candidate.start} onSelect={(candidate) => { setSlot(candidate); setError((current) => (current === NO_BAY_FOR_SWING ? "" : current)); }} emptyLabel={t("No public times available this week.")} /></div> : null}</section>
-      <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{t("3. Your Information")}</span><span className="booking-progressive-title-state">{readyForDetails ? t("In progress") : t("Locked")}</span></div>{readyForDetails ? <div className="booking-progressive-body"><div className="booking-form">{remembered && forSomeoneElse ? <div className="booking-remembered"><p><strong>{t("Booking for someone else")}</strong></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookAsRemembered} type="button">{t("Book as {name} instead", { name: remembered.firstName })}</button></div></div> : null}{remembered && !forSomeoneElse && !editingDetails ? <div className="booking-remembered"><p><strong>{t("Booking as {name}", { name: `${form.firstName} ${form.lastName}`.trim() })}</strong><small>{form.email}</small></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={() => setEditingDetails(true)} type="button">{t("Edit details")}</button><button className="booking-progressive-change" onClick={bookForSomeoneElse} type="button">{t("Book for someone else")}</button><button className="booking-progressive-change" onClick={forgetMe} type="button">{t("Forget me")}</button></div></div> : (["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? t("First name *") : key === "lastName" ? t("Last name *") : key === "phone" ? t("Phone") : t("Email *")} />)}{!customer && !remembered ? <label className="booking-remember"><input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />{t("Remember me on this device")}</label> : null}{askHandedness ? <fieldset className="booking-handedness"><legend>{t("Which way do you swing?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={t("Handedness")}>{handednessOptions.map((option) => <button aria-checked={handedness === option.value} aria-describedby={`handedness-tip-${option.value}`} className={handedness === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => setHandedness(option.value)} role="radio" type="button">{option.label}<span className="booking-handedness-tip" id={`handedness-tip-${option.value}`} role="tooltip">{option.explainer}</span></button>)}</div></fieldset> : null}<textarea aria-label={t("Notes for your {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })} className="booking-notes" maxLength={800} onChange={(event) => setNotes(event.target.value)} placeholder={t("Notes for your {staffSingular} (optional) — anything useful before the booking", { staffSingular: terms.staffSingular.toLowerCase() })} value={notes} /></div>{customGroup && service ? <GroupAttendees account={catalogue.account} attendees={attendees} bookerName={`${form.firstName} ${form.lastName}`} onChange={setAttendees} service={service} /> : null}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? t("Confirming…") : t("Confirm {serviceSingular}", { serviceSingular: terms.serviceSingular })}</button></div> : null}</section>
+      <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{t("3. Your Information")}</span><span className="booking-progressive-title-state">{readyForDetails ? t("In progress") : t("Locked")}</span></div>{readyForDetails ? <div className="booking-progressive-body">{customGroup && service ? <><GroupAttendees account={catalogue.account} askHandedness={askHandedness} attendees={attendees} booker={bookerDetails} bookerSwing={askHandedness ? <SwingToggle label={t("Which way you swing")} onChange={setHandedness} value={handedness} /> : null} onChange={setAttendees} service={service} /><div className="booking-form">{notesBox}</div></> : <div className="booking-form">{bookerDetails}{swingChoice}{notesBox}</div>}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? t("Confirming…") : t("Confirm {serviceSingular}", { serviceSingular: terms.serviceSingular })}</button></div> : null}</section>
     </div>
   </main></BookingFrame>;
 }

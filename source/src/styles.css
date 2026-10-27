@@ -2922,16 +2922,47 @@
   line-height: 1.2;
 }
 
-.booking-group-row.is-booker {
-  min-height: 42px;
-  padding: 0 10px;
+/* With a swing toggle per player, it takes a column of its own. */
+.booking-group.has-swing .booking-group-head,
+.booking-group.has-swing .booking-group-row {
+  grid-template-columns: minmax(0, 1fr) 84px 42px 34px;
+}
+
+.booking-group.has-swing .booking-group-invite-head {
+  grid-column: 3 / 5;
+}
+
+.booking-group-col-head {
+  color: var(--booking-muted, var(--c-text-soft));
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* The booker's place: their details card, or the fields for them, under a
+   "You" line that carries their swing like every other row. */
+.booking-group-booker {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px 10px;
   border: 1px dashed var(--booking-border, var(--c-border));
   border-radius: 8px;
 }
 
-.booking-group-row.is-booker small {
-  grid-column: 2 / 4;
-  color: var(--booking-muted, var(--c-text-soft));
+.booking-group-booker > .booking-group-row {
+  grid-template-columns: minmax(0, 1fr) 84px;
+}
+
+/* A row's R / L toggle: the handedness picker's look, made compact. */
+.booking-swing {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.booking-handedness.booking-swing button {
+  min-height: 42px;
+  padding: 0 4px;
+  font-size: var(--c-size-meta);
 }
 
 .booking-group-row input {

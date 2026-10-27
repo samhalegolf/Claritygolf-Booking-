@@ -23,7 +23,7 @@ import {
   runResourceAction,
 } from "./_shared/resource-handler.mts";
 import { bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
-import { cleanHandedness, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
+import { cleanHandedness, groupSwingNoteLine, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
 import { clarityResourcesApply, serviceResourceMode } from "./_shared/resources.mts";
 import { primaryServiceCoachId, serviceCoachIds, serviceLocationIds } from "./_shared/service-scope.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
@@ -7953,6 +7953,17 @@ export async function createPublicBooking(
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
     };
   }
+  // Each player's swing, as the page sent it alongside their name. Only the
+  // note keeps it (see _shared/handedness.mts), so it is matched back by name.
+  const swingByName = new Map(
+    rawAttendees.map((attendee) => [cleanString(attendee?.name, "", 120), cleanHandedness(attendee?.handedness)]),
+  );
+  const groupSwings = customGroup
+    ? groupSwingNoteLine(customGroup.attendees.map((attendee) => ({
+        name: attendee.name,
+        handedness: attendee.id === "booker" ? handedness : swingByName.get(attendee.name) ?? "right",
+      })))
+    : "";
   const coachId = chosen.coachId;
   const location = cleanBookingLocationSnapshot(locationSnapshot(chosen.location));
   const coach = cleanBookingCoachSnapshot(
@@ -7978,6 +7989,7 @@ export async function createPublicBooking(
     // bookings should not open on a golf bay-allocation line.
     note: [
       capabilitiesFor(accountState.account?.market).handedness ? handednessNoteLine(handedness) : "",
+      capabilitiesFor(accountState.account?.market).handedness ? groupSwings : "",
       reviewDue
         ? `Video review booked from ${bookedVia}. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
         : `Booked from ${bookedVia}.`,

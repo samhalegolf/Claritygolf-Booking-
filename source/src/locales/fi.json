@@ -4755,5 +4755,10 @@
   "We email the voucher code to you, ready to pass on.": "Lähetämme koodin sinulle sähköpostilla, valmiina annettavaksi eteenpäin.",
   "It goes on your account under this email.": "Se lisätään tilillesi tällä sähköpostiosoitteella.",
   "Taking you to secure payment…": "Siirrytään turvalliseen maksuun…",
-  "Pay {amount}": "Maksa {amount}"
+  "Pay {amount}": "Maksa {amount}",
+  "R": "O",
+  "L": "V",
+  "Swing": "Swing",
+  "Which way {name} swings": "Kumpaan suuntaan {name} lyö",
+  "Which way you swing": "Kumpaan suuntaan lyöt"
 }

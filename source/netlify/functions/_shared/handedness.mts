@@ -26,3 +26,11 @@ export function handednessFromNote(note: unknown): Handedness | null {
   const match = HANDEDNESS_LINE.exec(String(note || ""));
   return match ? cleanHandedness(match[1]) : null;
 }
+
+/** Everyone's swing in a custom group, for the coach. A line of its own so the
+ *  bay picker, which reads the booker's line above, is not changed by it. */
+export function groupSwingNoteLine(players: Array<{ name: string; handedness: Handedness }>): string {
+  return players.length > 1
+    ? `Group swings: ${players.map((player) => `${player.name} (${player.handedness === "left" ? "Left" : "Right"})`).join(", ")}`
+    : "";
+}

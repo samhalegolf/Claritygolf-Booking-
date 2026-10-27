@@ -4755,5 +4755,10 @@
   "We email the voucher code to you, ready to pass on.": "We mailen je de code van de bon, klaar om door te geven.",
   "It goes on your account under this email.": "Het komt op je account onder dit e-mailadres.",
   "Taking you to secure payment…": "Je gaat naar de beveiligde betaling…",
-  "Pay {amount}": "{amount} betalen"
+  "Pay {amount}": "{amount} betalen",
+  "R": "R",
+  "L": "L",
+  "Swing": "Swing",
+  "Which way {name} swings": "Welke kant {name} op slaat",
+  "Which way you swing": "Welke kant je op slaat"
 }
