@@ -94,6 +94,11 @@ function stubSupabase(fixture: Fixture, options: { failLinkReads?: boolean } = {
       return new Response(null, { status: 201 });
     }
 
+    // No group share invoices in these fixtures.
+    if (table === "billing_invoice_items" && method === "GET") {
+      return new Response("[]", { status: 200 });
+    }
+
     throw new Error(`unstubbed ${method} ${table}${query}`);
   }) as typeof fetch;
 

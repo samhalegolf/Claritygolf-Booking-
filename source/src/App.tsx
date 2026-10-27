@@ -2101,6 +2101,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // rail shows; the id is what tells this booking apart from one on a different
   // invoice.
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, InvoicedBookingLink>>({});
+  // What each custom group's invited players are invoiced for, by booking id.
+  // The booker is asked only for the rest (see lessonAmountDue).
+  const [groupShareInvoiced, setGroupShareInvoiced] = useState<Record<string, number>>({});
   // --- POS ------------------------------------------------------------------
   // Counter sales. Kept in their own state (and their own tables) so nothing
   // here can leak into invoice totals - a lesson can legitimately be paid at
@@ -3425,10 +3428,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       if (!item.client?.trim() || posPaidBookings[item.id] || invoicedBookingIds[item.id]) continue;
       if (!itemInCoachScope(item)) continue;
       const service = itemService(item, services);
-      const isCustomGroup = isCustomGroupService(service);
-      const price = isCustomGroup && service
-        ? calculateCustomGroupPrice(service, attendeeListWithBooker(item).length)
-        : Number(service?.price ?? item.calculatedPrice ?? 0);
+      const price = lessonAmountDue(item, service);
       if (!(price > 0)) continue;
       const startsAt = dateForSlot(itemWeek(item), item.day);
       startsAt.setHours(Math.floor(item.start / 60), item.start % 60, 0, 0);
@@ -3447,7 +3447,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     }
     return lessons;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coachAccount, coachProfiles, invoicedBookingIds, isAdminUser, items, posPaidBookings, services, serviceScopeCoachId]);
+  }, [coachAccount, coachProfiles, groupShareInvoiced, invoicedBookingIds, isAdminUser, items, posPaidBookings, services, serviceScopeCoachId]);
 
   // "Ready to Pull" with an adjustable date range, per the billing build plan.
   // itemDateValue converts a calendar item's week/day slot back into a real
@@ -7196,6 +7196,18 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     setQuickCreate(null);
   }
 
+  /**
+   * What the booker owes for a lesson: its price, and for a custom group the
+   * group's price less the shares its invited players are invoiced for
+   * themselves. Never below nothing.
+   */
+  function lessonAmountDue(item: CalendarItem, service: Service | undefined) {
+    const listed = isCustomGroupService(service) && service
+      ? calculateCustomGroupPrice(service, attendeeListWithBooker(item).length)
+      : Number(service?.price ?? item.calculatedPrice ?? 0);
+    return Math.max(0, Math.round((listed - (groupShareInvoiced[item.id] || 0)) * 100) / 100);
+  }
+
   function attendeeListWithBooker(item: CalendarItem): CustomGroupAttendee[] {
     const current = Array.isArray(item.attendees) ? item.attendees : [];
     const booker =
@@ -9464,8 +9476,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // "already invoiced" / "paid at POS" marker at once. Batch instead.
   const BOOKING_LOOKUP_BATCH_SIZE = 150;
 
-  async function fetchBookingMap<T>(path: string, key: string, bookingIds: string[]): Promise<Record<string, T>> {
-    const merged: Record<string, T> = {};
+  /** Each of `keys`' maps from the lookup, merged across the batches. */
+  async function fetchBookingMaps<K extends string>(path: string, keys: K[], bookingIds: string[]): Promise<Record<K, Record<string, unknown>>> {
+    const merged = Object.fromEntries(keys.map((key) => [key, {}])) as Record<K, Record<string, unknown>>;
     for (let index = 0; index < bookingIds.length; index += BOOKING_LOOKUP_BATCH_SIZE) {
       const batch = bookingIds.slice(index, index + BOOKING_LOOKUP_BATCH_SIZE);
       const response = await fetch(`${path}?bookingIds=${batch.map(encodeURIComponent).join(",")}`, {
@@ -9473,8 +9486,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         cache: "no-store",
       });
       if (!response.ok) throw new Error(await readApiFailure(response, t("Could not check booking payments.")));
-      const data = (await response.json()) as Record<string, Record<string, T> | undefined>;
-      Object.assign(merged, data[key] || {});
+      const data = (await response.json()) as Record<string, Record<string, unknown> | undefined>;
+      for (const key of keys) Object.assign(merged[key], data[key] || {});
     }
     return merged;
   }
@@ -9485,7 +9498,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       return;
     }
     try {
-      const links = await fetchBookingMap<InvoicedBookingLink | string>("/api/billing/booking-links", "links", bookingIds);
+      const maps = await fetchBookingMaps("/api/billing/booking-links", ["links", "groupShares"], bookingIds);
+      const links = maps.links as Record<string, InvoicedBookingLink | string>;
+      setGroupShareInvoiced(maps.groupShares as Record<string, number>);
       // A billing function deployed before the number was added still answers
       // with a bare invoice id. Normalise rather than let the rail render
       // "[object Object]" or nothing at all against a stale deploy.
@@ -9560,7 +9575,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     }
     try {
       setPosPaidBookings(
-        await fetchBookingMap<PosBookingPayment>("/api/billing/pos/booking-payments", "payments", bookingIds),
+        (await fetchBookingMaps("/api/billing/pos/booking-payments", ["payments"], bookingIds)).payments as Record<string, PosBookingPayment>,
       );
     } catch {
       // Same reasoning as the invoice map: keep the last known state rather
@@ -10426,7 +10441,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           sourceId: item.id,
           description: `${service?.name ?? item.title} - ${item.client || item.title}`,
           quantity: 1,
-          unitPrice: service?.price ?? 0,
+          unitPrice: lessonAmountDue(item, service),
           taxRate: invoiceSettings.taxRate,
           discountKind: "none",
           discountValue: 0,
@@ -11346,11 +11361,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
   function openPosCheckoutForLesson(item: CalendarItem) {
     const service = itemService(item, services);
-    const isCustomGroup = isCustomGroupService(service);
-    const attendees = isCustomGroup ? attendeeListWithBooker(item) : [];
-    const listed = isCustomGroup && service
-      ? calculateCustomGroupPrice(service, attendees.length)
-      : Number(service?.price ?? item.calculatedPrice ?? 0);
+    const listed = lessonAmountDue(item, service);
     setPosCheckout({
       source: "lesson",
       description: `${service?.name || item.title}${item.client ? ` - ${item.client}` : ""}`,

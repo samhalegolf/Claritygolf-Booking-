@@ -6,6 +6,7 @@ import { stripePlatform, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts"
 import { getDatabase } from "./_shared/database.mts";
 import {
   refundPosSaleFromStripeCharge,
+  settleInvoiceCheckoutFromWebhook,
   settlePosCheckoutFromWebhook,
   settleTerminalPaymentFromWebhook,
 } from "./billing-api.mts";
@@ -55,6 +56,9 @@ import { json } from "./_shared/http.mts";
 // The same checkout.session.completed settles a till sale paid through Stripe
 // Checkout -- an online shop order, or a counter QR nobody stayed to watch.
 // Those carry pos_transaction_id metadata.
+//
+// And an invoice paid through its emailed pay link or its checkout (a group
+// player's share among them) is marked paid from it. Those carry invoice_id.
 
 /** Both modes' secrets: the live and test endpoints are signed separately. */
 function webhookSecrets() {
@@ -177,7 +181,13 @@ async function handleEvent(event: Record<string, any>, object: Record<string, an
     case "payment_intent.succeeded":
       return settleTerminalPaymentFromWebhook(accountId, String(object?.id || ""));
     case "checkout.session.completed":
-      return (await settlePosCheckoutFromWebhook(accountId, object)) || { ignored: "not_a_pos_sale" };
+      // An invoice paid through its pay link or checkout, else a till or
+      // online sale. Each looks for its own id in the session's metadata.
+      return (
+        (await settleInvoiceCheckoutFromWebhook(accountId, object)) ||
+        (await settlePosCheckoutFromWebhook(accountId, object)) ||
+        { ignored: "not_an_invoice_or_sale" }
+      );
     default:
       // Unhandled event types are acknowledged so Stripe doesn't retry them.
       return { ignored: event?.type || "unknown" };
