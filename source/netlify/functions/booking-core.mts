@@ -3204,12 +3204,28 @@ export async function handleCalendarFeedRequest(req: Request) {
   }
 }
 
+/**
+ * A public read that failed, as an answer rather than a crash: an unknown
+ * business is a 404 the page can name, and anything else a 500. A thrown
+ * error left the CDN serving its last good copy instead.
+ */
+function publicReadError(error) {
+  const status = Number(error?.status) || 500;
+  return json(
+    {
+      error: error?.code || (status === 500 ? "public_booking_error" : "request_error"),
+      message: status === 500 ? "Booking is unavailable." : error instanceof Error ? error.message : "Booking is unavailable.",
+    },
+    status,
+  );
+}
+
 export async function handlePublicBookingStateRequest(req: Request) {
   try {
     return json(publicBookingState(await readPublicCalendarState(await resolvePublicAccountId(req))));
   } catch (error) {
     console.error("public_booking_state_error", error);
-    throw error;
+    return publicReadError(error);
   }
 }
 
@@ -3218,7 +3234,7 @@ export async function handlePublicBookingCatalogRequest(req: Request) {
     return json(publicBookingCatalog(await readPublicCatalogState(await resolvePublicAccountId(req))));
   } catch (error) {
     console.error("public_booking_catalog_error", error);
-    throw error;
+    return publicReadError(error);
   }
 }
 
