@@ -4755,5 +4755,10 @@
   "We email the voucher code to you, ready to pass on.": "Vi sender dig koden på e-mail, klar til at give videre.",
   "It goes on your account under this email.": "Det lægges på din konto under denne e-mail.",
   "Taking you to secure payment…": "Du sendes videre til sikker betaling…",
-  "Pay {amount}": "Betal {amount}"
+  "Pay {amount}": "Betal {amount}",
+  "R": "H",
+  "L": "V",
+  "Swing": "Sving",
+  "Which way {name} swings": "Hvilken vej {name} svinger",
+  "Which way you swing": "Hvilken vej svinger du"
 }

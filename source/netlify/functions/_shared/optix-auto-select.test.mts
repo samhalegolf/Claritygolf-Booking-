@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { OptixSyncError } from "./optix-client.mts";
 import { candidateOptixResourceIds, DUAL_HANDED_RESOURCE_IDS, moveOptixBookingInPlace } from "./optix-auto-select.mts";
-import { cleanHandedness, handednessFromNote, handednessNoteLine } from "./handedness.mts";
+import { cleanHandedness, groupSwingNoteLine, handednessFromNote, handednessNoteLine } from "./handedness.mts";
 import {
   buildOptixAppointmentInput,
   optixAppointmentFingerprint,
@@ -212,6 +212,14 @@ test("handedness round-trips through the appointment note", () => {
   assert.equal(cleanHandedness("LEFT"), "left");
   assert.equal(cleanHandedness("anything else"), "right");
   assert.equal(cleanHandedness(undefined), "right");
+});
+
+test("a custom group's swings are listed for the coach without moving the booker's bay", () => {
+  const players = groupSwingNoteLine([{ name: "Sam Hale", handedness: "right" }, { name: "Jo", handedness: "left" }]);
+  assert.equal(players, "Group swings: Sam Hale (Right), Jo (Left)");
+  assert.equal(handednessFromNote([handednessNoteLine("right"), players].join("\n")), "right");
+  // Nobody else coming, nothing to list.
+  assert.equal(groupSwingNoteLine([{ name: "Sam Hale", handedness: "left" }]), "");
 });
 
 test("a right-handed player keeps the lesson type's preferred bay order", () => {

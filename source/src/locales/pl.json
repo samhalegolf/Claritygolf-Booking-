@@ -4755,5 +4755,10 @@
   "We email the voucher code to you, ready to pass on.": "Wyślemy Ci kod e-mailem, gotowy do przekazania.",
   "It goes on your account under this email.": "Trafi na Twoje konto pod tym adresem e-mail.",
   "Taking you to secure payment…": "Przechodzimy do bezpiecznej płatności…",
-  "Pay {amount}": "Zapłać {amount}"
+  "Pay {amount}": "Zapłać {amount}",
+  "R": "P",
+  "L": "L",
+  "Swing": "Swing",
+  "Which way {name} swings": "W którą stronę gra {name}",
+  "Which way you swing": "W którą stronę grasz"
 }

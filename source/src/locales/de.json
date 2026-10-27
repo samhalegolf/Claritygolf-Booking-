@@ -4755,5 +4755,10 @@
   "We email the voucher code to you, ready to pass on.": "Wir schicken dir den Gutscheincode per E-Mail, fertig zum Weitergeben.",
   "It goes on your account under this email.": "Es wird deinem Konto mit dieser E-Mail-Adresse gutgeschrieben.",
   "Taking you to secure payment…": "Weiter zur sicheren Zahlung…",
-  "Pay {amount}": "{amount} bezahlen"
+  "Pay {amount}": "{amount} bezahlen",
+  "R": "R",
+  "L": "L",
+  "Swing": "Schwung",
+  "Which way {name} swings": "Wie {name} schwingt",
+  "Which way you swing": "Wie du schwingst"
 }

@@ -4755,5 +4755,10 @@
   "We email the voucher code to you, ready to pass on.": "バウチャーのコードをメールでお送りします。そのままお渡しいただけます。",
   "It goes on your account under this email.": "このメールアドレスのアカウントに追加されます。",
   "Taking you to secure payment…": "安全な決済ページに移動しています…",
-  "Pay {amount}": "{amount}を支払う"
+  "Pay {amount}": "{amount}を支払う",
+  "R": "右",
+  "L": "左",
+  "Swing": "スイング",
+  "Which way {name} swings": "{name}のスイングの向き",
+  "Which way you swing": "あなたのスイングの向き"
 }
