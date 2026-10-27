@@ -1037,9 +1037,15 @@
   justify-content: flex-end;
 }
 
-.service-list-tabs {
+.service-list-tabs,
+.service-price-mode {
   display: flex;
   gap: 8px;
+}
+
+/* Level with the price box beside it. */
+.service-price-mode .pill {
+  min-height: 42px;
 }
 
 .service-action-button {

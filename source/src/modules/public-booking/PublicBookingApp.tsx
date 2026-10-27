@@ -39,12 +39,14 @@ function currentWeek() {
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
 /** The lesson's price in the business's own currency, with its tax named when
- *  prices are quoted before it ("$80 + GST"). */
+ *  prices are quoted before it ("$80 + GST"), and "per person" when that is
+ *  how the coach priced it. */
 function price(service: Service, account: Account) {
   if (service.priceMode === "free" || !service.price) return t("Free");
   const amount = money(service.price, account);
   const tax = account.invoiceSettings;
-  return tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+  const quoted = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+  return service.priceMode === "per-person" ? t("{price} per person", { price: quoted }) : quoted;
 }
 /** What the player is told a review will be back by. The server sets the real
  *  deadline at booking; this is the same sum a day earlier or later at worst,

@@ -299,8 +299,8 @@ function rethrowProductConflict(error: unknown, sku: string | null): never {
 // What one booking of this lesson type costs, which is not always `price`.
 //
 // A custom group charges basePrice for the base head count and extraPersonPrice
-// per head above it, and the editor writes those fields without touching
-// `price` - so the two drift apart the moment a base price is edited. Selling
+// per head above it. Its `price` now follows basePrice, but rows saved before
+// that held a stale one, so basePrice is still read first here. Selling
 // the base price at the counter is the honest floor; the per-head part is a
 // counter override, the same as any other.
 //

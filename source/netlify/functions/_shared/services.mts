@@ -173,6 +173,17 @@ export function isScheduledGroupService(service) {
 }
 
 /**
+ * Whether a lesson type may be priced per person rather than as a total. Only
+ * private and scheduled group lessons: a custom group already prices by head
+ * through its base and extra person prices, a review is one swing, and a pass
+ * is sold whole. Kept in step with canPricePerPerson in the app's serviceModel.
+ */
+function pricesPerPerson(service) {
+  const format = service?.lessonFormat ?? "private";
+  return format === "private" || (format === "group" && !hasCustomGroupFlag(service));
+}
+
+/**
  * An asynchronous video review: the player books it, sends a swing, and the
  * coach returns an annotated clip within the turnaround.
  *
@@ -431,7 +442,7 @@ function cleanService(service, index = 0, accountId = "") {
       ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants)))
       : 1;
   const priceMode =
-    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup
+    service?.priceMode === "per-person" && pricesPerPerson({ lessonFormat, customGroup })
       ? "per-person"
       : "session";
   const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
@@ -457,7 +468,9 @@ function cleanService(service, index = 0, accountId = "") {
     coachIds: cleanScopeIds(serviceCoachIds(service)),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
-    price: Math.max(0, Math.round(price)),
+    // A custom group's price is its base price. The editor has one price box,
+    // so `price` follows it rather than holding a second number nobody sees.
+    price: customGroup ? customGroupBasePrice(service) : Math.max(0, Math.round(price)),
     description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
     visibility:
       lessonFormat === "package" || service?.visibility === "private"

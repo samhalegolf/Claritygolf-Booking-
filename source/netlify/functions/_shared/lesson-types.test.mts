@@ -154,3 +154,36 @@ test("a missing screen list still means the main screen, an empty one still mean
   const [hidden] = normalizeServices([lessonType({ bookingScreenIds: [] })], "test-account");
   assert.deepEqual(hidden.bookingScreenIds, [], "an explicit empty list is a real choice and is kept");
 });
+
+test("per person pricing is kept for private and scheduled group lessons", () => {
+  const [privateLesson, groupLesson] = normalizeServices([
+    lessonType({ id: "pair", capacity: 2, priceMode: "per-person" }),
+    lessonType({ id: "clinic", lessonFormat: "group", capacity: 6, minParticipants: 2, priceMode: "per-person" }),
+  ], "test-account");
+
+  // The editor offers the toggle on both, so dropping it here would be the
+  // toggle doing nothing on a private lesson again.
+  assert.equal(privateLesson.priceMode, "per-person");
+  assert.equal(groupLesson.priceMode, "per-person");
+});
+
+test("per person pricing is dropped where the editor does not offer it", () => {
+  const [review, pass, customGroup] = normalizeServices([
+    lessonType({ id: "review", lessonFormat: "video-review", priceMode: "per-person" }),
+    lessonType({ id: "pass", lessonFormat: "package", priceMode: "per-person" }),
+    lessonType({ id: "custom", lessonFormat: "group", customGroup: true, priceMode: "per-person" }),
+  ], "test-account");
+
+  assert.equal(review.priceMode, "session");
+  assert.equal(pass.priceMode, "session");
+  assert.equal(customGroup.priceMode, "session", "a custom group prices by head through its own fields");
+});
+
+test("a custom group's price follows its base price", () => {
+  const [service] = normalizeServices([
+    lessonType({ lessonFormat: "group", customGroup: true, price: 100, basePrice: 240, extraPersonPrice: 30 }),
+  ], "test-account");
+
+  assert.equal(service.basePrice, 240);
+  assert.equal(service.price, 240, "one price box, so no second price drifting beside it");
+});

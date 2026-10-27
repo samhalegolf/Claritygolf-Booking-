@@ -3,7 +3,7 @@ import { useState } from "react";
 import { t } from "../../lib/i18n";
 import { formatMoney } from "../../lib/money";
 import { usePhoneLayout } from "../phone/phoneLayout";
-import { customGroupMaxParticipants } from "../services/serviceModel";
+import { customGroupMaxParticipants, servicePriceLabel } from "../services/serviceModel";
 import { ClarityProfile, ClaritySessions } from "../shared/ClarityIcons";
 import { locationById } from "../workspace/workspaceModel";
 import { bookingCoachSnapshotFor, type CalendarItem, customGroupStatusLabel } from "./calendarModel";
@@ -82,7 +82,7 @@ export function QuickCreateForm({
             <Plus size={16} />
             <span>
               <strong>{service.name}</strong>
-              <em>{t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price) })}</em>
+              <em>{t("{duration} min · {price}", { duration: service.duration, price: servicePriceLabel(service) })}</em>
             </span>
           </button>
         ))}
@@ -115,7 +115,7 @@ export function QuickCreateForm({
       <button className="quick-service-summary" onClick={backToQuickServiceChoice} type="button">
         <span>
           <strong>{quickCreateService.name}</strong>
-          <em>{t("{duration} min · {price}", { duration: quickCreateService.duration, price: formatMoney(quickCreateService.price) })}</em>
+          <em>{t("{duration} min · {price}", { duration: quickCreateService.duration, price: servicePriceLabel(quickCreateService) })}</em>
         </span>
         <ArrowLeft size={14} />
       </button>

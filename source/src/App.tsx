@@ -415,6 +415,7 @@ import {
   ServiceListTab,
   ServiceNumberField,
   calculateCustomGroupPrice,
+  canPricePerPerson,
   cleanGroupSchedule,
   cleanService,
   cleanServices,
@@ -431,6 +432,7 @@ import {
   isAppointmentStyleService,
   isCustomGroupService,
   isScheduledGroupService,
+  serviceNumberFieldsShown,
   servicePriceLabel,
 } from "./modules/services/serviceModel";
 import {
@@ -7914,7 +7916,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         extraPersonPrice: undefined,
         capacity: clamp(Math.round(Number(next.capacity) || 1), 1, 24),
         minParticipants: 1,
-        priceMode: "session" as PriceMode,
+        priceMode: canPricePerPerson(next) ? next.priceMode : ("session" as PriceMode),
       };
     });
   }
@@ -7978,7 +7980,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           groupSchedule: undefined,
           capacity: clamp(Math.round(Number(current.capacity) || 1), 1, 24),
           minParticipants: 1,
-          priceMode: "session",
+          priceMode: current.priceMode === "per-person" ? "per-person" : "session",
           baseParticipants: undefined,
           basePrice: undefined,
           extraPersonPrice: undefined,
@@ -8052,7 +8054,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   function resolveServiceNumberDraft(field: ServiceNumberField, draft: string, editor: ServiceEditor) {
     const limits = SERVICE_NUMBER_LIMITS[field];
     const parsed = parseDraftNumber(draft);
-    // A blank or invalid entry keeps the value the field already had.
+    // Only reached for a blank box the format no longer shows (saving refuses
+    // a blank one on screen), and that keeps the value it already had.
     if (parsed === null) return serviceNumberEditorValue(field, editor);
     return clamp(Math.round(parsed), limits.min, limits.max);
   }
@@ -8064,7 +8067,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
   function commitServiceNumberDraft(field: ServiceNumberField) {
     const draft = serviceNumberDrafts[field];
-    if (draft === undefined) return;
+    // A cleared box stays cleared. Filling it back in with the old number on
+    // blur read as the field refusing to be emptied; saving asks for it instead.
+    if (draft === undefined || parseDraftNumber(draft) === null) return;
     const value = resolveServiceNumberDraft(field, draft, serviceEditor);
     setServiceNumberDrafts((current) => {
       const next = { ...current };
@@ -11602,6 +11607,19 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   function saveEditedService() {
     if (!serviceEditor.name.trim()) {
       setToast({ message: t("Give the lesson type a name before saving.") });
+      return;
+    }
+    const blankField = serviceNumberFieldsShown(serviceEditor).find((field) => {
+      const draft = serviceNumberDrafts[field];
+      return draft !== undefined && parseDraftNumber(draft) === null;
+    });
+    if (blankField) {
+      const priceField = blankField === "price" || blankField === "basePrice" || blankField === "extraPersonPrice";
+      setToast({
+        message: priceField
+          ? t("Enter a price before saving. Use 0 for a free lesson.")
+          : t("Fill in every number before saving."),
+      });
       return;
     }
     const normalizedEditor = applyServiceNumberDrafts(applyGroupDraftInputs());
