@@ -1,25 +1,10 @@
 import type { Config } from "@netlify/functions";
 
 import { handlePublicBookingCatalogRequest } from "./booking-core.mts";
-
-function withPublicReadCache(response: Response) {
-  const headers = new Headers(response.headers);
-  if (response.ok) {
-    headers.set(
-      "Netlify-CDN-Cache-Control",
-      "public, durable, max-age=60, stale-while-revalidate=300",
-    );
-    headers.set("Cache-Control", "public, max-age=0, must-revalidate");
-  }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
+import { withPublicReadCache } from "./_shared/public-read-cache.mts";
 
 export default async function handler(req: Request) {
-  return withPublicReadCache(await handlePublicBookingCatalogRequest(req));
+  return withPublicReadCache(req, await handlePublicBookingCatalogRequest(req), { maxAge: 60, staleWhileRevalidate: 300 });
 }
 
 export const config: Config = { path: "/api/public-booking-catalog", region: "syd" };
