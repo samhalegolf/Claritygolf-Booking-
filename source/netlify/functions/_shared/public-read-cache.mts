@@ -7,7 +7,34 @@
  * copy, so the page showed old lesson types and nothing said why. Uncached,
  * a bare link that cannot be resolved shows its error straight away.
  */
+import { purgeCache } from "@netlify/functions";
+
 const BUSINESS_PARAMS = ["business", "account", "accountId", "slug"];
+
+/**
+ * The CDN tag on every cached public read of one business. A save purges it
+ * (purgePublicBookingCache below), so a change to lessons, availability or a
+ * booking reaches the booking page on its next load instead of when the cached
+ * copy runs out.
+ */
+export function publicCacheTagHeader(accountId: string) {
+  return { "Netlify-Cache-Tag": `public-booking-${accountId}` };
+}
+
+/**
+ * Drop one business's cached public reads. A failed purge is logged and left:
+ * the copies still expire on their own within a minute or so, and a save must
+ * not fail because the CDN did not answer. Outside Netlify there is no token
+ * and nothing to purge.
+ */
+export async function purgePublicBookingCache(accountId: string) {
+  if (!accountId || !process.env.NETLIFY_PURGE_API_TOKEN) return;
+  try {
+    await purgeCache({ tags: [publicCacheTagHeader(accountId)["Netlify-Cache-Tag"]] });
+  } catch (error) {
+    console.error("public_booking_cache_purge_failed", accountId, error);
+  }
+}
 
 export function withPublicReadCache(req: Request, response: Response, seconds: { maxAge: number; staleWhileRevalidate: number }) {
   const params = new URL(req.url).searchParams;

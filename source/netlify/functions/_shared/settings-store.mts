@@ -1,5 +1,6 @@
 import { getDatabase } from "./database.mts";
-import { safeJsonParse } from "./values.mts";
+import { hasOwn, safeJsonParse } from "./values.mts";
+import { purgePublicBookingCache } from "./public-read-cache.mts";
 
 /**
  * The database handle and the per-business settings table.
@@ -66,6 +67,10 @@ export async function setSettingsBulk(accountId: string, values: Record<string, 
            updated_at = EXCLUDED.updated_at`,
     params,
   );
+  // Every save that changes what the public booking page shows -- lesson
+  // types, availability, coaches, locations, bookings -- stamps updatedAt, so
+  // that stamp is when the page's cached copies are dropped.
+  if (hasOwn(values, "updatedAt")) await purgePublicBookingCache(accountId);
 }
 
 export async function getSetting(accountId: string, key: string): Promise<string> {
