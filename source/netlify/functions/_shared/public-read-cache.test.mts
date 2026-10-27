@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withPublicReadCache } from "./public-read-cache.mts";
+import { publicCacheTagHeader, purgePublicBookingCache, withPublicReadCache } from "./public-read-cache.mts";
+import { setSettingsBulk } from "./settings-store.mts";
 
 const seconds = { maxAge: 60, staleWhileRevalidate: 300 };
 const ok = () => new Response("{}", { status: 200 });
@@ -25,4 +26,47 @@ test("an error is never cached", () => {
   );
   assert.equal(response.status, 404);
   assert.equal(response.headers.get("Netlify-CDN-Cache-Control"), null);
+});
+
+test("a business's public reads share one cache tag", () => {
+  assert.deepEqual(publicCacheTagHeader("sam-hale-golf"), { "Netlify-Cache-Tag": "public-booking-sam-hale-golf" });
+});
+
+test("a save that stamps updatedAt purges that business's cached reads, and only then", async () => {
+  const realFetch = globalThis.fetch;
+  const purged: unknown[] = [];
+  process.env.NETLIFY_PURGE_API_TOKEN = "test-token";
+  process.env.SITE_ID = "test-site";
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    purged.push(JSON.parse(String(init.body)).cache_tags);
+    return new Response(null, { status: 202 });
+  }) as typeof fetch;
+  try {
+    const run = async () => undefined;
+    await setSettingsBulk("sam-hale-golf", { servicesJson: "[]", updatedAt: "2026-10-27T00:00:00Z" }, run);
+    await setSettingsBulk("sam-hale-golf", { syncKey: "abc" }, run);
+    assert.deepEqual(purged, [["public-booking-sam-hale-golf"]]);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.NETLIFY_PURGE_API_TOKEN;
+    delete process.env.SITE_ID;
+  }
+});
+
+test("a purge the CDN refuses does not fail the save", async () => {
+  const realFetch = globalThis.fetch;
+  process.env.NETLIFY_PURGE_API_TOKEN = "test-token";
+  process.env.SITE_ID = "test-site";
+  globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
+  try {
+    await purgePublicBookingCache("sam-hale-golf");
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.NETLIFY_PURGE_API_TOKEN;
+    delete process.env.SITE_ID;
+  }
+});
+
+test("without a purge token (tests, local) nothing is purged", async () => {
+  await purgePublicBookingCache("sam-hale-golf");
 });

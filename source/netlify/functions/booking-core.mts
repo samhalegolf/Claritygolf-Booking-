@@ -24,6 +24,7 @@ import {
 } from "./_shared/resource-handler.mts";
 import { bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { cleanHandedness, groupSwingNoteLine, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
+import { publicCacheTagHeader } from "./_shared/public-read-cache.mts";
 import { clarityResourcesApply, serviceResourceMode } from "./_shared/resources.mts";
 import { primaryServiceCoachId, serviceCoachIds, serviceLocationIds } from "./_shared/service-scope.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
@@ -3222,7 +3223,8 @@ function publicReadError(error) {
 
 export async function handlePublicBookingStateRequest(req: Request) {
   try {
-    return json(publicBookingState(await readPublicCalendarState(await resolvePublicAccountId(req))));
+    const accountId = await resolvePublicAccountId(req);
+    return json(publicBookingState(await readPublicCalendarState(accountId)), 200, publicCacheTagHeader(accountId));
   } catch (error) {
     console.error("public_booking_state_error", error);
     return publicReadError(error);
@@ -3231,7 +3233,8 @@ export async function handlePublicBookingStateRequest(req: Request) {
 
 export async function handlePublicBookingCatalogRequest(req: Request) {
   try {
-    return json(publicBookingCatalog(await readPublicCatalogState(await resolvePublicAccountId(req))));
+    const accountId = await resolvePublicAccountId(req);
+    return json(publicBookingCatalog(await readPublicCatalogState(accountId)), 200, publicCacheTagHeader(accountId));
   } catch (error) {
     console.error("public_booking_catalog_error", error);
     return publicReadError(error);
@@ -7742,7 +7745,7 @@ export async function handlePublicBookingSlotsRequest(req, options = {}) {
     });
     metrics.slotCalculationMs = Date.now() - slotCalculationStartedAt;
     metrics.status = 200;
-    return json(payload);
+    return json(payload, 200, publicCacheTagHeader(accountId));
   } catch (error) {
     console.error("public_booking_slots_error", error);
     const status = error?.status || 500;
