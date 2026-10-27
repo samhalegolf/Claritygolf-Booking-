@@ -2925,7 +2925,7 @@
 /* With a swing toggle per player, it takes a column of its own. */
 .booking-group.has-swing .booking-group-head,
 .booking-group.has-swing .booking-group-row {
-  grid-template-columns: minmax(0, 1fr) 84px 42px 34px;
+  grid-template-columns: minmax(0, 1fr) 56px 42px 34px;
 }
 
 .booking-group.has-swing .booking-group-invite-head {
@@ -2949,20 +2949,44 @@
 }
 
 .booking-group-booker > .booking-group-row {
-  grid-template-columns: minmax(0, 1fr) 84px;
+  grid-template-columns: minmax(0, 1fr) 56px;
 }
 
-/* A row's R / L toggle: the handedness picker's look, made compact. */
+/* A row's R / L swing: the theme switch's pill, small enough to sit in the
+   row. It reads the booking theme's colours so it fits light and dark pages. */
 .booking-swing {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
   gap: 2px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--booking-border, var(--c-border));
+  border-radius: var(--c-radius-pill);
+  background: var(--booking-control, var(--c-surface-soft));
+  cursor: pointer;
 }
 
-.booking-handedness.booking-swing button {
-  min-height: 42px;
-  padding: 0 4px;
-  font-size: var(--c-size-meta);
+.booking-swing > span {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-pill);
+  color: var(--booking-muted, var(--c-muted));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.booking-swing > span.active {
+  background: var(--coach-primary, var(--c-accent));
+  color: var(--c-accent-text);
+}
+
+.booking-swing:focus-visible {
+  outline: 2px solid var(--coach-primary);
+  outline-offset: 2px;
 }
 
 .booking-group-row input {
