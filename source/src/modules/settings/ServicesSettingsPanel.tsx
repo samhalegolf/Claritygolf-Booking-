@@ -2,7 +2,7 @@
 // the editor state and the save handlers still live in App.tsx and arrive as
 // props. Loaded with Settings, not with the shell.
 import { t } from "../../lib/i18n";
-import { DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS, MAX_GROUP_OCCURRENCE_COUNT, MAX_REVIEW_TURNAROUND_DAYS, defaultServiceColor, emptyServiceEditor, hasCustomGroupFlag, serviceEditorFormat, serviceFormatLabel, servicePriceLabel } from "../services/serviceModel";
+import { DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS, MAX_GROUP_OCCURRENCE_COUNT, MAX_REVIEW_TURNAROUND_DAYS, canPricePerPerson, defaultServiceColor, emptyServiceEditor, hasCustomGroupFlag, serviceEditorFormat, serviceFormatLabel, servicePriceLabel } from "../services/serviceModel";
 import { timeToMinutes } from "../../lib/date";
 import { Archive, ChevronDown, ChevronUp, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { BOOKING_SCREENS, formatBookingScreenLabels } from "../public-booking/bookingScreens";
@@ -123,6 +123,8 @@ export function ServicesSettingsPanel(props: ServicesSettingsPanelProps) {
     coachAccount,
     restoreService,
   } = props;
+  const customGroup = serviceEditor.lessonFormat === "group" && hasCustomGroupFlag(serviceEditor);
+  const priceField: ServiceNumberField = customGroup ? "basePrice" : "price";
   return (
     <div className="settings-section settings-services">
       <div className="service-layout">
@@ -248,33 +250,41 @@ export function ServicesSettingsPanel(props: ServicesSettingsPanelProps) {
                     type="number"
                   />
                 </label>
+                {/* One price box. A custom group's price is its base price, so
+                    there the box edits that and `price` follows it on save. */}
                 <label className="settings-field">
-                  <span>{t("Price NZD")}</span>
+                  <span>{customGroup ? t("Base price NZD") : t("Price NZD")}</span>
                   <input
-                    value={serviceNumberInputValue("price")}
+                    value={serviceNumberInputValue(priceField)}
                     min={0}
                     step={1}
                     inputMode="decimal"
-                    onChange={(event) => updateServiceNumberDraft("price", event.target.value)}
-                    onBlur={() => commitServiceNumberDraft("price")}
+                    onChange={(event) => updateServiceNumberDraft(priceField, event.target.value)}
+                    onBlur={() => commitServiceNumberDraft(priceField)}
                     type="number"
                   />
                 </label>
-                <label className="settings-field">
-                  <span>{t("Pricing")}</span>
-                  <select
-                    disabled={serviceEditor.lessonFormat !== "group" || hasCustomGroupFlag(serviceEditor)}
-                    value={serviceEditor.priceMode}
-                    onChange={(event) =>
-                      updateServiceEditor("priceMode", event.target.value === "per-person" ? "per-person" : "session")
-                    }
-                  >
-                    <option value="session">{t("Per session")}</option>
-                    <option value="per-person">{t("Per person")}</option>
-                  </select>
-                </label>
+                {canPricePerPerson(serviceEditor) && (
+                  <div className="settings-field">
+                    <span>{t("Pricing")}</span>
+                    <div className="service-price-mode" role="radiogroup" aria-label={t("Pricing")}>
+                      {(["per-person", "session"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          role="radio"
+                          aria-checked={serviceEditor.priceMode === mode}
+                          className={`pill ${serviceEditor.priceMode === mode ? "active-pill" : ""}`}
+                          onClick={() => updateServiceEditor("priceMode", mode)}
+                        >
+                          {mode === "per-person" ? t("Per person") : t("Total")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              {serviceEditor.lessonFormat === "group" && hasCustomGroupFlag(serviceEditor) && (
+              {customGroup && (
                 <div className="service-form-row">
                   <label className="settings-field">
                     <span>{t("Base participants")}</span>
@@ -286,18 +296,6 @@ export function ServicesSettingsPanel(props: ServicesSettingsPanelProps) {
                       inputMode="numeric"
                       onChange={(event) => updateServiceNumberDraft("baseParticipants", event.target.value)}
                       onBlur={() => commitServiceNumberDraft("baseParticipants")}
-                      type="number"
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Base price NZD")}</span>
-                    <input
-                      value={serviceNumberInputValue("basePrice")}
-                      min={0}
-                      step={1}
-                      inputMode="decimal"
-                      onChange={(event) => updateServiceNumberDraft("basePrice", event.target.value)}
-                      onBlur={() => commitServiceNumberDraft("basePrice")}
                       type="number"
                     />
                   </label>

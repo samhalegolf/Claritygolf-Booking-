@@ -290,6 +290,13 @@ function moneyLabel(amount: number, settings: any) {
   }
 }
 
+/** One person's even share of a custom group, as a number; 0 when there is nothing to share. */
+function customGroupShareAmount(appt: any) {
+  const groupSize = appt.customGroup && Array.isArray(appt.attendees) ? appt.attendees.length : 0;
+  const total = Number(appt.calculatedPrice) || 0;
+  return groupSize && total > 0 ? Math.round((total / groupSize) * 100) / 100 : 0;
+}
+
 /**
  * A custom group's price, and each person's even share of it. Everyone on the
  * booking counts, the booker included. Empty for any other booking.
@@ -301,7 +308,7 @@ function customGroupPricing(appt: any, settings: any) {
   return {
     groupSize: String(groupSize),
     totalPrice: moneyLabel(total, settings),
-    sharePrice: moneyLabel(Math.round((total / groupSize) * 100) / 100, settings),
+    sharePrice: moneyLabel(customGroupShareAmount(appt), settings),
   };
 }
 
@@ -480,9 +487,11 @@ function customGroupConfirmUrl(token: string, settings: any) {
  * is, their share of the price, a button to say they are coming, and how to pay
  * ahead if the business has said how. The wording is the coach's (the
  * groupInvite template); the table, the button's link and the paying-ahead
- * section are filled in per invite.
+ * section are filled in per invite. `payUrl` pays the invited person's own
+ * share invoice (see ensureGroupShareInvoice); without one the paying-ahead
+ * section offers the business's bank details only, as before.
  */
-function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVariables: Record<string, string>) {
+function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVariables: Record<string, string>, payUrl = "") {
   const mt = messageText(settings.messageLanguage);
   const variables = {
     ...baseVariables,
@@ -502,7 +511,7 @@ function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVari
     [mt("Where"), variables.venue],
     ...customGroupRows(appt, variables, mt),
   ];
-  const payAhead = settings.bankAccount || settings.paymentInstructions
+  const payAhead = payUrl || settings.bankAccount || settings.paymentInstructions
     ? [
         variables.sharePrice
           ? mt("Paying ahead is optional. To pay your share of {share} before the lesson:", { share: variables.sharePrice })
@@ -516,9 +525,12 @@ function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVari
   const button = confirmUrl && confirmLabel
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(confirmLabel)}</a></td></tr></table>`
     : "";
+  const payButton = payUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:10px 0 8px"><tr><td><a href="${escapeHtml(payUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:11px 18px;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(mt("Pay my share"))}</a></td></tr></table>`
+    : "";
   const payAheadHtml = payAhead.length
     ? `<div style="margin:18px 0 0;padding:14px 16px;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px"><p style="margin:0 0 6px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(mt("Paying ahead"))}</p>${payAhead
-        .map((line) => `<p style="margin:0 0 6px;color:#26332a;font-size:14px">${escapeHtml(line).replace(/\n/g, "<br/>")}</p>`)
+        .map((line, index) => `<p style="margin:0 0 6px;color:#26332a;font-size:14px">${escapeHtml(line).replace(/\n/g, "<br/>")}</p>${index === 0 ? payButton : ""}`)
         .join("")}</div>`
     : "";
   const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(heading)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}${payAheadHtml}<p style="margin:16px 0 0;color:#526054">${escapeHtml(signoff).replace(/\n/g, "<br/>")}</p>${confirmUrl && confirmLabel ? `<p style="margin:16px 0 0;color:#8e9a8d;font-size:12px">${escapeHtml(mt("If the button does not work, paste this link into your browser: {url}", { url: confirmUrl }))}</p>` : ""}</div></div></div>`;
@@ -531,7 +543,9 @@ function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVari
     "",
     confirmUrl && confirmLabel ? `${confirmLabel}: ${confirmUrl}` : "",
     "",
-    ...(payAhead.length ? [mt("Paying ahead"), ...payAhead, ""] : []),
+    ...(payAhead.length
+      ? [mt("Paying ahead"), payAhead[0], ...(payUrl ? [mt("Pay online: {url}", { url: payUrl })] : []), ...payAhead.slice(1), ""]
+      : []),
     signoff,
   ]
     .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
@@ -1090,14 +1104,36 @@ export async function notifyBookingEvent(input: NotifyInput) {
     const recipient = cleanEmail(attendee?.email, "");
     const token = cleanString(attendee?.token, "", 220);
     if (!recipient || !token || attendee?.status !== "invited") return;
-    const invite = customGroupInviteBody(attendee, appt, settings, variables);
     const kind = `${action}_custom_group_invite_email`;
     if (!settings.sendClientEmail) {
+      const invite = customGroupInviteBody(attendee, appt, settings, variables);
       const skipped = { channel: "custom_group_invite", recipient, subject: invite.subject, kind, status: "skipped", sent: false, reason: "disabled_client_email" };
       results.push(skipped);
       await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status: "skipped", provider: "settings", error: "disabled_client_email", notificationJobId: input.notificationJobId });
       return;
     }
+    // Their share as an invoice of its own, so the email can carry its pay
+    // link and Billing shows who has paid. A failure here never stops the
+    // invite: it goes out with the bank details instead.
+    const mt = messageText(settings.messageLanguage);
+    let payUrl = "";
+    try {
+      const { ensureGroupShareInvoice } = await import("./billing-api.mts");
+      const share = await ensureGroupShareInvoice(accountId, {
+        bookingId: appt.id,
+        attendeeId: cleanString(attendee?.id, "", 120),
+        name: cleanString(attendee?.name, "", 120),
+        email: recipient,
+        amount: customGroupShareAmount(appt),
+        description: `${variables.service} · ${variables.date} · ${mt("Share for {name}", { name: cleanString(attendee?.name, "", 120) || recipient })}`,
+        week: appt.week,
+        day: appt.day,
+      }, settings.bookingUrl || "https://book.claritygolf.app");
+      payUrl = share?.payUrl || "";
+    } catch (error) {
+      console.error("notification_engine:group_share_invoice_failed", appt.id, error);
+    }
+    const invite = customGroupInviteBody(attendee, appt, settings, variables, payUrl);
     const result = await deliverEmail({
       accountId,
       to: recipient,
@@ -1198,6 +1234,23 @@ export async function notifyBookingEvent(input: NotifyInput) {
     await sendAndRecord("admin", adminRecipient, subjects.admin);
   } else {
     await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: adminRecipient, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email", notificationJobId: input.notificationJobId });
+  }
+
+  // A share invoice stands only while its player is in a lesson that is on:
+  // cancel the lesson, or take the player off it, and an unpaid share is voided.
+  if (appt.customGroup && (action === "cancelled" || (action === "updated" && previous))) {
+    const stillComing = new Set(action === "cancelled" ? [] : (appt.attendees || []).map((attendee: any) => cleanString(attendee?.id, "", 120)));
+    const gone = ((action === "cancelled" ? appt.attendees : previous?.attendees) || [])
+      .map((attendee: any) => cleanString(attendee?.id, "", 120))
+      .filter((id: string) => id && id !== "booker" && !stillComing.has(id));
+    if (gone.length) {
+      try {
+        const { voidGroupShareInvoices } = await import("./billing-api.mts");
+        await voidGroupShareInvoices(accountId, appt.id, gone);
+      } catch (error) {
+        console.error("notification_engine:group_share_void_failed", appt.id, error);
+      }
+    }
   }
 
   if ((action === "booking" || action === "updated") && appt.customGroup) {

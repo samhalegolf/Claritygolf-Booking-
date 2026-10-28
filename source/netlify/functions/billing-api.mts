@@ -299,8 +299,8 @@ function rethrowProductConflict(error: unknown, sku: string | null): never {
 // What one booking of this lesson type costs, which is not always `price`.
 //
 // A custom group charges basePrice for the base head count and extraPersonPrice
-// per head above it, and the editor writes those fields without touching
-// `price` - so the two drift apart the moment a base price is edited. Selling
+// per head above it. Its `price` now follows basePrice, but rows saved before
+// that held a stale one, so basePrice is still read first here. Selling
 // the base price at the counter is the honest floor; the per-head part is a
 // counter override, the same as any other.
 //
@@ -1015,7 +1015,7 @@ type InvoiceItemInput = {
 };
 
 function cleanInvoiceItem(raw: InvoiceItemInput, taxInclusive = false) {
-  const sourceType = ["booking", "product", "manual"].includes(String(raw?.sourceType)) ? String(raw.sourceType) : "manual";
+  const sourceType = ["booking", "product", "manual", "group_share"].includes(String(raw?.sourceType)) ? String(raw.sourceType) : "manual";
   const quantity = cleanNumber(raw?.quantity, 1, { min: 0 });
   const unitPrice = round2(cleanNumber(raw?.unitPrice, 0, { min: 0 }));
   const taxRate = round2(cleanNumber(raw?.taxRate, 0, { min: 0, max: 100 }));
@@ -1714,14 +1714,16 @@ export async function deleteInvoice(accountId: string, id: string) {
 // dropped from the pull list. This matches the write side - createBookingLinks
 // clears the same stale links rather than refusing the save.
 export async function checkBookingLinks(accountId: string, bookingIds: string[]) {
-  if (!bookingIds.length) return { links: {} };
+  if (!bookingIds.length) return { links: {}, groupShares: {} };
   const owners = await bookingLinkOwners(accountId, bookingIds);
   const links = Object.fromEntries(
     owners
       .filter((owner) => !owner.voided)
       .map((owner) => [owner.bookingId, { invoiceId: owner.invoiceId, invoiceNumber: owner.invoiceNumber }]),
   );
-  return { links };
+  // What each custom group's invited players are invoiced for, so the booker
+  // is asked only for the rest.
+  return { links, groupShares: await groupShareTotals(accountId, bookingIds) };
 }
 
 // --- Revenue report -----------------------------------------------------------
@@ -2878,6 +2880,150 @@ export async function resolveInvoicePaymentLink(
     prefer: "return=minimal",
   });
   return url;
+}
+
+// --- Group shares ---------------------------------------------------------------
+//
+// Each person a booker invites to a custom group gets an invoice for their
+// share, and the invite email's Pay button pays it. The share line is
+// source_type 'group_share' with source_id "<booking id>:<attendee id>" -- not
+// a 'booking' line, which would claim the whole lesson (one invoice per lesson,
+// see createBookingLinks) and leave the booker's own invoice nowhere to go.
+// What the booker owes is the lesson less these shares (groupShareTotals).
+
+function groupShareSourceId(bookingId: string, attendeeId: string) {
+  return `${bookingId}:${attendeeId}`;
+}
+
+/** The share lines matching `sourceFilter` (a PostgREST condition on source_id) whose invoice still stands. */
+async function liveGroupShareInvoices(accountId: string, sourceFilter: string) {
+  const lines = (await supabase("billing_invoice_items", {
+    query: `select=invoice_id,source_id,line_total&account_id=eq.${encodeFilter(accountId)}&source_type=eq.group_share&${sourceFilter}`,
+  })) as Array<Record<string, unknown>>;
+  if (!lines.length) return [];
+  const invoiceIds = [...new Set(lines.map((line) => String(line.invoice_id ?? "")).filter(Boolean))];
+  const invoices = (await supabase("billing_invoices", {
+    query: `select=id,status&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(invoiceIds.map((id) => `"${id.replace(/"/g, "")}"`).join(","))})`,
+  })) as Array<Record<string, unknown>>;
+  const statusById = new Map(invoices.map((invoice) => [String(invoice.id), String(invoice.status ?? "")]));
+  // A voided share is withdrawn: it neither stands in for a new one nor comes
+  // off what the booker owes.
+  return lines
+    .map((line) => ({
+      invoiceId: String(line.invoice_id ?? ""),
+      sourceId: String(line.source_id ?? ""),
+      amount: Number(line.line_total) || 0,
+      status: statusById.get(String(line.invoice_id ?? "")) || "",
+    }))
+    .filter((share) => share.status && share.status !== "void");
+}
+
+/**
+ * The invoice for one invited person's share, made on first use and reused
+ * after (an invite resent, a retried notification job). Returns its Stripe pay
+ * link too, or "" when Stripe is not connected or did not answer: the invoice
+ * still stands, and the email falls back to the business's bank details.
+ */
+export async function ensureGroupShareInvoice(
+  accountId: string,
+  input: { bookingId: string; attendeeId: string; name: string; email: string; amount: number; description: string; week: unknown; day: unknown },
+  origin: string,
+) {
+  const sourceId = groupShareSourceId(input.bookingId, input.attendeeId);
+  const amount = round2(Number(input.amount) || 0);
+  const serviceDate = calendarItemDate(input.week, input.day);
+  if (!input.bookingId || !input.attendeeId || amount <= 0) return null;
+  const [existing] = await liveGroupShareInvoices(accountId, `source_id=eq.${encodeFilter(sourceId)}`);
+  let invoice = existing ? await getInvoiceWithItems(accountId, existing.invoiceId) : null;
+  if (!invoice) {
+    const settingsRows = await supabase("settings", {
+      query: settingsSelectQuery(accountId, { filters: ["key=in.(accountInvoiceSettingsJson,accountCountry)"] }),
+    });
+    const map = Object.fromEntries((settingsRows as Array<{ key: string; value: string }>).map((row) => [row.key, row.value]));
+    let invoiceSettings: Record<string, unknown> = {};
+    try {
+      invoiceSettings = map.accountInvoiceSettingsJson ? JSON.parse(map.accountInvoiceSettingsJson) : {};
+    } catch {
+      invoiceSettings = {};
+    }
+    const tax = taxDefaultsForCountry(map.accountCountry);
+    const taxRate = Number.isFinite(Number(invoiceSettings.taxRate)) ? Number(invoiceSettings.taxRate) : tax.taxRate;
+    const taxInclusive = typeof invoiceSettings.taxInclusive === "boolean" ? invoiceSettings.taxInclusive : tax.taxInclusive;
+    invoice = await createInvoice(accountId, {
+      autoNumber: true,
+      status: "sent",
+      customerName: input.name || input.email,
+      customerEmail: input.email,
+      // Due by the lesson: that is when it is owed.
+      dueDate: serviceDate,
+      taxInclusive,
+      items: [{
+        sourceType: "group_share",
+        sourceId,
+        description: input.description,
+        quantity: 1,
+        unitPrice: amount,
+        taxRate,
+        serviceDate,
+      }],
+    });
+  }
+  if (!invoice) return null;
+  let payUrl = "";
+  try {
+    payUrl = await resolveInvoicePaymentLink(accountId, invoice, await resolveInvoiceBranding(accountId), origin);
+  } catch (error) {
+    console.error("billing_api:group_share_pay_link_failed", accountId, invoice.id, error);
+  }
+  return { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, payUrl };
+}
+
+/** Void the unpaid share invoices of a lesson that is not happening. A paid one is left for the coach to refund. */
+export async function voidGroupShareInvoices(accountId: string, bookingId: string, attendeeIds: string[]) {
+  if (!attendeeIds.length) return;
+  const list = attendeeIds.map((id) => `"${groupShareSourceId(bookingId, id).replace(/"/g, "")}"`).join(",");
+  const shares = await liveGroupShareInvoices(accountId, `source_id=in.(${encodeURIComponent(list)})`);
+  for (const share of shares) {
+    if (share.status === "paid") continue;
+    await updateInvoiceStatus(accountId, share.invoiceId, { status: "void" });
+  }
+}
+
+/** How much of each lesson its invited players are invoiced for, keyed by booking id. */
+async function groupShareTotals(accountId: string, bookingIds: string[]) {
+  const totals: Record<string, number> = {};
+  for (let index = 0; index < bookingIds.length; index += 200) {
+    const prefixes = bookingIds.slice(index, index + 200);
+    const filter = prefixes.map((id) => `source_id.like.${encodeURIComponent(`${id.replace(/[,()*]/g, "")}:*`)}`).join(",");
+    const shares = await liveGroupShareInvoices(accountId, `or=(${filter})`);
+    for (const share of shares) {
+      const bookingId = share.sourceId.slice(0, share.sourceId.lastIndexOf(":"));
+      totals[bookingId] = round2((totals[bookingId] || 0) + share.amount);
+    }
+  }
+  return totals;
+}
+
+/**
+ * An invoice paid through its Stripe pay link or checkout, marked paid. Both
+ * carry the invoice id in their metadata (createStripePaymentLink copies a
+ * link's metadata to the session). Anything else returns null for the next
+ * handler to look at.
+ */
+export async function settleInvoiceCheckoutFromWebhook(accountId: string, session: Record<string, unknown>) {
+  const metadata = (session?.metadata || {}) as Record<string, string>;
+  const id = cleanString(metadata.invoice_id, "", 160);
+  if (!id || metadata.account_id !== accountId) return null;
+  if (session.payment_status !== "paid") return { ignored: "not_paid", invoice: id };
+  const [row] = (await supabase("billing_invoices", {
+    query: `select=id,status,total,amount_paid&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  if (!row) return { ignored: "unknown_invoice", invoice: id };
+  // Stripe delivers at least once: an invoice already settled stays as it is.
+  if (row.status === "paid" || row.status === "void") return { invoice: id, alreadySettled: row.status };
+  const paid = round2((Number(row.amount_paid) || 0) + (Number(session.amount_total) || 0) / 100);
+  await updateInvoiceStatus(accountId, id, { status: "paid", amountPaid: Math.min(paid, Number(row.total) || paid) });
+  return { invoice: id, paid };
 }
 
 async function invoicePdfResponse(accountId: string, id: string) {

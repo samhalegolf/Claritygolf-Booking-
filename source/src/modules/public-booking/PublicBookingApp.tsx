@@ -39,12 +39,14 @@ function currentWeek() {
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
 /** The lesson's price in the business's own currency, with its tax named when
- *  prices are quoted before it ("$80 + GST"). */
+ *  prices are quoted before it ("$80 + GST"), and "per person" when that is
+ *  how the coach priced it. */
 function price(service: Service, account: Account) {
   if (service.priceMode === "free" || !service.price) return t("Free");
   const amount = money(service.price, account);
   const tax = account.invoiceSettings;
-  return tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+  const quoted = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+  return service.priceMode === "per-person" ? t("{price} per person", { price: quoted }) : quoted;
 }
 /** What the player is told a review will be back by. The server sets the real
  *  deadline at booking; this is the same sum a day earlier or later at worst,
@@ -88,12 +90,14 @@ function blankAttendees(service: Service | null): Attendee[] {
 }
 function blankAttendee(): Attendee { return { name: "", email: "", invite: false, handedness: "right" }; }
 
-/** A player's swing as a small R / L toggle, for a row in the group list. The
- *  initials keep it narrow; the full label and explainer are its name and tip. */
+/** A player's swing as the app's small two-way pill switch (the theme
+ *  switch's look): one press flips it. The initials keep it narrow; the full
+ *  label and explainer are its name and tip. */
 function SwingToggle({ value, onChange, label }: { value: Handedness; onChange: (next: Handedness) => void; label: string }) {
-  return <div aria-label={label} className="booking-handedness booking-swing" role="radiogroup">
-    {handednessOptions.map((option) => <button aria-checked={value === option.value} aria-label={option.label} className={value === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => onChange(option.value)} role="radio" title={`${option.label}. ${option.explainer}`} type="button">{option.short}</button>)}
-  </div>;
+  const current = handednessOptions.find((option) => option.value === value) ?? handednessOptions[0];
+  return <button aria-label={`${label}: ${current.label}`} className="booking-swing" onClick={() => onChange(value === "left" ? "right" : "left")} title={`${current.label}. ${current.explainer}`} type="button">
+    {handednessOptions.map((option) => <span aria-hidden="true" className={option.value === value ? "active" : ""} key={option.value}>{option.short}</span>)}
+  </button>;
 }
 
 /**

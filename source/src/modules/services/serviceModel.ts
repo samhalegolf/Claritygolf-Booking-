@@ -176,6 +176,17 @@ export function serviceFormatLabel(service?: Partial<Service> | null) {
   return t("Private");
 }
 
+/**
+ * Whether a lesson type may be priced per person rather than as a total. Only
+ * private and scheduled group lessons: a custom group already prices by head
+ * through its base and extra person prices, a review is one swing, and a pass
+ * is sold whole. Kept in step with pricesPerPerson in _shared/services.mts.
+ */
+export function canPricePerPerson(service?: Partial<Service> | null) {
+  const format = service?.lessonFormat ?? "private";
+  return format === "private" || (format === "group" && !hasCustomGroupFlag(service));
+}
+
 export function customGroupBaseParticipants(service?: Partial<Service> | null) {
   const raw = Number(service?.baseParticipants ?? DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS);
   return Number.isFinite(raw)
@@ -485,7 +496,7 @@ export function cleanService(service?: Partial<Service>, index = 0): Service {
   const basePrice = customGroupBasePrice(service);
   const extraPersonPrice = customGroupExtraPersonPrice(service);
   const priceMode: PriceMode =
-    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup ? "per-person" : "session";
+    service?.priceMode === "per-person" && canPricePerPerson({ lessonFormat, customGroup }) ? "per-person" : "session";
   const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
     ? clamp(Math.round(Number(service?.packageAllowance)), 1, 100)
     : Math.max(1, fallback.packageAllowance ?? 5);
@@ -499,7 +510,9 @@ export function cleanService(service?: Partial<Service>, index = 0): Service {
     coachIds: cleanScopeIds(serviceCoachIds(service)),
     name,
     duration: clamp(Math.round(duration), 15, 240),
-    price: Math.max(0, Math.round(price)),
+    // A custom group's price is its base price. The editor has one price box,
+    // so `price` follows it rather than holding a second number nobody sees.
+    price: customGroup ? basePrice : Math.max(0, Math.round(price)),
     description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
     visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
     active: service?.active !== false,
@@ -572,7 +585,7 @@ export function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"
   if (isCustomGroupService(service)) {
     return t("{price} up to {count}", { price: formatMoney(customGroupBasePrice(service)), count: customGroupBaseParticipants(service) });
   }
-  return service.priceMode === "per-person" ? t("{price} pp", { price: formatMoney(service.price) }) : formatMoney(service.price);
+  return service.priceMode === "per-person" ? t("{price} per person", { price: formatMoney(service.price) }) : formatMoney(service.price);
 }
 
 export type ServiceNumberField =
@@ -601,6 +614,19 @@ export const SERVICE_NUMBER_LIMITS: Record<ServiceNumberField, { min: number; ma
   basePrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_BASE_PRICE },
   extraPersonPrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE },
 };
+
+/**
+ * The number boxes the editor shows for this lesson type's format. Saving asks
+ * for each of these to be filled in; one left blank on another format is not
+ * on screen, so it keeps the value it had.
+ */
+export function serviceNumberFieldsShown(service?: Partial<Service> | null): ServiceNumberField[] {
+  const format = serviceEditorFormat(service);
+  if (format === "custom-group") return ["duration", "basePrice", "baseParticipants", "extraPersonPrice"];
+  if (format === "package") return ["duration", "price", "packageAllowance"];
+  if (format === "video-review") return ["duration", "price", "reviewTurnaroundDays"];
+  return ["duration", "price"];
+}
 
 export function generateServiceDraftId() {
   return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
