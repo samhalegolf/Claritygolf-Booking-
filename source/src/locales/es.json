@@ -4772,5 +4772,22 @@
   "This is your live booking page. Anything you book here is a real booking.": "Esta es tu página de reservas real. Todo lo que reserves aquí es una reserva de verdad.",
   "Copy this and send it to {name} however you like:": "Copia esto y envíaselo a {name} como prefieras:",
   "Invite message for {name}": "Mensaje de invitación para {name}",
-  "I've sent it": "Ya lo he enviado"
+  "I've sent it": "Ya lo he enviado",
+  "Paid with your new package": "Pagado con tu nuevo bono",
+  "Package bought · this lesson is covered": "Bono comprado · esta clase está cubierta",
+  "{count} lesson left on your package": "Te queda {count} clase en tu bono",
+  "{count} lessons left on your package": "Te quedan {count} clases en tu bono",
+  "Book your next lesson": "Reserva tu próxima clase",
+  "Pay for this lesson": "Pagar esta clase",
+  "Buy a {count}-lesson package": "Comprar un bono de {count} clases",
+  "Save {amount}": "Ahorra {amount}",
+  "{each} a lesson instead of {price}": "{each} por clase en vez de {price}",
+  "This lesson uses your first credit.": "Esta clase usa tu primer crédito.",
+  "{count} more for your next lesson, to use within {months} months.": "{count} más para tu próxima clase, para usar en {months} meses.",
+  "{count} more for your next lessons, to use within {months} months.": "{count} más para tus próximas clases, para usar en {months} meses.",
+  "{count} more for your next lesson, whenever you like.": "{count} más para tu próxima clase, cuando quieras.",
+  "{count} more for your next lessons, whenever you like.": "{count} más para tus próximas clases, cuando quieras.",
+  "Buy package · {amount}": "Comprar bono · {amount}",
+  "Package bought": "Bono comprado",
+  "Your coach will put it towards this lesson.": "Tu entrenador lo aplicará a esta clase."
 }

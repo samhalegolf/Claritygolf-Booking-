@@ -4772,5 +4772,22 @@
   "This is your live booking page. Anything you book here is a real booking.": "Ceci est votre page de réservation en ligne. Tout ce que vous réservez ici est une vraie réservation.",
   "Copy this and send it to {name} however you like:": "Copiez ceci et envoyez-le à {name} comme vous voulez :",
   "Invite message for {name}": "Message d’invitation pour {name}",
-  "I've sent it": "Je l’ai envoyé"
+  "I've sent it": "Je l’ai envoyé",
+  "Paid with your new package": "Payé avec votre nouveau forfait",
+  "Package bought · this lesson is covered": "Forfait acheté · ce cours est couvert",
+  "{count} lesson left on your package": "Il reste {count} cours sur votre forfait",
+  "{count} lessons left on your package": "Il reste {count} cours sur votre forfait",
+  "Book your next lesson": "Réservez votre prochain cours",
+  "Pay for this lesson": "Payer ce cours",
+  "Buy a {count}-lesson package": "Acheter un forfait de {count} cours",
+  "Save {amount}": "Économisez {amount}",
+  "{each} a lesson instead of {price}": "{each} le cours au lieu de {price}",
+  "This lesson uses your first credit.": "Ce cours utilise votre premier crédit.",
+  "{count} more for your next lesson, to use within {months} months.": "{count} de plus pour votre prochain cours, à utiliser sous {months} mois.",
+  "{count} more for your next lessons, to use within {months} months.": "{count} de plus pour vos prochains cours, à utiliser sous {months} mois.",
+  "{count} more for your next lesson, whenever you like.": "{count} de plus pour votre prochain cours, quand vous voulez.",
+  "{count} more for your next lessons, whenever you like.": "{count} de plus pour vos prochains cours, quand vous voulez.",
+  "Buy package · {amount}": "Acheter le forfait · {amount}",
+  "Package bought": "Forfait acheté",
+  "Your coach will put it towards this lesson.": "Votre coach l’appliquera à ce cours."
 }

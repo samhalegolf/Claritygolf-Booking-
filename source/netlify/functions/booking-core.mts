@@ -8392,6 +8392,32 @@ export async function handlePublicBookingPayRequest(req: Request) {
     const service = (catalogue.services || []).find((candidate) => candidate.id === appointment.serviceId);
     const payment = bookerPaymentFor(appointment, service);
     const billing = await import("./billing-api.mts");
+    // Paying with a package: buy one that covers this lesson and its first
+    // credit pays for it. Not for a group lesson -- one person's package
+    // paying for a group's lesson is a different thing, not offered yet.
+    if (body?.action === "offers" || body?.action === "package" || body?.action === "package-status") {
+      if (appointment.customGroup) {
+        if (body.action === "offers") return json({ ok: true, offers: [] });
+        throw Object.assign(new Error("Packages can't pay for a group lesson."), { status: 400 });
+      }
+      if (body.action === "offers") {
+        return json({ ok: true, offers: await billing.bookingPackageOffers(accountId, appointment.serviceId) });
+      }
+      if (body.action === "package") {
+        return json({
+          ok: true,
+          ...(await billing.startBookingPackageOrder(accountId, {
+            bookingId: appointment.id,
+            lessonServiceId: appointment.serviceId,
+            packageServiceId: cleanString(body?.packageId, "", 160),
+            personId: cleanString(appointment.personId, "", 160),
+            name: cleanString(appointment.client, "", 160),
+            email: cleanEmail(appointment.email, ""),
+          })),
+        });
+      }
+      return json({ ok: true, ...(await billing.bookingPackageOrderStatus(accountId, cleanString(body?.orderId, "", 160), appointment.id)) });
+    }
     if (body?.action === "status") {
       return json({ ok: true, paid: await billing.bookerPaymentPaid(accountId, { bookingId: appointment.id, share: payment.share }) });
     }

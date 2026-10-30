@@ -4772,5 +4772,22 @@
   "This is your live booking page. Anything you book here is a real booking.": "Dette er den ekte bookingsiden din. Alt du booker her, er en ekte booking.",
   "Copy this and send it to {name} however you like:": "Kopier dette og send det til {name} slik du vil:",
   "Invite message for {name}": "Invitasjonsmelding til {name}",
-  "I've sent it": "Jeg har sendt den"
+  "I've sent it": "Jeg har sendt den",
+  "Paid with your new package": "Betalt med den nye pakken din",
+  "Package bought · this lesson is covered": "Pakke kjøpt · denne timen er dekket",
+  "{count} lesson left on your package": "{count} time igjen på pakken din",
+  "{count} lessons left on your package": "{count} timer igjen på pakken din",
+  "Book your next lesson": "Bestill neste time",
+  "Pay for this lesson": "Betal for denne timen",
+  "Buy a {count}-lesson package": "Kjøp en pakke med {count} timer",
+  "Save {amount}": "Spar {amount}",
+  "{each} a lesson instead of {price}": "{each} per time i stedet for {price}",
+  "This lesson uses your first credit.": "Denne timen bruker din første kreditt.",
+  "{count} more for your next lesson, to use within {months} months.": "{count} til for neste time, til bruk innen {months} måneder.",
+  "{count} more for your next lessons, to use within {months} months.": "{count} til for de neste timene, til bruk innen {months} måneder.",
+  "{count} more for your next lesson, whenever you like.": "{count} til for neste time, når du vil.",
+  "{count} more for your next lessons, whenever you like.": "{count} til for de neste timene, når du vil.",
+  "Buy package · {amount}": "Kjøp pakke · {amount}",
+  "Package bought": "Pakke kjøpt",
+  "Your coach will put it towards this lesson.": "Treneren din bruker den på denne timen."
 }

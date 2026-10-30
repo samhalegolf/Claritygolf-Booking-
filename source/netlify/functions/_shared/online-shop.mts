@@ -149,3 +149,59 @@ export function readOnlineOrder(
 export function onlineBuyerPersonId(transactionId: string) {
   return `online-${text(transactionId, 120)}`;
 }
+
+/** A package offered while booking a lesson it covers: buy it, and the lesson takes its first credit. */
+export type LessonPackageOffer = {
+  /** The till's catalog id, as an online order names it. */
+  id: string;
+  serviceId: string;
+  name: string;
+  /** Major units, as the catalogue stores them. */
+  price: number;
+  /** Lessons it covers in all, this one included. */
+  credits: number;
+  /** How long the credits last from purchase. Null: they don't expire. */
+  expiryMonths: number | null;
+  /** A bundle's contents ("5 × 1 Hour Lessons"); empty for a plain package. */
+  includes: string[];
+  /**
+   * What it saves against buying `credits` of this lesson one by one. 0 when it
+   * doesn't, or can't be said: a bundle mixes in other things, so "per lesson"
+   * means nothing for it.
+   */
+  saving: number;
+};
+
+/**
+ * The packages a lesson could be paid with: the ones the shop sells (the same
+ * rule, so the booking page never offers what the shop would refuse) whose
+ * credits cover this lesson. Cheapest first.
+ */
+export function packageOffersForLesson(services: unknown, currency: string, lessonServiceId: string): LessonPackageOffer[] {
+  const listed = Array.isArray(services)
+    ? (services as Array<Record<string, unknown>>).filter((service) => service?.archived !== true)
+    : [];
+  const lesson = listed.find((service) => text(service?.id, 120) === lessonServiceId);
+  if (!lesson || text(lesson.lessonFormat, 40) === "package") return [];
+  const lessonPrice = text(lesson.priceMode, 40) === "free" ? 0 : Number(lesson.price) || 0;
+  return playerShopItems(listed, currency)
+    .filter((item) => item.kind === "package" && item.credits > 0)
+    .filter((item) => item.coversAllServices || item.coversServiceIds.includes(lessonServiceId))
+    .map((item) => {
+      const source = listed.find((service) => text(service?.id, 120) === item.serviceId);
+      const months = Number(source?.passExpiryMonths);
+      const bundle = item.includes.length > 0;
+      const saving = !bundle && lessonPrice > 0 ? Math.round((lessonPrice * item.credits - item.price) * 100) / 100 : 0;
+      return {
+        id: `${LESSON_ITEM_PREFIX}${item.serviceId}`,
+        serviceId: item.serviceId,
+        name: item.name,
+        price: item.price,
+        credits: item.credits,
+        expiryMonths: Number.isFinite(months) && months > 0 ? Math.round(months) : null,
+        includes: item.includes,
+        saving: saving > 0 ? saving : 0,
+      };
+    })
+    .sort((a, b) => a.price - b.price || a.name.localeCompare(b.name));
+}

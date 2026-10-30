@@ -4772,5 +4772,22 @@
   "This is your live booking page. Anything you book here is a real booking.": "これは本番の予約ページです。ここでの予約はすべて実際の予約になります。",
   "Copy this and send it to {name} however you like:": "これをコピーして、お好きな方法で{name}さんに送ってください：",
   "Invite message for {name}": "{name}さんへの招待メッセージ",
-  "I've sent it": "送りました"
+  "I've sent it": "送りました",
+  "Paid with your new package": "新しいパッケージで支払い済み",
+  "Package bought · this lesson is covered": "パッケージ購入済み · このレッスンは支払い済みです",
+  "{count} lesson left on your package": "パッケージの残り{count}回",
+  "{count} lessons left on your package": "パッケージの残り{count}回",
+  "Book your next lesson": "次のレッスンを予約",
+  "Pay for this lesson": "このレッスンを支払う",
+  "Buy a {count}-lesson package": "{count}回レッスンのパッケージを購入",
+  "Save {amount}": "{amount}お得",
+  "{each} a lesson instead of {price}": "1回{price}のところ{each}",
+  "This lesson uses your first credit.": "このレッスンで最初の1回分を使います。",
+  "{count} more for your next lesson, to use within {months} months.": "次のレッスン用にあと{count}回分。{months}か月以内にご利用ください。",
+  "{count} more for your next lessons, to use within {months} months.": "次のレッスン用にあと{count}回分。{months}か月以内にご利用ください。",
+  "{count} more for your next lesson, whenever you like.": "次のレッスン用にあと{count}回分。いつでもご利用いただけます。",
+  "{count} more for your next lessons, whenever you like.": "次のレッスン用にあと{count}回分。いつでもご利用いただけます。",
+  "Buy package · {amount}": "パッケージを購入 · {amount}",
+  "Package bought": "パッケージを購入しました",
+  "Your coach will put it towards this lesson.": "コーチがこのレッスンに適用します。"
 }
