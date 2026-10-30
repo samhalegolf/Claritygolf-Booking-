@@ -19,7 +19,6 @@ import {
   holdResourceIfAutomatic,
   queueResourceAction,
   queueResourceHold,
-  releaseResource,
   runResourceAction,
 } from "./_shared/resource-handler.mts";
 import { bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
@@ -3880,20 +3879,18 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
   const existingItem = current.items.find((item) => item.id === cleanId);
   let optixBayWarning = "";
   if (existingItem?.kind === "appointment") {
-    try {
-      await releaseResource(accountId, cleanId);
-    } catch (error) {
-      // A bay Optix will not release must not strand the lesson in Clarity.
-      // Blocking the delete here is what left an undeletable ghost on the
-      // calendar when Optix answered a release with an internal server error.
-      // cancelOptixBayForCalendarItem has already marked the sync row failed,
-      // so the delete goes ahead and the coach is told to clear the bay there.
-      const detail = cleanString(
-        error?.cause?.message || (error instanceof Error ? error.message : String(error || "")),
-        "Optix did not confirm the release.",
-        400,
-      );
-      optixBayWarning = `The lesson was removed from Clarity, but its Optix bay booking was not released: ${detail} Cancel the bay in Optix so the slot is not held.`;
+    // A bay the other system will not release must not strand the lesson in
+    // Clarity. Blocking the delete on the refusal is what left an undeletable
+    // ghost on the calendar when Optix answered a release with an internal
+    // server error. So the release owed is written down first, the attempt is
+    // made, and on a refusal the delete goes ahead: the sweep retries the
+    // release from the ledger row after the lesson is gone, and the coach is
+    // told in case it never succeeds.
+    await queueResourceAction(accountId, [cleanId], "release");
+    const released = await runResourceAction(accountId, cleanId, "release");
+    if (!released.done) {
+      const detail = cleanString(released.error, "The bay system did not confirm the release.", 400);
+      optixBayWarning = `The lesson was removed from Clarity, but its bay booking was not released: ${detail} Clarity will keep trying for a few minutes; if the bay is still held after that, cancel it in the bay system.`;
       console.error("calendar_delete:optix_bay_release_failed", { calendarItemId: cleanId, detail });
     }
   }

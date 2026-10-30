@@ -444,14 +444,17 @@ export async function sweepQueuedResourceActions(
         SELECT account_id FROM calendar_items WHERE id = ${calendarItemId} LIMIT 1
       `;
       const accountId = String(claimed[0].account_id || lessons[0]?.account_id || "");
-      if (!lessons[0] || attempts > ACTION_MAX_ATTEMPTS) {
-        // Deleted lessons release their bay in the delete itself; a lesson
-        // that is gone has nothing left to move. After the last attempt the
-        // row keeps the refusal the coach can see, without the mark.
+      // A release outlives its lesson: the delete that owed it goes ahead when
+      // the other system refuses (see deleteCalendarItemById), and the ledger
+      // row is enough to release from. A move does not -- a lesson that is
+      // gone has nothing left to move. After the last attempt the row keeps
+      // the refusal the coach can see, without the mark.
+      const abandoned = attempts > ACTION_MAX_ATTEMPTS;
+      if (abandoned || (action === "move" && !lessons[0])) {
         await settleResourceAction(calendarItemId, action);
         outcome.settled += 1;
-        record(!lessons[0] ? "lesson_deleted" : "abandoned");
-        if (lessons[0]) console.error("resource_action_abandoned", { calendarItemId, action, attempts });
+        record(abandoned ? "abandoned" : "lesson_deleted");
+        if (abandoned) console.error("resource_action_abandoned", { calendarItemId, action, attempts });
         continue;
       }
       const result = await runResourceAction(accountId, calendarItemId, action);

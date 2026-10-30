@@ -467,9 +467,16 @@ export async function webhookRelease(accountId: string, calendarItemId: string) 
   }
   const lesson = await readLesson(accountId, calendarItemId);
   const config = await readResourceWebhookConfig(accountId);
-  if (!lesson || !configured(config)) {
+  if (!configured(config)) {
     throw Object.assign(new Error("The bay could not be released because the bay system is not connected."), {
       code: "not_configured",
+    });
+  }
+  // The webhook describes the lesson to the other system, so a release
+  // retried after the lesson was deleted has nothing to send.
+  if (!lesson) {
+    throw Object.assign(new Error("The bay could not be released because its lesson no longer exists."), {
+      code: "lesson_deleted",
     });
   }
   const business = await readBusiness(accountId);
