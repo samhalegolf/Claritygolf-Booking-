@@ -17877,7 +17877,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   <BrowserNotificationsPanel />
                 </Suspense>
               ) : null}
-              {servicesSettingsPanel}
+              {/* Own tab only. Every other panel sits in a SettingsGroup that
+                  returns null off its tab; this one draws its own header and
+                  list, so without the guard "Lesson types" and its New button
+                  sat at the top of every section. */}
+              {settingsTab === "services" ? servicesSettingsPanel : null}
               {isAdminUser ? terminologySettingsPanel : null}
               {isAdminUser ? coachesSettingsPanel : null}
               {isAdminUser ? locationsSettingsPanel : null}
