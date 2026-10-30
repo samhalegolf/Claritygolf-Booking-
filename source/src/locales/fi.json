@@ -4721,7 +4721,6 @@
   "{booker} booked you into {lesson} with {business}, {when}.": "{booker} varasi sinulle paikan: {lesson}, {business}, {when}.",
   "Your share is {share}. Pay and confirm your spot here:": "Osuutesi on {share}. Maksa ja vahvista paikkasi tästä:",
   "It's covered. Confirm your spot here:": "Se on jo maksettu. Vahvista paikkasi tästä:",
-  "Copy this link and send it to {name}: {url}": "Kopioi tämä linkki ja lähetä se henkilölle {name}: {url}",
   "Payment could not be started. You can pay on the day.": "Maksua ei voitu aloittaa. Voit maksaa paikan päällä.",
   "Paying {amount} on the day": "{amount} maksetaan paikan päällä",
   "{total} · {share} each": "{total} · {share} / hlö",
@@ -4770,5 +4769,8 @@
   "Review due {date}": "Arvio viimeistään {date}",
   "Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.": "Lähetä swingisi portaalista ({customerSingular}), kun olet valmis — {staffSingular} noudattaa käsittelyaikaa siitä eteenpäin.",
   "Confirm booking": "Vahvista varaus",
-  "This is your live booking page. Anything you book here is a real booking.": "Tämä on oikea varaussivusi. Kaikki täällä tehdyt varaukset ovat oikeita varauksia."
+  "This is your live booking page. Anything you book here is a real booking.": "Tämä on oikea varaussivusi. Kaikki täällä tehdyt varaukset ovat oikeita varauksia.",
+  "Copy this and send it to {name} however you like:": "Kopioi tämä ja lähetä se henkilölle {name} haluamallasi tavalla:",
+  "Invite message for {name}": "Kutsuviesti henkilölle {name}",
+  "I've sent it": "Lähetin sen"
 }

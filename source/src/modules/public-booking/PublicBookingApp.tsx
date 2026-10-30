@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight, ChevronDown, Pencil, Plus, X } from "lucide-reac
 import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen, publicApi, publicBookingRoute, publicShopHref, withBusiness } from "./bookingScreen";
 import { WeekSlots } from "./WeekSlots";
-import { BookingFrame, money, type Account, type Brand } from "./BookingFrame";
+import { BookingFrame, money, quotedMoney, type Account, type Brand } from "./BookingFrame";
 import { BookingConfirmed, type ConfirmedBooking, type ConfirmedGroup } from "./BookingConfirmed";
 import { forgetRememberedBooker, readRememberedBooker, saveRememberedBooker, type RememberedBooker } from "./rememberedBooker";
 import { resolvedMarketFromWire } from "../../../netlify/functions/_shared/market-profile.mts";
@@ -45,9 +45,7 @@ function time(minutes: number) { const hour = Math.floor(minutes / 60); return `
  *  how the coach priced it. */
 function price(service: Service, account: Account) {
   if (service.priceMode === "free" || !service.price) return t("Free");
-  const amount = money(service.price, account);
-  const tax = account.invoiceSettings;
-  const quoted = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+  const quoted = quotedMoney(service.price, account);
   return service.priceMode === "per-person" ? t("{price} per person", { price: quoted }) : quoted;
 }
 /** What the player is told a review will be back by. The server sets the real
@@ -143,17 +141,17 @@ function GroupAttendees({ service, account, booker, bookerSwing, askHandedness, 
     })}
     <button className="booking-group-add" disabled={1 + attendees.length >= max} onClick={addPerson} type="button"><Plus size={15} />{1 + attendees.length >= max ? t("Group full ({max})", { max }) : t("Add person")}</button>
     <p className="booking-group-summary">
-      <strong>{tn(size, "{count} person", "{count} people")} · {money(total, account)}</strong>
+      <strong>{tn(size, "{count} person", "{count} people")} · {quotedMoney(total, account)}</strong>
       {size < min ? <span>{tn(min - size, "Add {count} more person to book this lesson.", "Add {count} more people to book this lesson.")}</span> : <span>{t("Up to {max} people.", { max })}</span>}
     </p>
     <fieldset className="booking-group-payment">
       <legend>{t("Who's paying?")}</legend>
       <div role="radiogroup" aria-label={t("Who's paying?")}>
         <button aria-checked={groupPayment === "booker"} className={groupPayment === "booker" ? "is-chosen" : ""} onClick={() => onGroupPayment("booker")} role="radio" type="button">
-          <span><strong>{t("I'll pay for everyone")}</strong><small>{t("Friends just get an invite")}</small></span><em>{money(total, account)}</em>
+          <span><strong>{t("I'll pay for everyone")}</strong><small>{t("Friends just get an invite")}</small></span><em>{quotedMoney(total, account)}</em>
         </button>
         <button aria-checked={groupPayment === "split"} className={groupPayment === "split" ? "is-chosen" : ""} onClick={() => onGroupPayment("split")} role="radio" type="button">
-          <span><strong>{tn(size, "Split it {count} way", "Split it {count} ways")}</strong><small>{t("Friends get an invite with a pay link")}</small></span><em>{t("{share} each", { share: money(share, account) })}</em>
+          <span><strong>{tn(size, "Split it {count} way", "Split it {count} ways")}</strong><small>{t("Friends get an invite with a pay link")}</small></span><em>{t("{share} each", { share: quotedMoney(share, account) })}</em>
         </button>
       </div>
     </fieldset>
@@ -302,7 +300,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
         group,
         // What paying online would cost them: their share, the whole group,
         // or the lesson. The server works out the real charge from the booking.
-        amountDue: group ? (group.payment === "split" ? Math.round((group.total / groupSize) * 100) / 100 : group.total) : service.priceMode === "free" ? 0 : Number(service.price) || 0,
+        amountDue: group ? (group.payment === "split" ? Math.round((group.total - Math.round((group.total / groupSize) * 100) / 100 * (groupSize - 1)) * 100) / 100 : group.total) : service.priceMode === "free" ? 0 : Number(service.price) || 0,
         priceLabel: group ? "" : price(service, catalogue.account),
       });
       setSubmitState("done"); onBookingComplete?.();

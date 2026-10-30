@@ -23,6 +23,15 @@ export function money(value: number, account: Account) {
   }
 }
 
+/** An amount as it will be charged: with its tax named when the business
+ *  quotes prices before tax ("$80 + GST"). An invoice raised from it adds that
+ *  tax, so a bare "$80" would be less than the card is charged. */
+export function quotedMoney(value: number, account: Account) {
+  const amount = money(value, account);
+  const tax = account.invoiceSettings;
+  return tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+}
+
 /** The frame the coach app's Booking page preview gives this same markup:
  *  .app-shell for the compatibility variables every booking rule reads
  *  (--coach-primary, --panel, --border ...), the business's brand colours from

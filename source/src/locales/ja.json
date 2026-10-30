@@ -4721,7 +4721,6 @@
   "{booker} booked you into {lesson} with {business}, {when}.": "{booker}さんが{business}の{lesson}（{when}）にあなたを予約しました。",
   "Your share is {share}. Pay and confirm your spot here:": "あなたの負担額は{share}です。こちらからお支払いのうえ参加を確定してください：",
   "It's covered. Confirm your spot here:": "お支払いは済んでいます。こちらから参加を確定してください：",
-  "Copy this link and send it to {name}: {url}": "このリンクをコピーして{name}さんに送ってください：{url}",
   "Payment could not be started. You can pay on the day.": "お支払いを開始できませんでした。当日お支払いいただけます。",
   "Paying {amount} on the day": "{amount}を当日お支払い",
   "{total} · {share} each": "{total} · 1人あたり{share}",
@@ -4770,5 +4769,8 @@
   "Review due {date}": "レビュー期限 {date}",
   "Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.": "準備ができたら{customerSingular}ポータルからスイングを送信してください。そこから{staffSingular}が返却期限に沿って対応します。",
   "Confirm booking": "予約を確定",
-  "This is your live booking page. Anything you book here is a real booking.": "これは本番の予約ページです。ここでの予約はすべて実際の予約になります。"
+  "This is your live booking page. Anything you book here is a real booking.": "これは本番の予約ページです。ここでの予約はすべて実際の予約になります。",
+  "Copy this and send it to {name} however you like:": "これをコピーして、お好きな方法で{name}さんに送ってください：",
+  "Invite message for {name}": "{name}さんへの招待メッセージ",
+  "I've sent it": "送りました"
 }

@@ -18625,3 +18625,22 @@
 .app-shell.is-phone .sell-docket {
   padding: 12px;
 }
+
+/* The invite to copy by hand, where the page may not share or copy for you. */
+.booking-person-manual {
+  display: grid;
+  gap: 8px;
+}
+
+.booking-person-manual textarea {
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--booking-border, var(--c-border));
+  border-radius: 8px;
+  background: var(--booking-input, var(--c-surface));
+  color: var(--booking-text, var(--c-text));
+  font: inherit;
+  font-size: var(--c-size-meta);
+  resize: none;
+}

@@ -8191,10 +8191,12 @@ export async function handlePublicBookingRequest(req, context = null) {
 // and lapses after PUBLIC_BOOKING_ACCESS_DAYS -- the `INTERVAL '90 days'` below.
 const PUBLIC_BOOKING_ACCESS_DAYS = 90;
 void PUBLIC_BOOKING_ACCESS_DAYS;
-// At most this many invite emails per friend on one booking. The address is
-// whatever the booker types, so without a ceiling the confirmation screen is a
-// way to send this business's email to anyone, as often as they like.
+// Ceilings on invite emails from one booking: in all (this many per person on
+// it), and to any one address. The address is whatever the booker types, so
+// without them the confirmation screen is a way to send this business's email
+// to anyone, as often as they like.
 const INVITE_EMAILS_PER_ATTENDEE = 5;
+const INVITE_EMAILS_PER_ADDRESS = 3;
 
 async function issueBookingAccess(accountId: string, appointmentId: string) {
   const token = randomBytes(32).toString("base64url");
@@ -8229,13 +8231,58 @@ async function bookingForAccess(accountId: string, body: Record<string, any>) {
   return appointment;
 }
 
-/** Saves one booking's new attendee list, and nothing else on the calendar. */
-async function writeAttendees(accountId: string, appointment: Record<string, any>, attendees: Record<string, any>[]) {
-  const next = { ...appointment, attendees };
-  await writeItems([next], { accountId });
+/**
+ * Changes one person on a group booking, and nothing else.
+ *
+ * The row is locked and re-read inside the transaction, and only that one
+ * attendee is changed, so two changes at once -- the booker sharing one
+ * friend's link while emailing another, or a friend confirming while the
+ * booker resends their invite -- both land instead of one undoing the other.
+ * Returns the booking as it now stands, or null if that person is not on it.
+ */
+async function patchAttendee(
+  accountId: string,
+  appointmentId: string,
+  isTarget: (attendee: Record<string, any>) => boolean,
+  patch: (attendee: Record<string, any>) => Record<string, any>,
+) {
+  const client = await db().pool.connect();
+  let changed = false;
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      "SELECT custom_group FROM calendar_items WHERE account_id = $1 AND id = $2 FOR UPDATE",
+      [accountId, appointmentId],
+    );
+    const raw = rows[0]?.custom_group;
+    const group = typeof raw === "string" ? safeJsonParse(raw, null) : raw;
+    if (!group || !Array.isArray(group.attendees)) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const attendees = group.attendees.map((attendee, index) => {
+      if (changed || attendee?.status === "booker" || !isTarget(attendee)) return attendee;
+      changed = true;
+      return cleanCustomGroupAttendee(patch(attendee), index) || attendee;
+    });
+    if (!changed) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    await client.query(
+      "UPDATE calendar_items SET custom_group = $3::jsonb, updated_at = NOW() WHERE account_id = $1 AND id = $2",
+      [accountId, appointmentId, JSON.stringify({ ...group, attendees })],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
   // The coach's calendar refetches when this moves.
   await setSetting(accountId, "updatedAt", nowIso());
-  return next;
+  return readCalendarItemById(accountId, appointmentId);
 }
 
 /**
@@ -8264,29 +8311,33 @@ export async function handlePublicBookingInviteRequest(req: Request) {
     if (!method) throw Object.assign(new Error("Choose how to send the invite."), { status: 400 });
     const token = cleanString(attendee.token, "", 180) || randomUUID();
 
+    const isThem = (candidate) => candidate.id === attendeeId;
+
     if (method === "link") {
-      await writeAttendees(accountId, appointment, appointment.attendees.map((candidate) =>
-        candidate.id === attendeeId ? { ...candidate, token, invitedVia: "link" } : candidate,
-      ));
+      await patchAttendee(accountId, appointment.id, isThem, (candidate) => ({ ...candidate, token: candidate.token || token, invitedVia: "link" }));
       return json({ ok: true, method, url: customGroupInviteUrl(new URL(req.url).origin, accountId, token) });
     }
 
     const email = cleanEmail(body?.email, "");
     if (!email) throw Object.assign(new Error("Enter a valid email address."), { status: 400 });
-    const sentBefore = (await readNotificationHistoryForAppointment(accountId, appointment.id)).filter(
+    if ((await getSetting(accountId, "sendClientEmail")) === "false") {
+      throw Object.assign(new Error("This business isn't sending emails right now. Share the link instead."), { status: 409 });
+    }
+    const sent = (await readNotificationHistoryForAppointment(accountId, appointment.id)).filter(
       (record) => String(record.kind || "").endsWith("custom_group_invite_email") && record.status === "sent",
-    ).length;
-    if (sentBefore >= INVITE_EMAILS_PER_ATTENDEE * appointment.attendees.length) {
+    );
+    if (
+      sent.filter((record) => cleanEmail(record.recipient, "") === email).length >= INVITE_EMAILS_PER_ADDRESS ||
+      sent.length >= INVITE_EMAILS_PER_ATTENDEE * appointment.attendees.length
+    ) {
       throw Object.assign(new Error("That's a lot of invites for one booking. Share the link instead."), { status: 429 });
     }
-    const updated = await writeAttendees(accountId, appointment, appointment.attendees.map((candidate) =>
-      candidate.id === attendeeId
-        ? { ...candidate, email, token, invitedVia: "email", status: candidate.status === "confirmed" ? "confirmed" : "invited" }
-        : candidate,
-    ));
+    // Sent first, saved after: a friend is only marked invited by email once
+    // the email has actually gone.
+    const invitee = { ...attendee, email, token, invitedVia: "email", status: attendee.status === "confirmed" ? "confirmed" : "invited" };
     const results = await notifyBookingEvent({
       action: "booking",
-      appointment: { ...updated, accountId },
+      appointment: { ...appointment, accountId, attendees: appointment.attendees.map((candidate) => (isThem(candidate) ? invitee : candidate)) },
       source: "public-booking-invite",
       inviteAttendeeId: attendeeId,
       idempotencyNonce: randomUUID(),
@@ -8294,6 +8345,13 @@ export async function handlePublicBookingInviteRequest(req: Request) {
     if (!results.some((result) => result.sent === true)) {
       return json({ ok: false, message: "The invite could not be emailed. Try again, or share the link instead." }, 502);
     }
+    await patchAttendee(accountId, appointment.id, isThem, (candidate) => ({
+      ...candidate,
+      email,
+      token: candidate.token || token,
+      invitedVia: "email",
+      status: candidate.status === "confirmed" ? "confirmed" : "invited",
+    }));
     return json({ ok: true, method, email });
   } catch (error) {
     console.error("public_booking_invite:failed", error);
@@ -8463,14 +8521,17 @@ export async function handleCustomGroupConfirmRequest(req: Request) {
     const service = (catalogue.services || []).find((candidate) => candidate.id === appointment.serviceId);
     const booker = cleanString(appointment.client, "", 160).split(/\s+/)[0] || "Your friend";
     const share = friendShareAmount(appointment);
-    const shareLabel = share > 0 ? accountMoney(share, catalogue.account) : "";
+    // As it will be charged: the share invoice adds tax when prices are quoted before it.
+    const tax = catalogue.account?.invoiceSettings;
+    const taxNote = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? ` + ${tax.taxName}` : "";
+    const shareLabel = share > 0 ? `${accountMoney(share, catalogue.account)}${taxNote}` : "";
     const cancelled = appointment.status === "cancelled";
     const rows: Array<[string, string]> = [
       ["Lesson", cleanString(service?.name, "Group lesson", 160)],
       ["When", `${formatBookingDate(appointment.week, appointment.day)}, ${clockLabel(appointment.start)}`],
       ["With", cleanString(appointment.coach?.displayName || appointment.coach?.name, "", 120)],
       ["Where", cleanString(appointment.location?.name, "", 140)],
-      ["Your share", share > 0 ? shareLabel : `Covered by ${booker}`],
+      ["Your share", share > 0 ? shareLabel : cleanGroupPayment(appointment.groupPayment) === "booker" ? `Covered by ${booker}` : ""],
     ];
     if (cancelled) {
       return invitePage({ business, heading: "This lesson was cancelled", lines: [`${booker}'s booking is no longer going ahead.`], rows });
@@ -8481,9 +8542,7 @@ export async function handleCustomGroupConfirmRequest(req: Request) {
       const form = new URLSearchParams(await req.text());
       const action = form.get("action");
       if (attendee.status !== "confirmed") {
-        appointment = await writeAttendees(accountId, appointment, appointment.attendees.map((candidate) =>
-          candidate.token === token ? { ...candidate, status: "confirmed" } : candidate,
-        ));
+        appointment = (await patchAttendee(accountId, appointment.id, (candidate) => candidate.token === token, (candidate) => ({ ...candidate, status: "confirmed" }))) || appointment;
         attendee = { ...attendee, status: "confirmed" };
       }
       if (action === "pay" && share > 0) {

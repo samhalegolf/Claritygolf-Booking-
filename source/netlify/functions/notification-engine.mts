@@ -1273,7 +1273,9 @@ export async function notifyBookingEvent(input: NotifyInput) {
     const stillComing = new Set(action === "cancelled" ? [] : (appt.attendees || []).map((attendee: any) => cleanString(attendee?.id, "", 120)));
     const gone = ((action === "cancelled" ? appt.attendees : previous?.attendees) || [])
       .map((attendee: any) => cleanString(attendee?.id, "", 120))
-      .filter((id: string) => id && id !== "booker" && !stillComing.has(id));
+      // The booker has a share of their own once they pay theirs online, and
+      // it goes with the lesson when the lesson is cancelled.
+      .filter((id: string) => id && (action === "cancelled" || id !== "booker") && !stillComing.has(id));
     if (gone.length) {
       try {
         const { voidGroupShareInvoices } = await import("./billing-api.mts");
@@ -1354,7 +1356,8 @@ export async function notifyGroupSharePaid(input: { accountId: string; bookingId
     const mt = messageText(settings.messageLanguage);
     const appt = normaliseAppointment({ ...row, ...group }, mt("Client"));
     const recipient = cleanEmail(appt.email, "");
-    if (!recipient || appt.status === "cancelled") return null;
+    // The business's own switch for emails to clients covers this one too.
+    if (!recipient || appt.status === "cancelled" || !settings.sendClientEmail) return null;
     const payer = (appt.attendees || []).find((attendee: any) => attendee.id === attendeeId);
     const payerName = cleanString(payer?.name, "", 120) || mt("Someone in your group");
     const services = await readServices(input.accountId);

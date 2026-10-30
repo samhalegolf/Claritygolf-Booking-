@@ -4721,7 +4721,6 @@
   "{booker} booked you into {lesson} with {business}, {when}.": "{booker} har booket dig på {lesson} hos {business}, {when}.",
   "Your share is {share}. Pay and confirm your spot here:": "Din andel er {share}. Betal og bekræft din plads her:",
   "It's covered. Confirm your spot here:": "Det er betalt. Bekræft din plads her:",
-  "Copy this link and send it to {name}: {url}": "Kopiér dette link, og send det til {name}: {url}",
   "Payment could not be started. You can pay on the day.": "Betalingen kunne ikke startes. Du kan betale på dagen.",
   "Paying {amount} on the day": "Betaler {amount} på dagen",
   "{total} · {share} each": "{total} · {share} pr. person",
@@ -4770,5 +4769,8 @@
   "Review due {date}": "Gennemgang senest {date}",
   "Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.": "Send dit sving fra {customerSingular}portalen, når du er klar – din {staffSingular} arbejder ud fra leveringstiden derfra.",
   "Confirm booking": "Bekræft booking",
-  "This is your live booking page. Anything you book here is a real booking.": "Dette er din aktive bookingside. Alt, hvad du booker her, er en rigtig booking."
+  "This is your live booking page. Anything you book here is a real booking.": "Dette er din aktive bookingside. Alt, hvad du booker her, er en rigtig booking.",
+  "Copy this and send it to {name} however you like:": "Kopiér dette og send det til {name}, som du vil:",
+  "Invite message for {name}": "Invitationsbesked til {name}",
+  "I've sent it": "Jeg har sendt den"
 }

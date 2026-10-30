@@ -33,8 +33,11 @@ test("covered: friends are asked for nothing and the booker pays the whole lesso
   assert.equal(bookerGroupAmount(group("booker")), 240);
 });
 
-test("a share that does not divide evenly is rounded to the cent", () => {
-  assert.equal(evenShare({ ...group("split"), calculatedPrice: 100 }), 33.33);
+test("a share that does not divide evenly leaves the odd cent with the booker", () => {
+  const uneven = { ...group("split"), calculatedPrice: 100 };
+  assert.equal(friendShareAmount(uneven), 33.33);
+  assert.equal(bookerGroupAmount(uneven), 33.34);
+  assert.equal(Math.round((friendShareAmount(uneven) * 2 + bookerGroupAmount(uneven)) * 100) / 100, 100);
 });
 
 test("the invite link names its business, so it still works with more than one", () => {

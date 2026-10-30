@@ -4721,7 +4721,6 @@
   "{booker} booked you into {lesson} with {business}, {when}.": "{booker} heeft je ingeboekt voor {lesson} bij {business}, {when}.",
   "Your share is {share}. Pay and confirm your spot here:": "Jouw deel is {share}. Betaal en bevestig je plek hier:",
   "It's covered. Confirm your spot here:": "Het is al betaald. Bevestig je plek hier:",
-  "Copy this link and send it to {name}: {url}": "Kopieer deze link en stuur hem naar {name}: {url}",
   "Payment could not be started. You can pay on the day.": "De betaling kon niet worden gestart. Je kunt ter plekke betalen.",
   "Paying {amount} on the day": "{amount} wordt ter plekke betaald",
   "{total} · {share} each": "{total} · {share} per persoon",
@@ -4770,5 +4769,8 @@
   "Review due {date}": "Review uiterlijk {date}",
   "Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.": "Stuur je swing via het {customerSingular}portal wanneer je klaar bent — je {staffSingular} werkt vanaf dat moment met de doorlooptijd.",
   "Confirm booking": "Boeking bevestigen",
-  "This is your live booking page. Anything you book here is a real booking.": "Dit is je live boekingspagina. Alles wat je hier boekt, is een echte boeking."
+  "This is your live booking page. Anything you book here is a real booking.": "Dit is je live boekingspagina. Alles wat je hier boekt, is een echte boeking.",
+  "Copy this and send it to {name} however you like:": "Kopieer dit en stuur het naar {name} zoals je wilt:",
+  "Invite message for {name}": "Uitnodigingsbericht voor {name}",
+  "I've sent it": "Ik heb het verstuurd"
 }

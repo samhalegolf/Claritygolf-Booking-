@@ -55,11 +55,15 @@ export function friendShareAmount(appt: GroupLike) {
 
 /**
  * What the booker pays if they pay online: their own share when it is split,
- * the whole lesson when they are covering it.
+ * the whole lesson when they are covering it. A split that does not divide to
+ * the cent leaves the odd cent with the booker, so the shares add up to the
+ * lesson ($100 for three: $33.33, $33.33 and the booker's $33.34).
  */
 export function bookerGroupAmount(appt: GroupLike) {
   const total = round2(Number(appt.calculatedPrice) || 0);
-  return cleanGroupPayment(appt.groupPayment) === "booker" ? total : evenShare(appt);
+  if (cleanGroupPayment(appt.groupPayment) === "booker") return total;
+  const size = groupSize(appt);
+  return size ? round2(total - evenShare(appt) * (size - 1)) : 0;
 }
 
 /**

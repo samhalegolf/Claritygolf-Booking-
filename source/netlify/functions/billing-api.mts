@@ -2917,7 +2917,8 @@ async function invoiceTaxDefaults(accountId: string) {
 /** The share lines matching `sourceFilter` (a PostgREST condition on source_id) whose invoice still stands. */
 async function liveGroupShareInvoices(accountId: string, sourceFilter: string) {
   const lines = (await supabase("billing_invoice_items", {
-    query: `select=invoice_id,source_id,line_total&account_id=eq.${encodeFilter(accountId)}&source_type=eq.group_share&${sourceFilter}`,
+    // Oldest first, so "the" share for a person is always the same one.
+    query: `select=invoice_id,source_id,line_total&account_id=eq.${encodeFilter(accountId)}&source_type=eq.group_share&${sourceFilter}&order=created_at.asc`,
   })) as Array<Record<string, unknown>>;
   if (!lines.length) return [];
   const invoiceIds = [...new Set(lines.map((line) => String(line.invoice_id ?? "")).filter(Boolean))];
@@ -2974,6 +2975,20 @@ export async function ensureGroupShareInvoice(
         serviceDate,
       }],
     });
+    // Two at once -- a friend tapping Pay while the booker emails their
+    // invite, or a double tap -- can each find no invoice and make one. Keep
+    // one (a paid one if there is, else the oldest) and void the rest, so a
+    // share is never owed twice or counted twice off the booker's amount.
+    const live = await liveGroupShareInvoices(accountId, `source_id=eq.${encodeFilter(sourceId)}`);
+    if (live.length > 1) {
+      const keep = live.find((share) => share.status === "paid") || live[0];
+      for (const extra of live) {
+        if (extra.invoiceId !== keep.invoiceId && extra.status !== "paid") {
+          await updateInvoiceStatus(accountId, extra.invoiceId, { status: "void" });
+        }
+      }
+      if (keep.invoiceId !== invoice?.id) invoice = await getInvoiceWithItems(accountId, keep.invoiceId);
+    }
   }
   if (!invoice) return null;
   let payUrl = "";
@@ -3042,6 +3057,11 @@ export async function ensureBookerPayment(accountId: string, payment: BookerPaym
     throw Object.assign(new Error("There is nothing to pay online for this booking."), { status: 400 });
   }
   if (payment.share) {
+    // The coach has already invoiced this lesson themselves: paying a share
+    // here as well would pay for it twice.
+    if ((await bookingLinkOwners(accountId, [payment.bookingId])).some((owner) => !owner.voided)) {
+      throw Object.assign(new Error("This lesson is already on an invoice from your coach. Pay it from that invoice, or on the day."), { status: 409 });
+    }
     const share = await ensureGroupShareInvoice(accountId, { ...payment, attendeeId: "booker", amount }, origin);
     if (!share) throw Object.assign(new Error("Payment could not be started."), { status: 500 });
     const invoice = await getInvoiceWithItems(accountId, share.invoiceId);

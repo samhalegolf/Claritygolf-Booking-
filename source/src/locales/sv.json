@@ -4721,7 +4721,6 @@
   "{booker} booked you into {lesson} with {business}, {when}.": "{booker} har bokat in dig på {lesson} hos {business}, {when}.",
   "Your share is {share}. Pay and confirm your spot here:": "Din andel är {share}. Betala och bekräfta din plats här:",
   "It's covered. Confirm your spot here:": "Det är redan betalt. Bekräfta din plats här:",
-  "Copy this link and send it to {name}: {url}": "Kopiera länken och skicka den till {name}: {url}",
   "Payment could not be started. You can pay on the day.": "Det gick inte att starta betalningen. Du kan betala på plats.",
   "Paying {amount} on the day": "Betalar {amount} på plats",
   "{total} · {share} each": "{total} · {share} var",
@@ -4770,5 +4769,8 @@
   "Review due {date}": "Genomgång senast {date}",
   "Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.": "Skicka din swing från {customerSingular}portalen när du är redo — din {staffSingular} utgår från svarstiden därifrån.",
   "Confirm booking": "Bekräfta bokning",
-  "This is your live booking page. Anything you book here is a real booking.": "Det här är din riktiga bokningssida. Allt du bokar här är en riktig bokning."
+  "This is your live booking page. Anything you book here is a real booking.": "Det här är din riktiga bokningssida. Allt du bokar här är en riktig bokning.",
+  "Copy this and send it to {name} however you like:": "Kopiera det här och skicka det till {name} som du vill:",
+  "Invite message for {name}": "Inbjudningsmeddelande till {name}",
+  "I've sent it": "Jag har skickat den"
 }

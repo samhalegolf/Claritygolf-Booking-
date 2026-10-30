@@ -79,6 +79,7 @@ export function BookingSettingsPanel(props: BookingSettingsPanelProps) {
         {selectedBookingScreen ? (
           <div className="booking-screen-preview booking-page-live-preview">
             <iframe
+              allow="web-share; clipboard-write; payment"
               src={selectedBookingScreen.publicUrl}
               title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
             />

@@ -4721,7 +4721,6 @@
   "{booker} booked you into {lesson} with {business}, {when}.": "{booker} vous a inscrit à {lesson} avec {business}, {when}.",
   "Your share is {share}. Pay and confirm your spot here:": "Votre part est de {share}. Payez et confirmez votre place ici :",
   "It's covered. Confirm your spot here:": "C’est déjà réglé. Confirmez votre place ici :",
-  "Copy this link and send it to {name}: {url}": "Copiez ce lien et envoyez-le à {name} : {url}",
   "Payment could not be started. You can pay on the day.": "Le paiement n’a pas pu démarrer. Vous pouvez payer sur place.",
   "Paying {amount} on the day": "Paiement de {amount} sur place",
   "{total} · {share} each": "{total} · {share} chacun",
@@ -4770,5 +4769,8 @@
   "Review due {date}": "Analyse attendue le {date}",
   "Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.": "Envoyez votre swing depuis le portail {customerSingular} dès que vous êtes prêt — votre {staffSingular} respecte le délai de réponse à partir de là.",
   "Confirm booking": "Confirmer la réservation",
-  "This is your live booking page. Anything you book here is a real booking.": "Ceci est votre page de réservation en ligne. Tout ce que vous réservez ici est une vraie réservation."
+  "This is your live booking page. Anything you book here is a real booking.": "Ceci est votre page de réservation en ligne. Tout ce que vous réservez ici est une vraie réservation.",
+  "Copy this and send it to {name} however you like:": "Copiez ceci et envoyez-le à {name} comme vous voulez :",
+  "Invite message for {name}": "Message d’invitation pour {name}",
+  "I've sent it": "Je l’ai envoyé"
 }

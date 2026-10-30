@@ -123,6 +123,7 @@ test("an invite sent again reuses the player's share invoice rather than making 
 
 test("the booker paying their share of a split group pays a share invoice of their own", async () => {
   const stub = stubSupabase([
+    ["billing_booking_invoice_links", "GET", () => []],
     ["billing_invoice_items", "GET", (call) =>
       call.url.includes("source_id=eq.appt-1:booker")
         ? [{ invoice_id: "inv-b", source_id: "appt-1:booker", line_total: 80 }]
@@ -159,6 +160,24 @@ test("a lesson the coach already put on a bigger invoice is not paid from the bo
       ensureBookerPayment("acct-1", {
         bookingId: "appt-1", share: false, amount: 160, name: "Sam", email: "sam@example.test",
         description: "Lesson", week: 0, day: 0,
+      }, "https://book.example"),
+      (error: Error & { status?: number }) => error.status === 409,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a split-group booker cannot pay their share of a lesson the coach already invoiced", async () => {
+  const stub = stubSupabase([
+    ["billing_booking_invoice_links", "GET", () => [{ booking_id: "appt-1", invoice_id: "inv-coach" }]],
+    ["billing_invoices", "GET", () => [{ id: "inv-coach", invoice_number: "SHG-0300", status: "sent" }]],
+  ]);
+  try {
+    await assert.rejects(
+      ensureBookerPayment("acct-1", {
+        bookingId: "appt-1", share: true, amount: 80, name: "Sam", email: "sam@example.test",
+        description: "Shared Lesson", week: 0, day: 0,
       }, "https://book.example"),
       (error: Error & { status?: number }) => error.status === 409,
     );

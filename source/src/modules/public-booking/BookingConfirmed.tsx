@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Mail, Share2, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
-import { money, type Account } from "./BookingFrame";
+import { quotedMoney as money, type Account } from "./BookingFrame";
 import { t } from "../../lib/i18n";
 
 export type ConfirmedFriend = { id: string; name: string; url: string };
@@ -52,6 +52,9 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [inviteError, setInviteError] = useState("");
+  // A page embedded on a website without permission to share or copy: the
+  // link is shown to copy by hand, and the booker says when it has gone.
+  const [manualLink, setManualLink] = useState<{ id: string; text: string } | null>(null);
 
   const [payChoice, setPayChoice] = useState<"now" | "day" | "">("");
   const [payState, setPayState] = useState<"idle" | "starting" | "waiting" | "paid">("idle");
@@ -72,6 +75,7 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
 
   const toggle = (id: string) => {
     setInviteError("");
+    setManualLink(null);
     setEmailMode(false);
     setDraft(invites[id]?.email ?? "");
     setOpenId((current) => (current === id ? "" : id));
@@ -119,12 +123,17 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
         await navigator.clipboard.writeText(`${message}\n${friend.url}`);
         shared = true;
       } catch {
-        setInviteError(t("Copy this link and send it to {name}: {url}", { name: friend.name, url: friend.url }));
+        setManualLink({ id: friend.id, text: `${message}\n${friend.url}` });
         return;
       }
     }
+    markShared(friend);
+  }
+
+  function markShared(friend: ConfirmedFriend) {
     setInvites((current) => ({ ...current, [friend.id]: { method: "link" } }));
     setOpenId("");
+    setManualLink(null);
     // Recording it is for the coach's view; the friend already has their link.
     post("/api/public-booking-invite", { attendeeId: friend.id, method: "link" }).catch(() => {});
   }
@@ -231,6 +240,11 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
             {emailMode ? <div className="booking-person-email">
               <input aria-label={t("Email for {name}", { name: friend.name })} autoComplete="off" autoFocus inputMode="email" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendEmail(friend); }} placeholder={t("Their email")} type="email" value={draft} />
               <button className="primary-button" disabled={!validDraft || sending} onClick={() => void sendEmail(friend)} type="button">{sending ? t("Sending…") : t("Send")}</button>
+            </div> : null}
+            {manualLink?.id === friend.id ? <div className="booking-person-manual">
+              <p className="booking-confirmed-help">{t("Copy this and send it to {name} however you like:", { name: friend.name })}</p>
+              <textarea aria-label={t("Invite message for {name}", { name: friend.name })} onFocus={(event) => event.currentTarget.select()} readOnly rows={4} value={manualLink.text} />
+              <button className="primary-button" onClick={() => markShared(friend)} type="button">{t("I've sent it")}</button>
             </div> : null}
             {inviteError ? <p className="email-status failed" role="alert"><X size={17} />{inviteError}</p> : null}
           </div> : null}

@@ -47,7 +47,7 @@ export function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
 
 export function getBookingScreenIframeCode(path: string, businessName: string, screenName: string, showLogo: boolean) {
   const bookingScreenUrl = getBookingScreenPublicUrl(path, showLogo);
-  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
+  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" allow="web-share; clipboard-write; payment" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
 }
 
 function normalizeBookingPath(pathname = "") {
