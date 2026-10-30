@@ -4787,5 +4787,7 @@
   "{count} more for your next lessons, to use within {months} months.": "{count} weitere für deine nächsten Stunden, einzulösen innerhalb von {months} Monaten.",
   "{count} more for your next lesson, whenever you like.": "{count} weitere für deine nächste Stunde, wann du willst.",
   "{count} more for your next lessons, whenever you like.": "{count} weitere für deine nächsten Stunden, wann du willst.",
-  "Buy package · {amount}": "Paket kaufen · {amount}"
+  "Buy package · {amount}": "Paket kaufen · {amount}",
+  "Package bought": "Paket gekauft",
+  "Your coach will put it towards this lesson.": "Dein Coach rechnet es auf diese Stunde an."
 }

@@ -4787,5 +4787,7 @@
   "{count} more for your next lessons, to use within {months} months.": "次のレッスン用にあと{count}回分。{months}か月以内にご利用ください。",
   "{count} more for your next lesson, whenever you like.": "次のレッスン用にあと{count}回分。いつでもご利用いただけます。",
   "{count} more for your next lessons, whenever you like.": "次のレッスン用にあと{count}回分。いつでもご利用いただけます。",
-  "Buy package · {amount}": "パッケージを購入 · {amount}"
+  "Buy package · {amount}": "パッケージを購入 · {amount}",
+  "Package bought": "パッケージを購入しました",
+  "Your coach will put it towards this lesson.": "コーチがこのレッスンに適用します。"
 }

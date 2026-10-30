@@ -3040,10 +3040,10 @@ export type BookerPayment = {
 };
 
 /** Whether a pass credit has paid for this booking (and not been given back). */
-async function bookingPaidByPass(accountId: string, bookingId: string) {
+async function bookingPaidByPass(accountId: string, bookingId: string, options: { includeReversed?: boolean } = {}) {
   if (!bookingId) return false;
   const rows = (await supabase("pass_redemptions", {
-    query: `select=id&account_id=eq.${encodeFilter(accountId)}&booking_id=eq.${encodeFilter(bookingId)}&reversed_at=is.null&limit=1`,
+    query: `select=id&account_id=eq.${encodeFilter(accountId)}&booking_id=eq.${encodeFilter(bookingId)}${options.includeReversed ? "" : "&reversed_at=is.null"}&limit=1`,
   })) as unknown[];
   return rows.length > 0;
 }
@@ -3065,8 +3065,9 @@ async function bookerInvoice(accountId: string, payment: Pick<BookerPayment, "bo
  * Pay now when they are, so that is a real error, not a fallback.
  */
 export async function ensureBookerPayment(accountId: string, payment: BookerPayment, origin: string) {
-  // A package credit already paid for it (bought from this same screen).
-  if (await bookingPaidByPass(accountId, payment.bookingId)) return { paid: true, payUrl: "" };
+  // A package credit already paid for it (bought from this same screen). Not
+  // for a share: a pass settling a group lesson says nothing about the booker's share.
+  if (!payment.share && (await bookingPaidByPass(accountId, payment.bookingId))) return { paid: true, payUrl: "" };
   const amount = round2(Number(payment.amount) || 0);
   if (!payment.bookingId || amount <= 0) {
     throw Object.assign(new Error("There is nothing to pay online for this booking."), { status: 400 });
@@ -3128,7 +3129,7 @@ export async function groupShareInvoiceStatus(accountId: string, bookingId: stri
 
 /** Whether the booker's invoice for this booking has been paid. */
 export async function bookerPaymentPaid(accountId: string, payment: Pick<BookerPayment, "bookingId" | "share">) {
-  if (await bookingPaidByPass(accountId, payment.bookingId)) return true;
+  if (!payment.share && (await bookingPaidByPass(accountId, payment.bookingId))) return true;
   const invoice = await bookerInvoice(accountId, payment);
   return invoice?.status === "paid";
 }
@@ -6521,6 +6522,20 @@ export async function startBookingPackageOrder(
   const offer = packageOffersForLesson(await readServiceList(accountId), shop.currency, input.lessonServiceId)
     .find((candidate) => candidate.serviceId === input.packageServiceId);
   if (!offer) throw Object.assign(new Error("That package doesn't cover this lesson."), { status: 400, code: "PACKAGE_NOT_OFFERED" });
+  if (await bookerPaymentPaid(accountId, { bookingId: input.bookingId, share: false })) {
+    throw Object.assign(new Error("This lesson is already paid."), { status: 409, code: "ALREADY_PAID" });
+  }
+  // The shop's ceiling and sweep: every tap is a sale and a Stripe page.
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recent = (await supabase("billing_pos_transactions", {
+    query:
+      `select=id&account_id=eq.${encodeFilter(accountId)}&source=eq.online` +
+      `&created_at=gte.${encodeFilter(hourAgo)}&limit=${ONLINE_ORDERS_PER_HOUR}`,
+  })) as unknown[];
+  if (recent.length >= ONLINE_ORDERS_PER_HOUR) {
+    throw Object.assign(new Error("Lots of orders right now. Try again in a little while, or pay on the day."), { status: 429, code: "SHOP_BUSY" });
+  }
+  await voidAbandonedOnlineOrders(accountId).catch((error) => console.error("billing_api:online_sweep_failed", accountId, error));
 
   const { transaction } = await createPosTransaction(
     accountId,
@@ -6604,10 +6619,13 @@ async function packageCreditOnBooking(accountId: string, orderId: string) {
   const covering = passes.filter((pass) => pass.status === "active" && passCoversService(pass, lessonServiceId));
   // The one this sale issued (or topped up) -- its allocation is noted with the
   // sale's receipt -- else any that covers the lesson.
+  // Only that one: a pass the buyer already held is theirs, not this sale's,
+  // and spending it would charge them twice. The receipt is matched as a whole
+  // word, so R-1000 is not found inside R-10000.
   const receipt = cleanString(row.receipt_number, "", 60);
-  const issued =
-    covering.find((pass) => receipt && pass.allocations.some((allocation) => allocation.note.includes(receipt))) ||
-    covering.find((pass) => pass.creditsAvailable > 0);
+  const issued = receipt
+    ? covering.find((pass) => pass.allocations.some((allocation) => allocation.note.split(/[^A-Za-z0-9-]+/).includes(receipt)))
+    : undefined;
   return {
     covered: await bookingPaidByPass(accountId, bookingId),
     creditsLeft: issued ? issued.creditsAvailable : null,
@@ -6630,6 +6648,11 @@ async function spendPackageOnBooking(accountId: string, orderId: string) {
   if (!row || row.status !== "paid" || !cleanString(row.for_booking_id, "", 160)) return;
   const state = await packageCreditOnBooking(accountId, orderId);
   if (state.covered || state.cancelled || !state.passId || !state.bookingId) return;
+  // A credit given back by the coach (a reversal) stays given back: a webhook
+  // replay or the screen's poll must not quietly spend it again.
+  if (await bookingPaidByPass(accountId, state.bookingId, { includeReversed: true })) return;
+  // Paid by card already (the booker's own invoice): a credit on top would pay twice.
+  if ((await bookerInvoice(accountId, { bookingId: state.bookingId, share: false }))?.status === "paid") return;
   try {
     await reservePassCredit({ accountId, passId: state.passId, bookingId: state.bookingId, actorId: "system" });
   } catch (error) {

@@ -64,6 +64,9 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
   // The package order in flight, once Pay with a package is pressed, and what it left.
   const [packageOrder, setPackageOrder] = useState<{ orderId: string; offer: PackageOffer } | null>(null);
   const [packageLeft, setPackageLeft] = useState<number | null>(null);
+  // Bought, but no credit was spent on this lesson (the pass is waiting for
+  // the coach to assign it): the screen must not say the lesson is covered.
+  const [packageCovered, setPackageCovered] = useState(true);
   const [payState, setPayState] = useState<"idle" | "starting" | "waiting" | "paid">("idle");
   const [payError, setPayError] = useState("");
   const [payUrl, setPayUrl] = useState("");
@@ -76,7 +79,7 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
       body: JSON.stringify({ booking: booking.appointmentId, token: booking.token, ...body }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.ok === false) throw new Error(data.message || t("Something went wrong. Please try again."));
+    if (!response.ok || data.ok === false) throw Object.assign(new Error(data.message || t("Something went wrong. Please try again.")), { status: response.status });
     return data;
   };
 
@@ -151,13 +154,23 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
         ? await post("/api/public-booking-pay", { action: "package-status", orderId: packageOrder.orderId })
         : await post("/api/public-booking-pay", { action: "status" });
       if (data.paid) {
-        if (packageOrder) setPackageLeft(typeof data.creditsLeft === "number" ? data.creditsLeft : null);
+        if (packageOrder) {
+          setPackageLeft(typeof data.creditsLeft === "number" ? data.creditsLeft : null);
+          setPackageCovered(data.covered === true);
+        }
         setPayState("paid");
         if (polling.current) window.clearInterval(polling.current);
         polling.current = null;
       }
-    } catch {
-      // Still waiting; the next check will tell.
+    } catch (cause) {
+      // A network blip: the next check will tell. The server saying no (the
+      // booking was cancelled, the screen expired) will not change, so stop.
+      const status = (cause as { status?: number })?.status ?? 0;
+      if (status >= 400 && status < 500) {
+        setPayState("idle");
+        setPayUrl("");
+        setPayError(cause instanceof Error ? cause.message : t("Something went wrong. Please try again."));
+      }
     }
   };
 
@@ -234,8 +247,11 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
   const dueLabel = group ? money(booking.amountDue, account) : booking.priceLabel || money(booking.amountDue, account);
   const chosenOffer = offers.find((offer) => payChoice === `pkg:${offer.serviceId}`) || null;
   const paidWithPackage = payState === "paid" && packageOrder !== null;
+  // While a Stripe page is open for one choice, the others stay put: the open
+  // page is what will be paid, and the screen must keep describing it.
+  const choiceLocked = payState === "starting" || payState === "waiting";
   const bookerSub = paidWithPackage
-    ? t("Paid with your new package")
+    ? packageCovered ? t("Paid with your new package") : t("Package bought")
     : payState === "paid"
     ? t("Paid {amount}", { amount: dueLabel })
     : payChoice === "day"
@@ -308,18 +324,20 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
       <h2 id="booking-pay-heading">{t("Your payment")}</h2>
       <p className="booking-confirmed-help">{group ? (split ? t("Your share of the split") : t("You're covering the whole group")) : booking.lessonName}</p>
       {paidWithPackage ? <div className="booking-confirmed-section">
-          <p className="booking-paid" role="status"><Check size={18} /><span className="booking-person-text"><strong>{t("Package bought · this lesson is covered")}</strong><small>{packageLeft !== null ? tn(packageLeft, "{count} lesson left on your package", "{count} lessons left on your package") : t("Receipt emailed")}</small></span></p>
+          {packageCovered
+            ? <p className="booking-paid" role="status"><Check size={18} /><span className="booking-person-text"><strong>{t("Package bought · this lesson is covered")}</strong><small>{packageLeft !== null ? tn(packageLeft, "{count} lesson left on your package", "{count} lessons left on your package") : t("Receipt emailed")}</small></span></p>
+            : <p className="booking-paid" role="status"><Check size={18} /><span className="booking-person-text"><strong>{t("Package bought")}</strong><small>{t("Your coach will put it towards this lesson.")}</small></span></p>}
           <button className="primary-button" onClick={onBookAnother} type="button">{t("Book your next lesson")}</button>
         </div>
         : payState === "paid" ? <p className="booking-paid" role="status"><Check size={18} /><strong>{t("Paid {amount}", { amount: dueLabel })}</strong><small>{t("Receipt emailed")}</small></p>
         : onlinePayments && canAct ? <div className="booking-pay-options" role="radiogroup" aria-label={t("How do you want to pay?")}>
-          <button aria-checked={payChoice === "now"} className={payChoice === "now" ? "is-chosen" : ""} onClick={() => setPayChoice("now")} role="radio" type="button">
+          <button aria-checked={payChoice === "now"} className={payChoice === "now" ? "is-chosen" : ""} disabled={choiceLocked && payChoice !== "now"} onClick={() => setPayChoice("now")} role="radio" type="button">
             <span><strong>{offers.length ? t("Pay for this lesson") : t("Pay now")}</strong><small>{t("By card online")}</small></span><em>{dueLabel}</em>
           </button>
           {offers.map((offer) => {
             const chosen = payChoice === `pkg:${offer.serviceId}`;
             const perLesson = Math.round((offer.price / offer.credits) * 100) / 100;
-            return <button aria-checked={chosen} className={`booking-pay-package${chosen ? " is-chosen" : ""}`} key={offer.serviceId} onClick={() => setPayChoice(`pkg:${offer.serviceId}`)} role="radio" type="button">
+            return <button aria-checked={chosen} className={`booking-pay-package${chosen ? " is-chosen" : ""}`} disabled={choiceLocked && !chosen} key={offer.serviceId} onClick={() => setPayChoice(`pkg:${offer.serviceId}`)} role="radio" type="button">
               <span className="booking-pay-package-head">
                 <span>
                   <strong>{offer.includes.length ? offer.name : t("Buy a {count}-lesson package", { count: offer.credits })}{offer.saving > 0 ? <b className="booking-pay-saving">{t("Save {amount}", { amount: money(offer.saving, account) })}</b> : null}</strong>
@@ -335,7 +353,7 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
               </span> : null}
             </button>;
           })}
-          <button aria-checked={payChoice === "day"} className={payChoice === "day" ? "is-chosen" : ""} onClick={() => setPayChoice("day")} role="radio" type="button">
+          <button aria-checked={payChoice === "day"} className={payChoice === "day" ? "is-chosen" : ""} disabled={choiceLocked} onClick={() => setPayChoice("day")} role="radio" type="button">
             <span><strong>{t("Pay on the day")}</strong><small>{t("Pay at the lesson")}</small></span>
           </button>
           {(payChoice === "now" || chosenOffer) && payState === "waiting" && payUrl

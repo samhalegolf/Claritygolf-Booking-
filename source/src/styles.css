@@ -18687,3 +18687,9 @@
   font-size: var(--c-size-meta);
   line-height: 1.45;
 }
+
+/* The other ways to pay, while a Stripe page is open for one of them. */
+.booking-pay-options [role="radio"]:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

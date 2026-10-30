@@ -4787,5 +4787,7 @@
   "{count} more for your next lessons, to use within {months} months.": "Nog {count} voor je volgende lessen, te gebruiken binnen {months} maanden.",
   "{count} more for your next lesson, whenever you like.": "Nog {count} voor je volgende les, wanneer je wilt.",
   "{count} more for your next lessons, whenever you like.": "Nog {count} voor je volgende lessen, wanneer je wilt.",
-  "Buy package · {amount}": "Pakket kopen · {amount}"
+  "Buy package · {amount}": "Pakket kopen · {amount}",
+  "Package bought": "Pakket gekocht",
+  "Your coach will put it towards this lesson.": "Je coach zet het in voor deze les."
 }

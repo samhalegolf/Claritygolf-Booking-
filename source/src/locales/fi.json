@@ -4787,5 +4787,7 @@
   "{count} more for your next lessons, to use within {months} months.": "{count} lisää seuraavia tunteja varten, käytettävä {months} kuukauden kuluessa.",
   "{count} more for your next lesson, whenever you like.": "{count} lisää seuraavaa tuntia varten, milloin vain.",
   "{count} more for your next lessons, whenever you like.": "{count} lisää seuraavia tunteja varten, milloin vain.",
-  "Buy package · {amount}": "Osta paketti · {amount}"
+  "Buy package · {amount}": "Osta paketti · {amount}",
+  "Package bought": "Paketti ostettu",
+  "Your coach will put it towards this lesson.": "Valmentajasi kohdistaa sen tähän tuntiin."
 }

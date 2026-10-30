@@ -4787,5 +4787,7 @@
   "{count} more for your next lessons, to use within {months} months.": "{count} till för dina nästa lektioner, att använda inom {months} månader.",
   "{count} more for your next lesson, whenever you like.": "{count} till för din nästa lektion, när du vill.",
   "{count} more for your next lessons, whenever you like.": "{count} till för dina nästa lektioner, när du vill.",
-  "Buy package · {amount}": "Köp paket · {amount}"
+  "Buy package · {amount}": "Köp paket · {amount}",
+  "Package bought": "Paket köpt",
+  "Your coach will put it towards this lesson.": "Din tränare använder det för den här lektionen."
 }
