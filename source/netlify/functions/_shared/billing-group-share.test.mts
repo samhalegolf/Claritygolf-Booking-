@@ -123,6 +123,7 @@ test("an invite sent again reuses the player's share invoice rather than making 
 
 test("the booker paying their share of a split group pays a share invoice of their own", async () => {
   const stub = stubSupabase([
+    ["pass_redemptions", "GET", () => []],
     ["billing_booking_invoice_links", "GET", () => []],
     ["billing_invoice_items", "GET", (call) =>
       call.url.includes("source_id=eq.appt-1:booker")
@@ -148,6 +149,7 @@ test("the booker paying their share of a split group pays a share invoice of the
 
 test("a lesson the coach already put on a bigger invoice is not paid from the booking page", async () => {
   const stub = stubSupabase([
+    ["pass_redemptions", "GET", () => []],
     ["billing_booking_invoice_links", "GET", () => [{ booking_id: "appt-1", invoice_id: "inv-month" }]],
     ["billing_invoices", "GET", () => [{ id: "inv-month", invoice_number: "SHG-0200", status: "sent", total: 320, amount_paid: 0, currency: "NZD" }]],
     ["billing_invoice_items", "GET", () => [
@@ -170,6 +172,7 @@ test("a lesson the coach already put on a bigger invoice is not paid from the bo
 
 test("a split-group booker cannot pay their share of a lesson the coach already invoiced", async () => {
   const stub = stubSupabase([
+    ["pass_redemptions", "GET", () => []],
     ["billing_booking_invoice_links", "GET", () => [{ booking_id: "appt-1", invoice_id: "inv-coach" }]],
     ["billing_invoices", "GET", () => [{ id: "inv-coach", invoice_number: "SHG-0300", status: "sent" }]],
   ]);
@@ -181,6 +184,20 @@ test("a split-group booker cannot pay their share of a lesson the coach already 
       }, "https://book.example"),
       (error: Error & { status?: number }) => error.status === 409,
     );
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a lesson a package credit already paid for is not charged again", async () => {
+  const stub = stubSupabase([["pass_redemptions", "GET", () => [{ id: "red-1" }]]]);
+  try {
+    const result = await ensureBookerPayment("acct-1", {
+      bookingId: "appt-1", share: false, amount: 160, name: "Sam", email: "sam@example.test",
+      description: "Lesson", week: 0, day: 0,
+    }, "https://book.example");
+    assert.deepEqual(result, { paid: true, payUrl: "" });
+    assert.equal(stub.calls.length, 1);
   } finally {
     stub.restore();
   }

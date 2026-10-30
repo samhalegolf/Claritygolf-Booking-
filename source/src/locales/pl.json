@@ -4772,5 +4772,20 @@
   "This is your live booking page. Anything you book here is a real booking.": "To Twoja prawdziwa strona rezerwacji. Wszystko, co tu zarezerwujesz, to prawdziwa rezerwacja.",
   "Copy this and send it to {name} however you like:": "Skopiuj to i wyślij {name} w dowolny sposób:",
   "Invite message for {name}": "Wiadomość z zaproszeniem dla {name}",
-  "I've sent it": "Wysłałem(-am)"
+  "I've sent it": "Wysłałem(-am)",
+  "Paid with your new package": "Opłacono nowym pakietem",
+  "Package bought · this lesson is covered": "Pakiet kupiony · ta lekcja jest opłacona",
+  "{count} lesson left on your package": "Została {count} lekcja w pakiecie",
+  "{count} lessons left on your package": "Zostało {count} lekcji w pakiecie",
+  "Book your next lesson": "Zarezerwuj kolejną lekcję",
+  "Pay for this lesson": "Zapłać za tę lekcję",
+  "Buy a {count}-lesson package": "Kup pakiet {count} lekcji",
+  "Save {amount}": "Oszczędzasz {amount}",
+  "{each} a lesson instead of {price}": "{each} za lekcję zamiast {price}",
+  "This lesson uses your first credit.": "Ta lekcja wykorzystuje Twój pierwszy kredyt.",
+  "{count} more for your next lesson, to use within {months} months.": "Jeszcze {count} na kolejną lekcję, do wykorzystania w ciągu {months} mies.",
+  "{count} more for your next lessons, to use within {months} months.": "Jeszcze {count} na kolejne lekcje, do wykorzystania w ciągu {months} mies.",
+  "{count} more for your next lesson, whenever you like.": "Jeszcze {count} na kolejną lekcję, kiedy chcesz.",
+  "{count} more for your next lessons, whenever you like.": "Jeszcze {count} na kolejne lekcje, kiedy chcesz.",
+  "Buy package · {amount}": "Kup pakiet · {amount}"
 }

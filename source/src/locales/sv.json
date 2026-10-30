@@ -4772,5 +4772,20 @@
   "This is your live booking page. Anything you book here is a real booking.": "Det här är din riktiga bokningssida. Allt du bokar här är en riktig bokning.",
   "Copy this and send it to {name} however you like:": "Kopiera det här och skicka det till {name} som du vill:",
   "Invite message for {name}": "Inbjudningsmeddelande till {name}",
-  "I've sent it": "Jag har skickat den"
+  "I've sent it": "Jag har skickat den",
+  "Paid with your new package": "Betalt med ditt nya paket",
+  "Package bought · this lesson is covered": "Paket köpt · den här lektionen är täckt",
+  "{count} lesson left on your package": "{count} lektion kvar på ditt paket",
+  "{count} lessons left on your package": "{count} lektioner kvar på ditt paket",
+  "Book your next lesson": "Boka din nästa lektion",
+  "Pay for this lesson": "Betala för den här lektionen",
+  "Buy a {count}-lesson package": "Köp ett paket med {count} lektioner",
+  "Save {amount}": "Spara {amount}",
+  "{each} a lesson instead of {price}": "{each} per lektion i stället för {price}",
+  "This lesson uses your first credit.": "Den här lektionen använder din första kredit.",
+  "{count} more for your next lesson, to use within {months} months.": "{count} till för din nästa lektion, att använda inom {months} månader.",
+  "{count} more for your next lessons, to use within {months} months.": "{count} till för dina nästa lektioner, att använda inom {months} månader.",
+  "{count} more for your next lesson, whenever you like.": "{count} till för din nästa lektion, när du vill.",
+  "{count} more for your next lessons, whenever you like.": "{count} till för dina nästa lektioner, när du vill.",
+  "Buy package · {amount}": "Köp paket · {amount}"
 }

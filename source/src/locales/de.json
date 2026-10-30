@@ -4772,5 +4772,20 @@
   "This is your live booking page. Anything you book here is a real booking.": "Das ist deine Live-Buchungsseite. Alles, was du hier buchst, ist eine echte Buchung.",
   "Copy this and send it to {name} however you like:": "Kopier das und schick es {name}, wie du magst:",
   "Invite message for {name}": "Einladungsnachricht für {name}",
-  "I've sent it": "Hab ich verschickt"
+  "I've sent it": "Hab ich verschickt",
+  "Paid with your new package": "Mit deinem neuen Paket bezahlt",
+  "Package bought · this lesson is covered": "Paket gekauft · diese Stunde ist abgedeckt",
+  "{count} lesson left on your package": "Noch {count} Stunde in deinem Paket",
+  "{count} lessons left on your package": "Noch {count} Stunden in deinem Paket",
+  "Book your next lesson": "Buch deine nächste Stunde",
+  "Pay for this lesson": "Diese Stunde bezahlen",
+  "Buy a {count}-lesson package": "Paket mit {count} Stunden kaufen",
+  "Save {amount}": "Spare {amount}",
+  "{each} a lesson instead of {price}": "{each} pro Stunde statt {price}",
+  "This lesson uses your first credit.": "Diese Stunde nutzt dein erstes Guthaben.",
+  "{count} more for your next lesson, to use within {months} months.": "{count} weitere für deine nächste Stunde, einzulösen innerhalb von {months} Monaten.",
+  "{count} more for your next lessons, to use within {months} months.": "{count} weitere für deine nächsten Stunden, einzulösen innerhalb von {months} Monaten.",
+  "{count} more for your next lesson, whenever you like.": "{count} weitere für deine nächste Stunde, wann du willst.",
+  "{count} more for your next lessons, whenever you like.": "{count} weitere für deine nächsten Stunden, wann du willst.",
+  "Buy package · {amount}": "Paket kaufen · {amount}"
 }

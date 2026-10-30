@@ -18644,3 +18644,46 @@
   font-size: var(--c-size-meta);
   resize: none;
 }
+
+/* A package that would pay for the lesson: its price and saving on one line,
+   and once chosen, what buying it does. */
+.booking-pay-options [role="radio"].booking-pay-package {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.booking-pay-package-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.booking-pay-package-head > span {
+  display: grid;
+  gap: 2px;
+}
+
+.booking-pay-saving {
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: var(--c-radius-pill);
+  background: color-mix(in srgb, var(--coach-accent, var(--coach-primary)) 18%, transparent);
+  color: var(--booking-text, var(--c-text));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.booking-pay-package-detail {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--booking-border, var(--c-border));
+  color: var(--booking-muted, var(--c-text-soft));
+  font-size: var(--c-size-meta);
+  line-height: 1.45;
+}

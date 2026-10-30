@@ -4772,5 +4772,20 @@
   "This is your live booking page. Anything you book here is a real booking.": "Dit is je live boekingspagina. Alles wat je hier boekt, is een echte boeking.",
   "Copy this and send it to {name} however you like:": "Kopieer dit en stuur het naar {name} zoals je wilt:",
   "Invite message for {name}": "Uitnodigingsbericht voor {name}",
-  "I've sent it": "Ik heb het verstuurd"
+  "I've sent it": "Ik heb het verstuurd",
+  "Paid with your new package": "Betaald met je nieuwe pakket",
+  "Package bought · this lesson is covered": "Pakket gekocht · deze les is gedekt",
+  "{count} lesson left on your package": "Nog {count} les over op je pakket",
+  "{count} lessons left on your package": "Nog {count} lessen over op je pakket",
+  "Book your next lesson": "Boek je volgende les",
+  "Pay for this lesson": "Deze les betalen",
+  "Buy a {count}-lesson package": "Koop een pakket van {count} lessen",
+  "Save {amount}": "Bespaar {amount}",
+  "{each} a lesson instead of {price}": "{each} per les in plaats van {price}",
+  "This lesson uses your first credit.": "Deze les gebruikt je eerste tegoed.",
+  "{count} more for your next lesson, to use within {months} months.": "Nog {count} voor je volgende les, te gebruiken binnen {months} maanden.",
+  "{count} more for your next lessons, to use within {months} months.": "Nog {count} voor je volgende lessen, te gebruiken binnen {months} maanden.",
+  "{count} more for your next lesson, whenever you like.": "Nog {count} voor je volgende les, wanneer je wilt.",
+  "{count} more for your next lessons, whenever you like.": "Nog {count} voor je volgende lessen, wanneer je wilt.",
+  "Buy package · {amount}": "Pakket kopen · {amount}"
 }

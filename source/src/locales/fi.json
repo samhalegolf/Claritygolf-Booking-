@@ -4772,5 +4772,20 @@
   "This is your live booking page. Anything you book here is a real booking.": "Tämä on oikea varaussivusi. Kaikki täällä tehdyt varaukset ovat oikeita varauksia.",
   "Copy this and send it to {name} however you like:": "Kopioi tämä ja lähetä se henkilölle {name} haluamallasi tavalla:",
   "Invite message for {name}": "Kutsuviesti henkilölle {name}",
-  "I've sent it": "Lähetin sen"
+  "I've sent it": "Lähetin sen",
+  "Paid with your new package": "Maksettu uudella paketillasi",
+  "Package bought · this lesson is covered": "Paketti ostettu · tämä tunti on katettu",
+  "{count} lesson left on your package": "Paketissasi on {count} tunti jäljellä",
+  "{count} lessons left on your package": "Paketissasi on {count} tuntia jäljellä",
+  "Book your next lesson": "Varaa seuraava tuntisi",
+  "Pay for this lesson": "Maksa tämä tunti",
+  "Buy a {count}-lesson package": "Osta {count} tunnin paketti",
+  "Save {amount}": "Säästä {amount}",
+  "{each} a lesson instead of {price}": "{each} tunnilta hinnan {price} sijaan",
+  "This lesson uses your first credit.": "Tämä tunti käyttää ensimmäisen krediittisi.",
+  "{count} more for your next lesson, to use within {months} months.": "{count} lisää seuraavaa tuntia varten, käytettävä {months} kuukauden kuluessa.",
+  "{count} more for your next lessons, to use within {months} months.": "{count} lisää seuraavia tunteja varten, käytettävä {months} kuukauden kuluessa.",
+  "{count} more for your next lesson, whenever you like.": "{count} lisää seuraavaa tuntia varten, milloin vain.",
+  "{count} more for your next lessons, whenever you like.": "{count} lisää seuraavia tunteja varten, milloin vain.",
+  "Buy package · {amount}": "Osta paketti · {amount}"
 }

@@ -18,19 +18,23 @@ import {
   onlineBuyerPersonId,
   onlineShopItems,
   onlineShopSwitchedOn,
+  packageOffersForLesson,
   readOnlineOrder,
 } from "./_shared/online-shop.mts";
 
 // The same human-scaled order number the billing sync stamps on a card charge,
 // so a voucher and the invoice row beside it name the sale identically.
 import { chargeInvoiceNumber } from "./_shared/stripe-billing.mts";
-import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { requireCoachActor, resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { SETTINGS_UPSERT_QUERY, settingsSelectQuery, settingsUpsertRows } from "./_shared/settings-scope.mts";
 import {
   attachRedemptionToSale,
   attachValueTransactionToSale,
   grantPass,
+  passCoversService,
   passTemplatesFromServices,
+  readPassesForPerson,
+  reservePassCredit,
   reversePassRedemption,
   reversePassValueTransaction,
   reservePassForService,
@@ -73,7 +77,7 @@ import {
   type TerminalIntent,
 } from "./_shared/terminal.mts";
 import { cleanPhoneCountry } from "./_shared/phone.mts";
-import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
+import { cleanString, cleanText, cleanUrl, env, nowIso } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 import {
   computeDashboardMetric,
@@ -3035,6 +3039,15 @@ export type BookerPayment = {
   day: unknown;
 };
 
+/** Whether a pass credit has paid for this booking (and not been given back). */
+async function bookingPaidByPass(accountId: string, bookingId: string) {
+  if (!bookingId) return false;
+  const rows = (await supabase("pass_redemptions", {
+    query: `select=id&account_id=eq.${encodeFilter(accountId)}&booking_id=eq.${encodeFilter(bookingId)}&reversed_at=is.null&limit=1`,
+  })) as unknown[];
+  return rows.length > 0;
+}
+
 /** The booker's invoice for this booking, if one stands. */
 async function bookerInvoice(accountId: string, payment: Pick<BookerPayment, "bookingId" | "share">) {
   if (payment.share) {
@@ -3052,6 +3065,8 @@ async function bookerInvoice(accountId: string, payment: Pick<BookerPayment, "bo
  * Pay now when they are, so that is a real error, not a fallback.
  */
 export async function ensureBookerPayment(accountId: string, payment: BookerPayment, origin: string) {
+  // A package credit already paid for it (bought from this same screen).
+  if (await bookingPaidByPass(accountId, payment.bookingId)) return { paid: true, payUrl: "" };
   const amount = round2(Number(payment.amount) || 0);
   if (!payment.bookingId || amount <= 0) {
     throw Object.assign(new Error("There is nothing to pay online for this booking."), { status: 400 });
@@ -3113,6 +3128,7 @@ export async function groupShareInvoiceStatus(accountId: string, bookingId: stri
 
 /** Whether the booker's invoice for this booking has been paid. */
 export async function bookerPaymentPaid(accountId: string, payment: Pick<BookerPayment, "bookingId" | "share">) {
+  if (await bookingPaidByPass(accountId, payment.bookingId)) return true;
   const invoice = await bookerInvoice(accountId, payment);
   return invoice?.status === "paid";
 }
@@ -4109,7 +4125,8 @@ async function syncPosCoupon(accountId: string, row: Record<string, unknown>, st
 
 /** What only the server may say about a sale: the till cannot ring one up as "online". */
 type PosSaleOrigin = {
-  online?: { giftRecipientName?: string; giftMessage?: string };
+  /** `forBookingId`: a package bought while booking, whose first credit pays for that booking once paid. */
+  online?: { giftRecipientName?: string; giftMessage?: string; forBookingId?: string };
 };
 
 export async function createPosTransaction(
@@ -4275,6 +4292,7 @@ export async function createPosTransaction(
     note: cleanString(body?.note, "", 600) || null,
     gift_recipient_name: cleanString(origin.online?.giftRecipientName, "", 140) || null,
     gift_message: cleanString(origin.online?.giftMessage, "", 500) || null,
+    ...(origin.online?.forBookingId ? { for_booking_id: cleanString(origin.online.forBookingId, "", 160) } : {}),
     paid_at: status === "paid" ? nowIso() : null,
     created_at: nowIso(),
     updated_at: nowIso(),
@@ -6463,12 +6481,161 @@ async function settleOnlineOrder(accountId: string, row: Record<string, unknown>
   const id = String(row.id ?? "");
   await ensureOnlineBuyer(accountId, row);
   const settled = await settlePosCardPayment(accountId, id, card);
+  // A package bought while booking: its first credit pays for that booking.
+  // Before the receipt goes, so the receipt can say so. Every settle tries --
+  // it is idempotent per booking -- because the first may have lost the pass
+  // write and a replay is the retry.
+  await spendPackageOnBooking(accountId, id).catch((error) =>
+    console.error("billing_api:package_booking_spend_failed", accountId, id, error),
+  );
   if (!settled.alreadyPaid) {
     await emailOnlineOrder(accountId, id).catch((error) =>
       console.error("billing_api:online_order_email_failed", accountId, id, error),
     );
   }
   return settled;
+}
+
+// --- A package bought while booking --------------------------------------------
+//
+// The booking page's "Buy a 5-lesson package", for a lesson the package
+// covers. It is an online order for the package like the shop's -- same
+// Clarity Pay rule, same Stripe page, same settlement, so the pass is issued
+// exactly as a shop purchase issues it -- carrying the booking it is for.
+// Once paid, the pass spends one credit on that booking.
+
+/** The packages this lesson could be paid with, when the shop can sell them. */
+export async function bookingPackageOffers(accountId: string, lessonServiceId: string) {
+  const shop = await readOnlineShop(accountId);
+  if (!shop.open) return [];
+  return packageOffersForLesson(await readServiceList(accountId), shop.currency, lessonServiceId);
+}
+
+/** Start buying a package for a booking: the sale, and the Stripe page that pays for it. */
+export async function startBookingPackageOrder(
+  accountId: string,
+  input: { bookingId: string; lessonServiceId: string; packageServiceId: string; personId: string; name: string; email: string },
+) {
+  const shop = await readOnlineShop(accountId);
+  if (!shop.open) throw Object.assign(new Error("Packages can't be bought online right now. You can pay on the day."), { status: 409, code: "SHOP_CLOSED" });
+  const offer = packageOffersForLesson(await readServiceList(accountId), shop.currency, input.lessonServiceId)
+    .find((candidate) => candidate.serviceId === input.packageServiceId);
+  if (!offer) throw Object.assign(new Error("That package doesn't cover this lesson."), { status: 400, code: "PACKAGE_NOT_OFFERED" });
+
+  const { transaction } = await createPosTransaction(
+    accountId,
+    {
+      items: [{ productId: offer.id, quantity: 1 }],
+      paymentMethodId: shop.paymentMethodId,
+      // The booking's own client, so the pass lands on the person the lesson is for.
+      customerId: input.personId,
+      customerName: input.name,
+      customerEmail: input.email,
+    },
+    { online: { forBookingId: input.bookingId } },
+  );
+  const account = await resolvePublicAccount(accountId);
+  const origin = cleanUrl(env("URL") || "", "https://claritygolf.app").replace(/\/$/, "");
+  const shopPath = `${origin}/${encodeURIComponent(account?.slug || accountId)}/shop`;
+  let session;
+  try {
+    session = await createStripeCheckoutSessionWith(await stripeFor(accountId), {
+      amount: transaction.amount,
+      currency: transaction.currency,
+      productName: `${offer.name} - ${shop.businessName}`,
+      productDescription: "",
+      customerEmail: input.email,
+      clientReferenceId: transaction.id,
+      metadata: { pos_transaction_id: transaction.id, account_id: accountId, receipt_number: transaction.receiptNumber },
+      // The shop's own return page: it confirms the order and shows the receipt.
+      successUrl: `${shopPath}?order=${encodeURIComponent(transaction.id)}`,
+      cancelUrl: `${shopPath}?cancelled=${encodeURIComponent(transaction.id)}`,
+      expiresInMinutes: ONLINE_CHECKOUT_MINUTES,
+    });
+  } catch (error) {
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(transaction.id)}&account_id=eq.${encodeFilter(accountId)}&status=eq.pending`,
+      body: { status: "void", updated_at: nowIso() },
+      prefer: "return=minimal",
+    }).catch(() => null);
+    throw error;
+  }
+  await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(transaction.id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { stripe_session_id: session.sessionId, updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+  return { url: session.url, orderId: transaction.id };
+}
+
+/**
+ * Whether a package order from the booking page has been paid, and the booking
+ * covered. Settles it if Stripe says it is paid and the webhook has not got
+ * there yet. Only answers for an order made for this booking.
+ */
+export async function bookingPackageOrderStatus(accountId: string, orderId: string, bookingId: string) {
+  const row = await onlineOrderRow(accountId, orderId);
+  if (!row || cleanString(row.for_booking_id, "", 160) !== bookingId) {
+    throw Object.assign(new Error("That order was not found."), { status: 404, code: "ORDER_NOT_FOUND" });
+  }
+  const summary = await confirmOnlineOrder(accountId, orderId);
+  if (summary.status !== "paid") return { paid: false, covered: false, creditsLeft: null as number | null };
+  // Settled now (or by the webhook): spend the credit if that has not happened.
+  await spendPackageOnBooking(accountId, orderId).catch(() => null);
+  const spent = await packageCreditOnBooking(accountId, orderId);
+  return { paid: true, covered: spent.covered, creditsLeft: spent.creditsLeft };
+}
+
+/** The pass a package sale issued, on its buyer, and whether this booking has taken a credit from it. */
+async function packageCreditOnBooking(accountId: string, orderId: string) {
+  const row = await posTransactionRow(accountId, orderId);
+  const bookingId = cleanString(row?.for_booking_id, "", 160);
+  const personId = cleanString(row?.customer_id, "", 160);
+  if (!row || !bookingId || !personId) return { covered: false, creditsLeft: null as number | null, passId: "" };
+  const items = (await posItemsForTransactions(accountId, [orderId]))[orderId] || [];
+  const packageId = items.map((item) => item.productId).find((id) => id.startsWith(LESSON_ITEM_PREFIX))?.slice(LESSON_ITEM_PREFIX.length) || "";
+  const [booking] = (await supabase("calendar_items", {
+    query: `select=id,service_id,status&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(bookingId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  const lessonServiceId = cleanString(booking?.service_id, "", 160);
+  const passes = await readPassesForPerson(accountId, personId);
+  const covering = passes.filter((pass) => pass.status === "active" && passCoversService(pass, lessonServiceId));
+  // The one this sale issued (or topped up) -- its allocation is noted with the
+  // sale's receipt -- else any that covers the lesson.
+  const receipt = cleanString(row.receipt_number, "", 60);
+  const issued =
+    covering.find((pass) => receipt && pass.allocations.some((allocation) => allocation.note.includes(receipt))) ||
+    covering.find((pass) => pass.creditsAvailable > 0);
+  return {
+    covered: await bookingPaidByPass(accountId, bookingId),
+    creditsLeft: issued ? issued.creditsAvailable : null,
+    passId: issued?.id || "",
+    bookingId,
+    cancelled: booking?.status === "cancelled",
+    packageId,
+  };
+}
+
+/**
+ * Spend one credit of the package this sale bought on the booking it was
+ * bought for. Nothing to do for any other sale, for a booking already paid by
+ * a pass, or for one since cancelled. A pass that went to the Pass inbox
+ * (an email matching two clients) waits there for the coach, who settles the
+ * lesson when they assign it.
+ */
+async function spendPackageOnBooking(accountId: string, orderId: string) {
+  const row = await posTransactionRow(accountId, orderId);
+  if (!row || row.status !== "paid" || !cleanString(row.for_booking_id, "", 160)) return;
+  const state = await packageCreditOnBooking(accountId, orderId);
+  if (state.covered || state.cancelled || !state.passId || !state.bookingId) return;
+  try {
+    await reservePassCredit({ accountId, passId: state.passId, bookingId: state.bookingId, actorId: "system" });
+  } catch (error) {
+    // Another settle got there first.
+    if ((error as { code?: string })?.code !== "already_redeemed") throw error;
+  }
 }
 
 /** What the return page shows. The codes are the buyer's: they hold the order id. */
