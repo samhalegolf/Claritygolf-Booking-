@@ -6354,14 +6354,48 @@
   gap: var(--c-space-2);
 }
 
-.app-shell .public-booking .booking-remembered p {
-  display: grid;
-  gap: 2px;
-  margin: 0;
+/* The folded details: a solid name card, read-only, with a chevron that opens
+   the fields again. It reads the booking theme like the fields it replaces. */
+.app-shell .public-booking .booking-remembered-card {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-2);
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--card-outline) 24%, var(--booking-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--booking-text) 6%, var(--booking-input));
+  color: var(--booking-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.app-shell .public-booking .booking-remembered small {
+.app-shell .public-booking .booking-remembered-card:hover {
+  border-color: var(--coach-primary);
+}
+
+.app-shell .public-booking .booking-remembered-card > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-shell .public-booking .booking-remembered-card small {
   opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-remembered-card svg {
+  flex: none;
+  opacity: 0.72;
+}
+
+/* The fields are grid items of the form around them, as before the wrapper
+   that watches focus leave them. */
+.app-shell .public-booking .booking-booker-fields {
+  display: contents;
 }
 
 .app-shell .public-booking .booking-remembered-actions {
