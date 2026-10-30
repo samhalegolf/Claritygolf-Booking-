@@ -2,6 +2,7 @@
 import { calendarSlot, MINUTES_IN_DAY } from "./calendar-slot.mts";
 import { defaultCoachAccount, defaultTimeZone, FALLBACK_TIME_ZONE } from "./coach-account.mts";
 import { recordBelongsToAccountStrict } from "./coach-auth.mts";
+import { cleanGroupPayment, cleanInviteMethod } from "./group-invite.mts";
 import { handednessFromNote } from "./handedness.mts";
 import { bayBookingMatchesSlot } from "./optix-reconcile.mts";
 import { hasPermission, missingAccountScope, permissionDenied } from "./permissions.mts";
@@ -121,12 +122,17 @@ export function cleanCustomGroupAttendee(raw, index = 0) {
     : email
       ? "invited"
       : "manual";
+  // How the booker sent them their invite, once they have: by our email, or a
+  // link they shared themselves. Without it a friend with no email reads the
+  // same as one nobody has invited yet.
+  const invitedVia = cleanInviteMethod(raw.invitedVia);
   return {
     id: cleanString(raw.id, `attendee-${index + 1}`, 120),
     name: name || email,
     ...(email ? { email } : {}),
     status,
     ...(raw.token ? { token: cleanString(raw.token, "", 180) } : {}),
+    ...(invitedVia ? { invitedVia } : {}),
   };
 }
 
@@ -141,6 +147,8 @@ function cleanCustomGroupData(value) {
     customGroup: true,
     attendees,
     calculatedPrice: cleanPositiveInteger(source.calculatedPrice, 0, 0, 100000),
+    // Who is paying: the booker for everyone, or split evenly. See group-invite.mts.
+    groupPayment: cleanGroupPayment(source.groupPayment),
   };
 }
 
@@ -391,6 +399,7 @@ export function cleanCalendarItem(item) {
     customGroup: item.customGroup,
     attendees: item.attendees,
     calculatedPrice: item.calculatedPrice,
+    groupPayment: item.groupPayment,
   });
   const cancelledGroupSession = isCancelledGroupSessionLike({ ...item, kind });
   return {

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkBookingLinks, ensureGroupShareInvoice, settleInvoiceCheckoutFromWebhook } from "../billing-api.mts";
+import { checkBookingLinks, ensureBookerPayment, ensureGroupShareInvoice, settleInvoiceCheckoutFromWebhook } from "../billing-api.mts";
 
 type Call = { url: string; method: string; body: string };
 type Route = (call: Call) => unknown;
@@ -116,6 +116,71 @@ test("an invite sent again reuses the player's share invoice rather than making 
     assert.equal(share?.invoiceId, "inv-a");
     assert.equal(share?.payUrl, "https://pay.stripe.com/plink_kept");
     assert.equal(stub.calls.filter((call) => call.method === "POST").length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("the booker paying their share of a split group pays a share invoice of their own", async () => {
+  const stub = stubSupabase([
+    ["billing_booking_invoice_links", "GET", () => []],
+    ["billing_invoice_items", "GET", (call) =>
+      call.url.includes("source_id=eq.appt-1:booker")
+        ? [{ invoice_id: "inv-b", source_id: "appt-1:booker", line_total: 80 }]
+        : [{ id: "line-1", source_type: "group_share", source_id: "appt-1:booker", line_total: 80 }]],
+    ["billing_invoices", "GET", () => [{
+      id: "inv-b", invoice_number: "SHG-0103", status: "sent", total: 80, amount_paid: 0,
+      payment_link_url: "https://pay.stripe.com/plink_booker", currency: "NZD",
+    }]],
+    ["settings", "GET", () => []],
+  ]);
+  try {
+    const result = await ensureBookerPayment("acct-1", {
+      bookingId: "appt-1", share: true, amount: 80, name: "Sam", email: "sam@example.test",
+      description: "Shared Lesson", week: 0, day: 0,
+    }, "https://book.example");
+    assert.deepEqual(result, { paid: false, payUrl: "https://pay.stripe.com/plink_booker" });
+    assert.equal(stub.calls.filter((call) => call.method === "POST").length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a lesson the coach already put on a bigger invoice is not paid from the booking page", async () => {
+  const stub = stubSupabase([
+    ["billing_booking_invoice_links", "GET", () => [{ booking_id: "appt-1", invoice_id: "inv-month" }]],
+    ["billing_invoices", "GET", () => [{ id: "inv-month", invoice_number: "SHG-0200", status: "sent", total: 320, amount_paid: 0, currency: "NZD" }]],
+    ["billing_invoice_items", "GET", () => [
+      { id: "l1", source_type: "booking", source_id: "appt-1", line_total: 160 },
+      { id: "l2", source_type: "booking", source_id: "appt-2", line_total: 160 },
+    ]],
+  ]);
+  try {
+    await assert.rejects(
+      ensureBookerPayment("acct-1", {
+        bookingId: "appt-1", share: false, amount: 160, name: "Sam", email: "sam@example.test",
+        description: "Lesson", week: 0, day: 0,
+      }, "https://book.example"),
+      (error: Error & { status?: number }) => error.status === 409,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a split-group booker cannot pay their share of a lesson the coach already invoiced", async () => {
+  const stub = stubSupabase([
+    ["billing_booking_invoice_links", "GET", () => [{ booking_id: "appt-1", invoice_id: "inv-coach" }]],
+    ["billing_invoices", "GET", () => [{ id: "inv-coach", invoice_number: "SHG-0300", status: "sent" }]],
+  ]);
+  try {
+    await assert.rejects(
+      ensureBookerPayment("acct-1", {
+        bookingId: "appt-1", share: true, amount: 80, name: "Sam", email: "sam@example.test",
+        description: "Shared Lesson", week: 0, day: 0,
+      }, "https://book.example"),
+      (error: Error & { status?: number }) => error.status === 409,
+    );
   } finally {
     stub.restore();
   }

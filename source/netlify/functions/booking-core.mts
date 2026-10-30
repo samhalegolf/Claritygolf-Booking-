@@ -24,6 +24,7 @@ import {
 } from "./_shared/resource-handler.mts";
 import { bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { cleanHandedness, groupSwingNoteLine, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
+import { bookerGroupAmount, cleanGroupPayment, customGroupInviteUrl, friendShareAmount } from "./_shared/group-invite.mts";
 import { publicCacheTagHeader } from "./_shared/public-read-cache.mts";
 import { clarityResourcesApply, serviceResourceMode } from "./_shared/resources.mts";
 import { primaryServiceCoachId, serviceCoachIds, serviceLocationIds } from "./_shared/service-scope.mts";
@@ -262,6 +263,7 @@ import {
   cleanEmail,
   cleanSlug,
   cleanString,
+  cleanUrl,
   env,
   hasOwn,
   nowIso,
@@ -3015,6 +3017,9 @@ export async function readPublicCatalogState(accountId: string) {
     shopLinked:
       onlineShopSwitchedOn(settingsMap[ONLINE_SHOP_SETTING]) &&
       stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]).features.portal,
+    // Whether the confirmation screen can offer "Pay now". Any connected Stripe
+    // will do: the booker pays an invoice's pay link, which every route takes.
+    onlinePayments: stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]).configured,
   };
 }
 
@@ -4262,6 +4267,7 @@ export function publicBookingCatalog(state) {
     brand: state.brand,
     account: publicCoachAccount(state.account),
     shopLinked: state.shopLinked === true,
+    onlinePayments: state.onlinePayments === true,
   };
 }
 
@@ -7937,13 +7943,16 @@ export async function createPublicBooking(
         status: 400,
       });
     }
+    // Everyone gets their own link from the start, email or not: the booker
+    // can share it themselves from the confirmation screen.
     const otherAttendees = rawAttendees
       .map((attendee, index) => cleanCustomGroupAttendee({
         id: `attendee-${index + 1}`,
         name: attendee?.name,
         email: attendee?.email,
         status: attendee?.email ? "invited" : "manual",
-        token: attendee?.email ? randomUUID() : "",
+        token: randomUUID(),
+        ...(attendee?.email ? { invitedVia: "email" } : {}),
       }, index))
       .filter(Boolean)
       .slice(0, customGroupMaxParticipants(service) - 1);
@@ -7970,6 +7979,9 @@ export async function createPublicBooking(
         ...otherAttendees,
       ],
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
+      // Paying for everyone, or splitting it. Decided before confirming because
+      // it decides what each invite says.
+      groupPayment: cleanGroupPayment(payload?.groupPayment),
     };
   }
   // Each player's swing, as the page sent it alongside their name. Only the
@@ -8113,9 +8125,35 @@ export async function handlePublicBookingRequest(req, context = null) {
             return "";
           })
         : "";
+    // What the confirmation screen acts with: inviting each friend and paying
+    // online. If this fails the booking still stands; the screen just has
+    // nothing to send with and says the coach will be in touch.
+    const bookingToken = await issueBookingAccess(accountId, result.appointment.id).catch((error) => {
+      console.error("public_booking:access_token_failed", error);
+      return "";
+    });
     return json({
       ok: true,
       ...(rememberToken ? { rememberToken } : {}),
+      ...(bookingToken ? { bookingToken } : {}),
+      // The friends on a group booking, by the id each invite is sent with.
+      ...(result.appointment.customGroup
+        ? {
+            group: {
+              payment: cleanGroupPayment(result.appointment.groupPayment),
+              total: Number(result.appointment.calculatedPrice) || 0,
+              // Each friend's own link, for the booker to share. The booker is
+              // the one person entitled to every link on their booking.
+              attendees: (result.appointment.attendees || [])
+                .filter((attendee) => attendee.status !== "booker")
+                .map((attendee) => ({
+                  id: attendee.id,
+                  name: attendee.name,
+                  url: customGroupInviteUrl(new URL(req.url).origin, accountId, attendee.token || ""),
+                })),
+            },
+          }
+        : {}),
       appointment: {
         id: result.appointment.id,
         week: result.appointment.week,
@@ -8127,7 +8165,6 @@ export async function handlePublicBookingRequest(req, context = null) {
         coach: result.appointment.coach,
         location: result.appointment.location,
       },
-      state: { items: result.state?.items || [] },
       notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
@@ -8146,45 +8183,412 @@ export async function handlePublicBookingRequest(req, context = null) {
   }
 }
 
-export async function handleCustomGroupConfirmRequest(req) {
+// --- The confirmation screen's token -------------------------------------------
+//
+// Returned with a public booking so the page that made it can go on to send
+// each friend their invite and take the booker's payment. Only its hash is kept
+// (public_booking_access). It reaches one booking, does only those two things,
+// and lapses after PUBLIC_BOOKING_ACCESS_DAYS -- the `INTERVAL '90 days'` below.
+const PUBLIC_BOOKING_ACCESS_DAYS = 90;
+void PUBLIC_BOOKING_ACCESS_DAYS;
+// Ceilings on invite emails from one booking: in all (this many per person on
+// it), and to any one address. The address is whatever the booker types, so
+// without them the confirmation screen is a way to send this business's email
+// to anyone, as often as they like.
+const INVITE_EMAILS_PER_ATTENDEE = 5;
+const INVITE_EMAILS_PER_ADDRESS = 3;
+
+async function issueBookingAccess(accountId: string, appointmentId: string) {
+  const token = randomBytes(32).toString("base64url");
+  await db().sql`
+    INSERT INTO public.public_booking_access (token_hash, account_id, appointment_id)
+    VALUES (${hashToken(token)}, ${accountId}, ${appointmentId})
+  `;
+  return token;
+}
+
+/** The booking a confirmation-screen token reaches. Anything else is refused. */
+async function bookingForAccess(accountId: string, body: Record<string, any>) {
+  const appointmentId = cleanString(body?.booking, "", 140);
+  const token = cleanString(body?.token, "", 200);
+  if (!appointmentId || !token) throw Object.assign(new Error("This booking could not be found."), { status: 400 });
+  const [row] = (await db().sql`
+    SELECT appointment_id FROM public.public_booking_access
+    WHERE token_hash = ${hashToken(token)}
+      AND account_id = ${accountId}
+      AND appointment_id = ${appointmentId}
+      AND created_at > NOW() - INTERVAL '90 days'
+    LIMIT 1
+  `) as Record<string, any>[];
+  if (!row) throw Object.assign(new Error("This booking screen has expired. Your confirmation email has everything you need."), { status: 403 });
+  const appointment = await readCalendarItemById(accountId, appointmentId);
+  if (!appointment || appointment.kind !== "appointment") {
+    throw Object.assign(new Error("This booking could not be found."), { status: 404 });
+  }
+  if (appointment.status === "cancelled") {
+    throw Object.assign(new Error("This booking has been cancelled."), { status: 409 });
+  }
+  return appointment;
+}
+
+/**
+ * Changes one person on a group booking, and nothing else.
+ *
+ * The row is locked and re-read inside the transaction, and only that one
+ * attendee is changed, so two changes at once -- the booker sharing one
+ * friend's link while emailing another, or a friend confirming while the
+ * booker resends their invite -- both land instead of one undoing the other.
+ * Returns the booking as it now stands, or null if that person is not on it.
+ */
+async function patchAttendee(
+  accountId: string,
+  appointmentId: string,
+  isTarget: (attendee: Record<string, any>) => boolean,
+  patch: (attendee: Record<string, any>) => Record<string, any>,
+) {
+  const client = await db().pool.connect();
+  let changed = false;
   try {
-    const token = cleanString(new URL(req.url).searchParams.get("token") || "", "", 180);
-    if (!token) return text("This confirmation link is missing its token.", 400);
-
-    const state = await readPublicCalendarState(await resolvePublicAccountId(req));
-    const workspaceAccount = publicWorkspaceAccount(state);
-    assertAccountFeature(workspaceAccount, "publicBooking");
-    let confirmedAttendee = null;
-    let confirmedAppointment = null;
-    const nextItems = state.items.map((item) => {
-      if (!recordBelongsToAccountStrict(item, workspaceAccount.id)) return item;
-      if (!item.customGroup || !Array.isArray(item.attendees)) return item;
-      let changed = false;
-      const attendees = item.attendees.map((attendee) => {
-        if (attendee.token !== token) return attendee;
-        changed = true;
-        confirmedAttendee = attendee;
-        confirmedAppointment = item;
-        return { ...attendee, status: "confirmed" };
-      });
-      return changed ? { ...item, attendees } : item;
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      "SELECT custom_group FROM calendar_items WHERE account_id = $1 AND id = $2 FOR UPDATE",
+      [accountId, appointmentId],
+    );
+    const raw = rows[0]?.custom_group;
+    const group = typeof raw === "string" ? safeJsonParse(raw, null) : raw;
+    if (!group || !Array.isArray(group.attendees)) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const attendees = group.attendees.map((attendee, index) => {
+      if (changed || attendee?.status === "booker" || !isTarget(attendee)) return attendee;
+      changed = true;
+      return cleanCustomGroupAttendee(patch(attendee), index) || attendee;
     });
+    if (!changed) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    await client.query(
+      "UPDATE calendar_items SET custom_group = $3::jsonb, updated_at = NOW() WHERE account_id = $1 AND id = $2",
+      [accountId, appointmentId, JSON.stringify({ ...group, attendees })],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  // The coach's calendar refetches when this moves.
+  await setSetting(accountId, "updatedAt", nowIso());
+  return readCalendarItemById(accountId, appointmentId);
+}
 
-    if (!confirmedAttendee || !confirmedAppointment) {
-      return text("This confirmation link is not valid or has already been replaced.", 404);
+/**
+ * The booker sends one friend their invite from the confirmation screen:
+ *
+ *   method "email" -- with the address they type; we send the invite (and, on
+ *     a split lesson, the friend's pay link) and mark them invited.
+ *   method "link"  -- the booker shares the friend's own link themselves, by
+ *     text or any app. We only record that they did and hand back the link.
+ *
+ * Either way the friend keeps the same link: it is theirs from the moment the
+ * booking was made.
+ */
+export async function handlePublicBookingInviteRequest(req: Request) {
+  try {
+    const accountId = await resolvePublicAccountId(req);
+    const body = await parseBody(req);
+    const appointment = await bookingForAccess(accountId, body);
+    if (!appointment.customGroup || !Array.isArray(appointment.attendees)) {
+      throw Object.assign(new Error("This booking has no group to invite."), { status: 400 });
+    }
+    const attendeeId = cleanString(body?.attendeeId, "", 120);
+    const attendee = appointment.attendees.find((candidate) => candidate.id === attendeeId && candidate.status !== "booker");
+    if (!attendee) throw Object.assign(new Error("That person is no longer on this booking."), { status: 404 });
+    const method = body?.method === "email" ? "email" : body?.method === "link" ? "link" : "";
+    if (!method) throw Object.assign(new Error("Choose how to send the invite."), { status: 400 });
+    const token = cleanString(attendee.token, "", 180) || randomUUID();
+
+    const isThem = (candidate) => candidate.id === attendeeId;
+
+    if (method === "link") {
+      await patchAttendee(accountId, appointment.id, isThem, (candidate) => ({ ...candidate, token: candidate.token || token, invitedVia: "link" }));
+      return json({ ok: true, method, url: customGroupInviteUrl(new URL(req.url).origin, accountId, token) });
     }
 
-    await writePublicBookingState(workspaceAccount.id, state, nextItems);
-    const service = state.services.find((candidate) => recordBelongsToAccountStrict(candidate, workspaceAccount.id) && candidate.id === confirmedAppointment.serviceId);
-    const title = "Attendance confirmed";
-    return text(
-      `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#101612;padding:32px;max-width:640px;margin:auto"><h1>${title}</h1><p>${escapeHtml(confirmedAttendee.name)} is confirmed for ${escapeHtml(service?.name || "the custom group lesson")}.</p><p>You can close this page.</p></body></html>`,
-      200,
-      "text/html; charset=utf-8",
+    const email = cleanEmail(body?.email, "");
+    if (!email) throw Object.assign(new Error("Enter a valid email address."), { status: 400 });
+    if ((await getSetting(accountId, "sendClientEmail")) === "false") {
+      throw Object.assign(new Error("This business isn't sending emails right now. Share the link instead."), { status: 409 });
+    }
+    const sent = (await readNotificationHistoryForAppointment(accountId, appointment.id)).filter(
+      (record) => String(record.kind || "").endsWith("custom_group_invite_email") && record.status === "sent",
     );
+    if (
+      sent.filter((record) => cleanEmail(record.recipient, "") === email).length >= INVITE_EMAILS_PER_ADDRESS ||
+      sent.length >= INVITE_EMAILS_PER_ATTENDEE * appointment.attendees.length
+    ) {
+      throw Object.assign(new Error("That's a lot of invites for one booking. Share the link instead."), { status: 429 });
+    }
+    // Sent first, saved after: a friend is only marked invited by email once
+    // the email has actually gone.
+    const invitee = { ...attendee, email, token, invitedVia: "email", status: attendee.status === "confirmed" ? "confirmed" : "invited" };
+    const results = await notifyBookingEvent({
+      action: "booking",
+      appointment: { ...appointment, accountId, attendees: appointment.attendees.map((candidate) => (isThem(candidate) ? invitee : candidate)) },
+      source: "public-booking-invite",
+      inviteAttendeeId: attendeeId,
+      idempotencyNonce: randomUUID(),
+    });
+    if (!results.some((result) => result.sent === true)) {
+      return json({ ok: false, message: "The invite could not be emailed. Try again, or share the link instead." }, 502);
+    }
+    await patchAttendee(accountId, appointment.id, isThem, (candidate) => ({
+      ...candidate,
+      email,
+      token: candidate.token || token,
+      invitedVia: "email",
+      status: candidate.status === "confirmed" ? "confirmed" : "invited",
+    }));
+    return json({ ok: true, method, email });
+  } catch (error) {
+    console.error("public_booking_invite:failed", error);
+    const status = error?.status || 500;
+    return json({ ok: false, message: status === 500 ? "The invite could not be sent." : error.message }, status);
+  }
+}
+
+/** What a booking costs the booker if they pay online, and whether it is a share. */
+function bookerPaymentFor(appointment: Record<string, any>, service: Record<string, any> | undefined) {
+  const name = cleanString(appointment.client, "", 160);
+  const date = formatBookingDate(appointment.week, appointment.day);
+  const lesson = cleanString(service?.name, "Lesson", 160);
+  if (appointment.customGroup) {
+    const share = cleanGroupPayment(appointment.groupPayment) === "split";
+    return {
+      share,
+      amount: bookerGroupAmount(appointment),
+      description: share ? `${lesson} · ${date} · Share for ${name}` : `${lesson} · ${date} · Group of ${(appointment.attendees || []).length}`,
+    };
+  }
+  const free = service?.priceMode === "free" || !(Number(service?.price) > 0);
+  return { share: false, amount: free ? 0 : Number(service.price), description: `${lesson} · ${date}` };
+}
+
+/**
+ * The booker paying online from the confirmation screen.
+ *
+ *   action "start"  -- the Stripe page to pay at (or `paid` if it already is).
+ *   action "status" -- whether it has been paid yet, for the screen to tick over.
+ */
+export async function handlePublicBookingPayRequest(req: Request) {
+  try {
+    const accountId = await resolvePublicAccountId(req);
+    const body = await parseBody(req);
+    const appointment = await bookingForAccess(accountId, body);
+    const catalogue = await readPublicCatalogState(accountId);
+    const service = (catalogue.services || []).find((candidate) => candidate.id === appointment.serviceId);
+    const payment = bookerPaymentFor(appointment, service);
+    const billing = await import("./billing-api.mts");
+    if (body?.action === "status") {
+      return json({ ok: true, paid: await billing.bookerPaymentPaid(accountId, { bookingId: appointment.id, share: payment.share }) });
+    }
+    if (!catalogue.onlinePayments) {
+      throw Object.assign(new Error("Card payments are not set up for this business. You can pay on the day."), { status: 409 });
+    }
+    const origin = cleanUrl(catalogue.account?.bookingUrl, "") || new URL(req.url).origin;
+    const result = await billing.ensureBookerPayment(accountId, {
+      bookingId: appointment.id,
+      share: payment.share,
+      amount: payment.amount,
+      name: cleanString(appointment.client, "", 160),
+      email: cleanEmail(appointment.email, ""),
+      description: payment.description,
+      week: appointment.week,
+      day: appointment.day,
+    }, origin);
+    return json({ ok: true, ...result });
+  } catch (error) {
+    console.error("public_booking_pay:failed", error);
+    const status = error?.status || 500;
+    return json({ ok: false, message: status === 500 ? "Payment could not be started. You can pay on the day." : error.message }, status);
+  }
+}
+
+/** The booking holding this invite token, with the attendee it belongs to. */
+async function bookingForInviteToken(accountId: string, token: string) {
+  // Invite tokens are UUIDs; anything much shorter is not one.
+  if (token.length < 20) return null;
+  // A text search rather than JSON containment: it finds the token whether the
+  // column holds the object or (on older rows) the object as a JSON string.
+  // The exact match on the attendee below is what actually decides.
+  const rows = (await db().sql`
+    SELECT id FROM calendar_items
+    WHERE account_id = ${accountId}
+      AND kind = 'appointment'
+      AND custom_group IS NOT NULL
+      AND strpos(custom_group::text, ${token}) > 0
+    LIMIT 5
+  `) as Record<string, any>[];
+  for (const row of rows) {
+    const appointment = await readCalendarItemById(accountId, row.id);
+    const attendee = appointment?.attendees?.find((candidate) => candidate.token === token && candidate.status !== "booker");
+    if (appointment && attendee) return { appointment, attendee };
+  }
+  return null;
+}
+
+/** An amount in the business's own currency, the way the booking page writes it. */
+function accountMoney(value: number, account: Record<string, any> = {}) {
+  const currency = currencyForAccountSettings(account?.invoiceSettings?.currency, account?.country);
+  try {
+    return new Intl.NumberFormat(localeForCountry(account?.country), {
+      style: "currency",
+      currency,
+      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value}`;
+  }
+}
+
+function clockLabel(minutes) {
+  const value = Number(minutes || 0);
+  const hour = Math.floor(value / 60);
+  return `${hour % 12 || 12}:${String(value % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+/** The page a friend lands on from their invite. Plain HTML: it has to open in any messaging app's browser. */
+function invitePage(input: {
+  business: string;
+  heading: string;
+  lines: string[];
+  rows: Array<[string, string]>;
+  done?: string;
+  actions?: string;
+  note?: string;
+  status?: number;
+}) {
+  const rows = input.rows
+    .filter(([, value]) => value)
+    .map(([label, value]) => `<div class="row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join("");
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(input.heading)}</title><style>
+body{margin:0;background:#f4f6f1;color:#13201a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:16px;line-height:1.5}
+main{max-width:480px;margin:0 auto;padding:28px 16px 40px}
+.brand{font-size:13px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#56625a}
+h1{margin:8px 0 10px;font-size:28px;line-height:1.15}
+p{margin:0 0 10px;color:#3d4a42}
+.card{background:#fff;border:1px solid #dde3da;border-radius:16px;padding:6px 16px;margin:18px 0}
+.row{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid #eef1ea;font-size:15px}
+.row:last-child{border-bottom:0}.row span{color:#56625a}.row strong{text-align:right}
+form{margin:0 0 10px}
+button{width:100%;min-height:52px;border:0;border-radius:14px;font:inherit;font-weight:600;font-size:16px;cursor:pointer}
+.primary{background:#1f6b45;color:#fff}.secondary{background:#fff;color:#13201a;border:1.5px solid #c9d2c5}
+.done{display:flex;align-items:center;gap:10px;background:#e3efe6;color:#1f4a33;border-radius:14px;padding:14px 16px;font-weight:600;margin:0 0 10px}
+.note{font-size:14px;color:#56625a}
+</style></head><body><main><div class="brand">${escapeHtml(input.business)}</div><h1>${escapeHtml(input.heading)}</h1>${input.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}${rows ? `<div class="card">${rows}</div>` : ""}${input.done ? `<div class="done" role="status">&#10003; ${escapeHtml(input.done)}</div>` : ""}${input.actions || ""}${input.note ? `<p class="note">${escapeHtml(input.note)}</p>` : ""}</main></body></html>`;
+  return text(html, input.status || 200, "text/html; charset=utf-8");
+}
+
+/**
+ * A friend's invite link: the same one in their email and in the message the
+ * booker shared.
+ *
+ * Opening it shows the lesson and an "I'm coming" button; nothing changes until
+ * that is pressed. It used to confirm on open, which is wrong for a link that
+ * goes into group chats: WhatsApp, iMessage and email scanners all open links
+ * to preview them, and would have confirmed people who never tapped anything.
+ * On a split lesson the page also takes their share.
+ */
+export async function handleCustomGroupConfirmRequest(req: Request) {
+  const url = new URL(req.url);
+  try {
+    const token = cleanString(url.searchParams.get("token") || "", "", 180);
+    if (!token) return invitePage({ business: "", heading: "This link is incomplete", lines: ["Ask whoever sent it for the link again."], rows: [], status: 400 });
+    const accountId = await resolvePublicAccountId(req);
+    const catalogue = await readPublicCatalogState(accountId);
+    assertAccountFeature(publicWorkspaceAccount(catalogue), "publicBooking");
+    const business = cleanString(catalogue.account?.businessName || catalogue.account?.coachName, "", 160);
+    const found = await bookingForInviteToken(accountId, token);
+    if (!found) {
+      return invitePage({ business, heading: "This invite isn't valid any more", lines: ["The booking may have changed. Ask whoever invited you to send it again."], rows: [], status: 404 });
+    }
+    let { appointment, attendee } = found;
+    const service = (catalogue.services || []).find((candidate) => candidate.id === appointment.serviceId);
+    const booker = cleanString(appointment.client, "", 160).split(/\s+/)[0] || "Your friend";
+    const share = friendShareAmount(appointment);
+    // As it will be charged: the share invoice adds tax when prices are quoted before it.
+    const tax = catalogue.account?.invoiceSettings;
+    const taxNote = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? ` + ${tax.taxName}` : "";
+    const shareLabel = share > 0 ? `${accountMoney(share, catalogue.account)}${taxNote}` : "";
+    const cancelled = appointment.status === "cancelled";
+    const rows: Array<[string, string]> = [
+      ["Lesson", cleanString(service?.name, "Group lesson", 160)],
+      ["When", `${formatBookingDate(appointment.week, appointment.day)}, ${clockLabel(appointment.start)}`],
+      ["With", cleanString(appointment.coach?.displayName || appointment.coach?.name, "", 120)],
+      ["Where", cleanString(appointment.location?.name, "", 140)],
+      ["Your share", share > 0 ? shareLabel : cleanGroupPayment(appointment.groupPayment) === "booker" ? `Covered by ${booker}` : ""],
+    ];
+    if (cancelled) {
+      return invitePage({ business, heading: "This lesson was cancelled", lines: [`${booker}'s booking is no longer going ahead.`], rows });
+    }
+
+    let notice = "";
+    if (req.method === "POST") {
+      const form = new URLSearchParams(await req.text());
+      const action = form.get("action");
+      if (attendee.status !== "confirmed") {
+        appointment = (await patchAttendee(accountId, appointment.id, (candidate) => candidate.token === token, (candidate) => ({ ...candidate, status: "confirmed" }))) || appointment;
+        attendee = { ...attendee, status: "confirmed" };
+      }
+      if (action === "pay" && share > 0) {
+        const { ensureGroupShareInvoice } = await import("./billing-api.mts");
+        const invoice = await ensureGroupShareInvoice(accountId, {
+          bookingId: appointment.id,
+          attendeeId: attendee.id,
+          name: attendee.name,
+          email: cleanEmail(attendee.email, ""),
+          amount: share,
+          description: `${cleanString(service?.name, "Lesson", 160)} · ${formatBookingDate(appointment.week, appointment.day)} · Share for ${attendee.name}`,
+          week: appointment.week,
+          day: appointment.day,
+        }, cleanUrl(catalogue.account?.bookingUrl, "") || url.origin).catch((error) => {
+          console.error("custom_group_confirm:share_invoice_failed", appointment.id, error);
+          return null;
+        });
+        if (invoice?.payUrl) return new Response(null, { status: 303, headers: { Location: invoice.payUrl, "Cache-Control": "no-store" } });
+        notice = "Card payments aren't available right now. You can pay on the day.";
+      }
+    }
+
+    const confirmed = attendee.status === "confirmed";
+    let paid = false;
+    if (share > 0) {
+      const { groupShareInvoiceStatus } = await import("./billing-api.mts");
+      paid = (await groupShareInvoiceStatus(accountId, appointment.id, attendee.id).catch(() => "")) === "paid";
+    }
+    const canPay = share > 0 && !paid && catalogue.onlinePayments === true;
+    const first = cleanString(attendee.name, "", 120).split(/\s+/)[0];
+    const actions = [
+      confirmed ? "" : `<form method="post"><input type="hidden" name="action" value="confirm"><button class="primary" type="submit">I'm coming</button></form>`,
+      canPay ? `<form method="post"><input type="hidden" name="action" value="pay"><button class="${confirmed ? "primary" : "secondary"}" type="submit">Pay my share · ${escapeHtml(shareLabel)}</button></form>` : "",
+    ].join("");
+    return invitePage({
+      business,
+      heading: confirmed ? "You're in" : first ? `You're invited, ${first}` : "You're invited",
+      lines: [confirmed ? `See you there. ${booker} has your spot.` : `${booker} has booked a lesson and saved you a spot.`],
+      rows,
+      done: paid ? "Your share is paid" : confirmed ? "You're confirmed" : "",
+      actions,
+      note: notice || (canPay ? "Paying ahead is optional. You can also pay on the day." : share > 0 && !paid ? "You can pay your share on the day." : ""),
+    });
   } catch (error) {
     console.error("custom_group_confirm:failed", error);
-    return text("Attendance could not be confirmed. Please contact the coach.", 500);
+    return invitePage({ business: "", heading: "Something went wrong", lines: ["Your spot couldn't be loaded. Try again in a moment, or let whoever invited you know."], rows: [], status: 500 });
   }
 }
 
@@ -8889,6 +9293,14 @@ async function routeBookingApiRequest(
       return handlePublicNotificationStatusRequest(req);
     }
 
+    if (req.method === "POST" && pathname === "/api/public-booking-invite") {
+      return handlePublicBookingInviteRequest(req);
+    }
+
+    if (req.method === "POST" && pathname === "/api/public-booking-pay") {
+      return handlePublicBookingPayRequest(req);
+    }
+
     if (pathname.startsWith("/api/auth/")) {
       await ensureAuthReady();
     } else {
@@ -9302,6 +9714,14 @@ async function routeBookingApiRequest(
 
     if (req.method === "GET" && pathname === "/api/public-notification-status") {
       return handlePublicNotificationStatusRequest(req);
+    }
+
+    if (req.method === "POST" && pathname === "/api/public-booking-invite") {
+      return handlePublicBookingInviteRequest(req);
+    }
+
+    if (req.method === "POST" && pathname === "/api/public-booking-pay") {
+      return handlePublicBookingPayRequest(req);
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {

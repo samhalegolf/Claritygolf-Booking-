@@ -1,6 +1,6 @@
 import { t } from "../../lib/i18n";
 import { BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE, PUBLIC_BOOKING_HOST } from "../shared/bookingHandoff";
-import { currentPublicBookingScreenId, publicBookingPath } from "./bookingScreen";
+import { publicBookingPath } from "./bookingScreen";
 
 /**
  * The public booking screens a business can publish (lessons, groups, video
@@ -47,22 +47,13 @@ export function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
 
 export function getBookingScreenIframeCode(path: string, businessName: string, screenName: string, showLogo: boolean) {
   const bookingScreenUrl = getBookingScreenPublicUrl(path, showLogo);
-  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
-}
-
-export function isBookingLogoHiddenByUrl() {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get(BOOKING_LOGO_PARAM) === "0";
+  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" allow="web-share; clipboard-write; payment" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
 }
 
 function normalizeBookingPath(pathname = "") {
   const cleaned = pathname.trim().toLowerCase();
   if (!cleaned || cleaned === "/") return "/";
   return `/${cleaned.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\/+/g, "/")}`;
-}
-
-export function getBookingScreenId(pathname = "") {
-  return currentPublicBookingScreenId(pathname);
 }
 
 /**

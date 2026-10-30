@@ -2642,25 +2642,13 @@
   padding: 10px 12px;
 }
 
-.booking-progressive-summary strong,
-.booking-progressive-summary-empty strong {
+.booking-progressive-summary strong {
   font-size: 14px;
   font-weight: 650;
 }
 
-.booking-progressive-summary span,
-.booking-progressive-summary-empty span {
+.booking-progressive-summary span {
   font-size: 12px;
-}
-
-.booking-progressive-summary-empty {
-  color: var(--c-text-soft);
-  background: var(--c-surface-soft);
-}
-
-.booking-progressive-summary-empty strong,
-.booking-progressive-summary-empty span {
-  font-style: normal;
 }
 
 .booking-progressive-section.is-open .booking-progressive-body {
@@ -2671,13 +2659,11 @@
   display: none;
 }
 
-.booking-progressive-section .booking-progressive-summary,
-.booking-progressive-section .booking-progressive-summary-empty {
+.booking-progressive-section .booking-progressive-summary {
   display: none;
 }
 
-.booking-progressive-section:not(.is-open) .booking-progressive-summary,
-.booking-progressive-section:not(.is-open) .booking-progressive-summary-empty {
+.booking-progressive-section:not(.is-open) .booking-progressive-summary {
   display: grid;
 }
 
@@ -2899,9 +2885,9 @@
   resize: vertical;
 }
 
-/* A custom group's people on the public booking page: a row each, with the
-   invite envelopes in a column of their own under a small heading. An
-   envelope that is on asks for that person's email on a line beneath them. */
+/* A custom group's people on the public booking page: a row each -- a name,
+   folded into a name card once it is in -- with the remove button at the end.
+   Invites are sent after booking, from the confirmation screen. */
 .booking-group {
   gap: 6px;
 }
@@ -2909,7 +2895,7 @@
 .booking-group-head,
 .booking-group-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px 34px;
+  grid-template-columns: minmax(0, 1fr) 34px;
   gap: 6px;
   align-items: center;
 }
@@ -2919,23 +2905,10 @@
   font-weight: 700;
 }
 
-.booking-group-invite-head {
-  grid-column: 2 / 4;
-  justify-self: start;
-  color: var(--booking-muted, var(--c-text-soft));
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
 /* With a swing toggle per player, it takes a column of its own. */
 .booking-group.has-swing .booking-group-head,
 .booking-group.has-swing .booking-group-row {
-  grid-template-columns: minmax(0, 1fr) 56px 42px 34px;
-}
-
-.booking-group.has-swing .booking-group-invite-head {
-  grid-column: 3 / 5;
+  grid-template-columns: minmax(0, 1fr) 56px 34px;
 }
 
 .booking-group-col-head {
@@ -2999,30 +2972,349 @@
   min-width: 0;
 }
 
-.booking-group-email {
-  grid-column: 1 / -1;
-}
-
-.booking-group-invite,
 .booking-group-remove {
   display: grid;
   place-items: center;
   height: 42px;
-  border: 1px solid var(--booking-border, var(--c-border));
+  border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: var(--booking-muted, var(--c-text-soft));
   cursor: pointer;
 }
 
-.booking-group-remove {
-  border-color: transparent;
+/* A friend's name, folded once it is in. Pressing it opens the field again. */
+.booking-group-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid var(--booking-border, var(--c-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--booking-text, var(--c-text)) 6%, var(--booking-input, var(--c-surface)));
+  color: var(--booking-text, var(--c-text));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.booking-group-invite[aria-pressed="true"] {
+.booking-group-card:hover {
+  border-color: var(--coach-primary);
+}
+
+.booking-group-card > span,
+.booking-person-initial {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--coach-primary, var(--c-accent)) 18%, transparent);
+  color: var(--booking-text, var(--c-text));
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.booking-group-card > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.booking-group-card > svg {
+  flex: none;
+  opacity: 0.6;
+}
+
+/* "Who's paying?" under a group's price, and "Pay now / on the day" after
+   booking: the same pair of large choices. */
+.booking-group-payment {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.booking-group-payment legend {
+  margin-bottom: 6px;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.booking-group-payment > div,
+.booking-pay-options {
+  display: grid;
+  gap: 8px;
+}
+
+.booking-group-payment button,
+.booking-pay-options [role="radio"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--booking-border, var(--c-border));
+  border-radius: 10px;
+  background: var(--booking-input, var(--c-surface));
+  color: var(--booking-text, var(--c-text));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.booking-group-payment button > span,
+.booking-pay-options [role="radio"] > span {
+  display: grid;
+  gap: 2px;
+}
+
+.booking-group-payment small,
+.booking-pay-options small {
+  color: var(--booking-muted, var(--c-text-soft));
+}
+
+.booking-group-payment em,
+.booking-pay-options em {
+  flex: none;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.booking-group-payment button.is-chosen,
+.booking-pay-options [role="radio"].is-chosen {
+  border-color: var(--coach-primary);
+  background: color-mix(in srgb, var(--coach-primary) 12%, var(--booking-input, var(--c-surface)));
+}
+
+/* After booking: the booking, each friend's invite, and paying. */
+.booking-confirmed {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 8px;
+}
+
+.booking-confirmed-summary dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.booking-confirmed-summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.booking-confirmed-summary dt {
+  color: var(--booking-muted, var(--c-text-soft));
+}
+
+.booking-confirmed-summary dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.booking-confirmed-section {
+  display: grid;
+  gap: 8px;
+}
+
+.booking-confirmed-section h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.booking-confirmed-help {
+  margin: 0;
+  color: var(--booking-muted, var(--c-text-soft));
+  font-size: var(--c-size-meta);
+  line-height: 1.45;
+}
+
+.booking-person {
+  display: grid;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--booking-border, var(--c-border));
+  border-radius: 10px;
+  background: var(--booking-input, var(--c-surface));
+}
+
+.booking-person.is-booker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  border-color: var(--coach-primary);
+}
+
+.booking-person.is-open {
+  border-color: var(--coach-primary);
+}
+
+.booking-person-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.booking-person-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.booking-person-text strong,
+.booking-person-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.booking-person-text small {
+  color: var(--booking-muted, var(--c-text-soft));
+}
+
+.booking-person-invite {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--booking-text, var(--c-text));
+  color: var(--booking-input, var(--c-surface));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.booking-person-invite[aria-expanded="true"] {
+  border-color: var(--booking-border, var(--c-border));
+  background: transparent;
+  color: var(--booking-text, var(--c-text));
+}
+
+/* Sent: a tick, and tapping it offers the two ways again for a resend. */
+.booking-person-invite.is-sent {
   border-color: var(--coach-primary);
   background: color-mix(in srgb, var(--coach-primary) 16%, transparent);
   color: var(--booking-text, var(--c-text));
+}
+
+.booking-person-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--booking-border, var(--c-border));
+}
+
+.booking-person-methods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.booking-person-methods button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  border: 1.5px solid var(--booking-border, var(--c-border));
+  border-radius: 10px;
+  background: transparent;
+  color: var(--booking-text, var(--c-text));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.booking-person-methods button.is-chosen {
+  border-color: var(--coach-primary);
+  background: color-mix(in srgb, var(--coach-primary) 12%, transparent);
+}
+
+.booking-person-email {
+  display: flex;
+  gap: 8px;
+}
+
+.booking-person-email input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.booking-person-email .primary-button {
+  flex: none;
+}
+
+.booking-paid {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--coach-primary) 16%, transparent);
+}
+
+.booking-paid small {
+  margin-left: auto;
+  color: var(--booking-muted, var(--c-text-soft));
+}
+
+/* "Booking confirmed" stays at the foot of the screen while the booker sends
+   invites and pays above it. */
+.booking-confirmed-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--coach-primary, var(--c-accent));
+  color: var(--c-accent-text);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.booking-confirmed-bar .booking-person-text small {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.booking-confirmed-tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--c-accent-text);
+  color: var(--coach-primary, var(--c-accent));
+}
+
+.booking-confirmed-bar .booking-progressive-change {
+  flex: none;
+  min-height: 44px;
+  color: inherit;
+  border-color: currentColor;
 }
 
 .booking-group-remove:disabled {
@@ -3072,35 +3364,6 @@
    fit more than two names. */
 .booking-coach-picker .booking-handedness-options {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-}
-
-/* The asterisk is positioned against this wrapper, so the wrapper has to be
-   the width of the input rather than the width of the row -- otherwise the
-   mark floats off to the right of a field it no longer belongs to. Grid, so
-   the input fills the wrapper without a width of its own, and the wrapper
-   carries the Rule 05 class from the JSX. */
-.booking-required-field {
-  position: relative;
-  display: grid;
-}
-
-.booking-required-field input {
-  box-sizing: border-box;
-  min-width: 0;
-  padding-right: 24px;
-}
-
-.booking-required-mark {
-  color: #d9362e;
-  font-weight: 900;
-}
-
-.booking-required-field .booking-required-mark {
-  position: absolute;
-  top: 50%;
-  right: 10px;
-  transform: translateY(-50%);
-  pointer-events: none;
 }
 
 .booking-summary {
@@ -3250,6 +3513,16 @@
   border: 1px solid var(--c-border);
   border-radius: 6px;
   background: var(--c-surface);
+}
+
+/* Settings > Booking page > Preview: the live page, tall enough to book through. */
+.booking-page-live-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.booking-page-live-preview iframe {
+  height: min(780px, 80vh);
 }
 
 .sync-card {
@@ -4642,10 +4915,6 @@
   color: var(--c-muted);
   font-size: 11px;
   font-style: normal;
-}
-
-.booking-client-match {
-  margin-top: 9px;
 }
 
 .quick-field-match {
@@ -6407,23 +6676,16 @@
   display: none;
 }
 
-.app-shell .public-booking .booking-progressive-summary,
-.app-shell .public-booking .booking-progressive-summary-empty {
+.app-shell .public-booking .booking-progressive-summary {
   padding-top: 11px;
   padding-bottom: 11px;
   box-shadow: none;
 }
 
-.app-shell .public-booking .booking-progressive-summary,
-.app-shell .public-booking .booking-progressive-summary-empty {
+.app-shell .public-booking .booking-progressive-summary {
   border-top: 0;
   background: color-mix(in srgb, var(--booking-control) 82%, var(--c-surface));
   color: var(--booking-text);
-}
-
-.app-shell .public-booking .booking-progressive-summary-empty {
-  color: var(--booking-muted);
-  background: color-mix(in srgb, var(--booking-control) 75%, transparent);
 }
 
 .app-shell .public-booking .booking-card > span,
@@ -9834,52 +10096,8 @@
   text-transform: uppercase;
 }
 
-.custom-group-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.custom-group-summary,
-.custom-group-attendee-row {
-  align-items: center;
-  background: color-mix(in srgb, var(--c-surface) 86%, transparent);
-  border: 1px solid color-mix(in srgb, var(--coach-accent, #07100a) 14%, transparent);
-  border-radius: 8px;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  padding: 10px 12px;
-}
-
-.custom-group-summary span,
-.custom-group-attendee-row em,
-.custom-group-attendee-row small {
-  color: var(--c-muted);
-  font-size: 0.82rem;
-}
-
-.custom-group-summary strong,
-.custom-group-summary em,
-.custom-group-attendee-row strong {
-  color: var(--c-text-body);
-}
-
 .custom-group-attendee-form {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.custom-group-attendee-list {
-  display: grid;
-  gap: 8px;
-}
-
-.custom-group-attendee-row span {
-  display: grid;
-  min-width: 0;
-}
-
-.custom-group-attendee-row .icon-button {
-  justify-self: end;
 }
 
 @media (max-width: 1180px) {
@@ -9897,9 +10115,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .custom-group-summary,
-  .custom-group-attendee-form,
-  .custom-group-attendee-row {
+  .custom-group-attendee-form {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -14112,7 +14328,6 @@
 .settings-page .integration-panel,
 .settings-page .integration-note,
 .settings-page .integration-error,
-.settings-page .custom-group-panel,
 .settings-page .settings-field,
 .settings-page .sync-field,
 .settings-page .sync-output {
@@ -18409,4 +18624,23 @@
 .app-shell.is-phone .sell-catalog,
 .app-shell.is-phone .sell-docket {
   padding: 12px;
+}
+
+/* The invite to copy by hand, where the page may not share or copy for you. */
+.booking-person-manual {
+  display: grid;
+  gap: 8px;
+}
+
+.booking-person-manual textarea {
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--booking-border, var(--c-border));
+  border-radius: 8px;
+  background: var(--booking-input, var(--c-surface));
+  color: var(--booking-text, var(--c-text));
+  font: inherit;
+  font-size: var(--c-size-meta);
+  resize: none;
 }

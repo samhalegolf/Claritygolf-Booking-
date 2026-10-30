@@ -1,11 +1,12 @@
 import "../../appStyles";
 import { Loading, loadingLabel } from "../shared/Loading";
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, Mail, Plus, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, Pencil, Plus, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen, publicApi, publicBookingRoute, publicShopHref, withBusiness } from "./bookingScreen";
 import { WeekSlots } from "./WeekSlots";
-import { BookingFrame, money, type Account, type Brand } from "./BookingFrame";
+import { BookingFrame, money, quotedMoney, type Account, type Brand } from "./BookingFrame";
+import { BookingConfirmed, type ConfirmedBooking, type ConfirmedGroup } from "./BookingConfirmed";
 import { forgetRememberedBooker, readRememberedBooker, saveRememberedBooker, type RememberedBooker } from "./rememberedBooker";
 import { resolvedMarketFromWire } from "../../../netlify/functions/_shared/market-profile.mts";
 import { t, tn, readerLocale } from "../../lib/i18n";
@@ -14,8 +15,9 @@ import { calculateCustomGroupPrice, customGroupMaxParticipants, customGroupMinPa
 type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; reviewTurnaroundDays?: number; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; capacity?: number; baseParticipants?: number; basePrice?: number; extraPersonPrice?: number; coachIds?: string[]; bookingScreenIds?: string[] };
 /** A coach as the public catalogue names them: no contact details. */
 type Coach = { id: string; name: string; photoUrl?: string };
-/** Someone the booker is bringing to a custom group. The email is only asked for, and only sent, when they tick the invite. */
-type Attendee = { name: string; email: string; invite: boolean; handedness: Handedness };
+/** Someone the booker is bringing to a custom group: just a name before booking. Their invite is sent from the confirmation screen. `editing` is the name's field being open rather than folded into its card. */
+type Attendee = { name: string; handedness: Handedness; editing: boolean };
+type GroupPayment = "booker" | "split";
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
 type Form = { firstName: string; lastName: string; phone: string; email: string };
 export type PublicBookingCustomer = { name?: string; email?: string; phone?: string };
@@ -43,9 +45,7 @@ function time(minutes: number) { const hour = Math.floor(minutes / 60); return `
  *  how the coach priced it. */
 function price(service: Service, account: Account) {
   if (service.priceMode === "free" || !service.price) return t("Free");
-  const amount = money(service.price, account);
-  const tax = account.invoiceSettings;
-  const quoted = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
+  const quoted = quotedMoney(service.price, account);
   return service.priceMode === "per-person" ? t("{price} per person", { price: quoted }) : quoted;
 }
 /** What the player is told a review will be back by. The server sets the real
@@ -88,7 +88,7 @@ function blankAttendees(service: Service | null): Attendee[] {
   // One row per person still needed to make the group up.
   return Array.from({ length: Math.max(1, customGroupMinParticipants(groupModel(service)) - 1) }, () => blankAttendee());
 }
-function blankAttendee(): Attendee { return { name: "", email: "", invite: false, handedness: "right" }; }
+function blankAttendee(): Attendee { return { name: "", handedness: "right", editing: true }; }
 
 /** A player's swing as the app's small two-way pill switch (the theme
  *  switch's look): one press flips it. The initials keep it narrow; the full
@@ -101,14 +101,18 @@ function SwingToggle({ value, onChange, label }: { value: Handedness; onChange: 
 }
 
 /**
- * Who is coming to a custom group. The booker is the first place in the list,
- * and their details (or the fields for them) live there rather than above it,
- * so a signed-in player sees their name once. Then a row per other person:
- * their name, their swing where the business asks, and an envelope to send
- * them an invite, which asks for their email only once it is ticked. The price
- * for the group as it stands, and each person's share, sit underneath.
+ * Who is coming to a custom group, and who is paying. The booker is the first
+ * place in the list, and their details (or the fields for them) live there
+ * rather than above it, so a signed-in player sees their name once. Then a card
+ * per other person: just a name before booking, folding into a name card once
+ * it is in, with their swing where the business asks. Invites go out from the
+ * confirmation screen, so no one's email is asked for here.
+ *
+ * Underneath: the price for the group as it stands, and whether the booker is
+ * paying for everyone or splitting it. That has to be settled before booking,
+ * because it decides what each friend's invite says.
  */
-function GroupAttendees({ service, account, booker, bookerSwing, askHandedness, attendees, onChange }: { service: Service; account: Account; booker: ReactNode; bookerSwing: ReactNode; askHandedness: boolean; attendees: Attendee[]; onChange: (next: Attendee[]) => void }) {
+function GroupAttendees({ service, account, booker, bookerSwing, askHandedness, attendees, onChange, groupPayment, onGroupPayment }: { service: Service; account: Account; booker: ReactNode; bookerSwing: ReactNode; askHandedness: boolean; attendees: Attendee[]; onChange: (next: Attendee[]) => void; groupPayment: GroupPayment | ""; onGroupPayment: (next: GroupPayment) => void }) {
   const model = groupModel(service);
   const min = customGroupMinParticipants(model);
   const max = customGroupMaxParticipants(model);
@@ -116,34 +120,47 @@ function GroupAttendees({ service, account, booker, bookerSwing, askHandedness, 
   const total = calculateCustomGroupPrice(model, size);
   const share = Math.round((total / size) * 100) / 100;
   const update = (index: number, patch: Partial<Attendee>) => onChange(attendees.map((attendee, position) => (position === index ? { ...attendee, ...patch } : attendee)));
+  // A new card folds every name already in, so only the one being typed is open.
+  const addPerson = () => onChange([...attendees.map((attendee) => (attendee.name.trim() ? { ...attendee, editing: false } : attendee)), blankAttendee()]);
   return <div className={`booking-form booking-group${askHandedness ? " has-swing" : ""}`}>
-    <div className="booking-group-head"><span>{t("Who's coming")}</span>{askHandedness ? <span className="booking-group-col-head">{t("Swing")}</span> : null}<span className="booking-group-invite-head">{t("Send optional invite")}</span></div>
+    <div className="booking-group-head"><span>{t("Who's coming")}</span>{askHandedness ? <span className="booking-group-col-head">{t("Swing")}</span> : null}</div>
     <div className="booking-group-booker">
       <div className="booking-group-row"><strong className="booking-group-name">{t("You")}</strong>{bookerSwing}</div>
       {booker}
     </div>
     {attendees.map((attendee, index) => {
       const label = attendee.name.trim() || t("Person {number}", { number: index + 2 });
-      return <div className={`booking-group-row${attendee.invite ? " is-inviting" : ""}`} key={index}>
-        <input aria-label={t("Name of person {number}", { number: index + 2 })} autoComplete="off" className="booking-group-name" onChange={(event) => update(index, { name: event.target.value })} placeholder={t("Name")} value={attendee.name} />
+      const folded = !attendee.editing && Boolean(attendee.name.trim());
+      return <div className="booking-group-row" key={index}>
+        {folded
+          ? <button aria-label={t("Edit {name}", { name: label })} className="booking-group-card" onClick={() => update(index, { editing: true })} type="button"><span aria-hidden="true">{(attendee.name.trim()[0] || "?").toUpperCase()}</span><strong>{attendee.name.trim()}</strong><Pencil size={15} /></button>
+          : <input aria-label={t("Name of person {number}", { number: index + 2 })} autoComplete="off" autoFocus={index > 0 && !attendee.name} className="booking-group-name" onBlur={() => { if (attendee.name.trim()) update(index, { editing: false }); }} onChange={(event) => update(index, { name: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && attendee.name.trim()) update(index, { editing: false }); }} placeholder={t("Name")} value={attendee.name} />}
         {askHandedness ? <SwingToggle onChange={(handedness) => update(index, { handedness })} value={attendee.handedness} label={t("Which way {name} swings", { name: label })} /> : null}
-        <button aria-label={attendee.invite ? t("Don't send {name} an invite", { name: label }) : t("Send {name} an invite", { name: label })} aria-pressed={attendee.invite} className="booking-group-invite" onClick={() => update(index, { invite: !attendee.invite })} title={attendee.invite ? t("Invite on") : t("Send optional invite")} type="button"><Mail size={16} /></button>
         <button aria-label={t("Remove {name}", { name: label })} className="booking-group-remove" disabled={attendees.length <= 1} onClick={() => onChange(attendees.filter((_, position) => position !== index))} type="button"><X size={15} /></button>
-        {attendee.invite ? <input aria-label={t("Email for {name}", { name: label })} autoComplete="off" className="booking-group-email" onChange={(event) => update(index, { email: event.target.value })} placeholder={t("Their email, for the invite")} type="email" value={attendee.email} /> : null}
       </div>;
     })}
-    <button className="booking-group-add" disabled={1 + attendees.length >= max} onClick={() => onChange([...attendees, blankAttendee()])} type="button"><Plus size={15} />{t("Add another person")}</button>
+    <button className="booking-group-add" disabled={1 + attendees.length >= max} onClick={addPerson} type="button"><Plus size={15} />{1 + attendees.length >= max ? t("Group full ({max})", { max }) : t("Add person")}</button>
     <p className="booking-group-summary">
-      <strong>{tn(size, "{count} person", "{count} people")} · {money(total, account)}</strong>
-      <span>{size > 1 ? t("{share} each if you split it evenly", { share: money(share, account) }) : null}</span>
+      <strong>{tn(size, "{count} person", "{count} people")} · {quotedMoney(total, account)}</strong>
       {size < min ? <span>{tn(min - size, "Add {count} more person to book this lesson.", "Add {count} more people to book this lesson.")}</span> : <span>{t("Up to {max} people.", { max })}</span>}
     </p>
+    <fieldset className="booking-group-payment">
+      <legend>{t("Who's paying?")}</legend>
+      <div role="radiogroup" aria-label={t("Who's paying?")}>
+        <button aria-checked={groupPayment === "booker"} className={groupPayment === "booker" ? "is-chosen" : ""} onClick={() => onGroupPayment("booker")} role="radio" type="button">
+          <span><strong>{t("I'll pay for everyone")}</strong><small>{t("Friends just get an invite")}</small></span><em>{quotedMoney(total, account)}</em>
+        </button>
+        <button aria-checked={groupPayment === "split"} className={groupPayment === "split" ? "is-chosen" : ""} onClick={() => onGroupPayment("split")} role="radio" type="button">
+          <span><strong>{tn(size, "Split it {count} way", "Split it {count} ways")}</strong><small>{t("Friends get an invite with a pay link")}</small></span><em>{t("{share} each", { share: quotedMoney(share, account) })}</em>
+        </button>
+      </div>
+    </fieldset>
   </div>;
 }
 
 export default function PublicBookingApp({ customer, onBookingComplete, accountId }: PublicBookingAppProps) {
   const api = (path: string) => (accountId ? withBusiness(path, accountId) : publicApi(path));
-  const [catalogue, setCatalogue] = useState<{ services: Service[]; coaches: Coach[]; brand: Brand; account: Account; shopLinked: boolean }>({ services: [], coaches: [], brand: {}, account: {}, shopLinked: false });
+  const [catalogue, setCatalogue] = useState<{ services: Service[]; coaches: Coach[]; brand: Brand; account: Account; shopLinked: boolean; onlinePayments: boolean }>({ services: [], coaches: [], brand: {}, account: {}, shopLinked: false, onlinePayments: false });
   // "missing" is a link the server cannot match to a business -- an old embed
   // that does not name one, say. Trying again will not fix it, so it says so.
   const [catalogueState, setCatalogueState] = useState<"loading" | "ready" | "error" | "missing">("loading");
@@ -171,6 +188,10 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const [handedness, setHandedness] = useState<Handedness>(() => remembered?.handedness ?? "right");
   const [notes, setNotes] = useState("");
   const [attendees, setAttendees] = useState<Attendee[]>([]);
+  // A custom group's "who's paying?", required before it can be booked.
+  const [groupPayment, setGroupPayment] = useState<GroupPayment | "">("");
+  // The booking just made, for the confirmation screen to act on.
+  const [confirmed, setConfirmed] = useState<ConfirmedBooking | null>(null);
   const [submitState, setSubmitState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const [error, setError] = useState("");
 
@@ -178,7 +199,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
     let cancelled = false;
     apiFetch(api("/api/public-booking-catalog"))
       .then(async (response) => { if (response.status === 404) throw new Error("missing"); if (!response.ok) throw new Error(t("Booking is unavailable.")); return response.json(); })
-      .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], coaches: Array.isArray(data.coaches) ? data.coaches : [], brand: data.brand ?? {}, account: data.account ?? {}, shopLinked: data.shopLinked === true }); setCatalogueState("ready"); } })
+      .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], coaches: Array.isArray(data.coaches) ? data.coaches : [], brand: data.brand ?? {}, account: data.account ?? {}, shopLinked: data.shopLinked === true, onlinePayments: data.onlinePayments === true }); setCatalogueState("ready"); } })
       .catch((cause) => { if (!cancelled) setCatalogueState(cause instanceof Error && cause.message === "missing" ? "missing" : "error"); });
     return () => { cancelled = true; };
   }, []);
@@ -236,7 +257,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const customGroup = service?.customGroup || service?.customGroupEnabled;
   const availableSlots = service ? slotsByService[service.id] ?? [] : [];
   const namedAttendees = attendees.filter((attendee) => attendee.name.trim());
-  const canSubmit = Boolean(service && (videoReview || slot) && form.firstName.trim() && form.lastName.trim() && form.email.trim() && (!customGroup || namedAttendees.length + 1 >= customGroupMinParticipants(groupModel(service))));
+  const canSubmit = Boolean(service && (videoReview || slot) && form.firstName.trim() && form.lastName.trim() && form.email.trim() && (!customGroup || (namedAttendees.length + 1 >= customGroupMinParticipants(groupModel(service)) && groupPayment !== "")));
   // The coaches the player can choose between: only where there is a choice,
   // and not for a review (no time to be anywhere) or a scheduled group (one
   // session, one coach).
@@ -245,7 +266,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
     ? (service.coachIds ?? []).map((id) => catalogue.coaches.find((coach) => coach.id === id)).filter((coach): coach is Coach => Boolean(coach))
     : [];
   const slotCoach = slot && coachChoices.length > 1 ? catalogue.coaches.find((coach) => coach.id === slot.coachId) : undefined;
-  const chooseService = (id: string) => { setServiceId(id); setSlot(null); setCoachId(""); setAttendees(blankAttendees(services.find((candidate) => candidate.id === id) ?? null)); };
+  const chooseService = (id: string) => { setServiceId(id); setSlot(null); setCoachId(""); setGroupPayment(""); setAttendees(blankAttendees(services.find((candidate) => candidate.id === id) ?? null)); };
   const chooseCoach = (id: string) => { setCoachId(id); setSlot(null); };
   // Once a choice is made the other options step aside, so the player sees
   // only what they picked and the next thing to fill in. "Change" brings the
@@ -258,17 +279,30 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   async function submit() {
     if (!service || !canSubmit) return;
     if (!videoReview && !slot) return;
-    const missingInviteEmail = customGroup ? namedAttendees.find((attendee) => attendee.invite && !VALID_EMAIL.test(attendee.email.trim())) : undefined;
-    if (missingInviteEmail) { setError(t("Add an email for {name}, or untick their invite.", { name: missingInviteEmail.name.trim() })); return; }
     setSubmitState("saving"); setError("");
     try {
-      const response = await apiFetch(api("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), email: attendee.invite ? attendee.email.trim() : "", ...(market.capabilities.handedness ? { handedness: attendee.handedness } : {}) })) : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
+      const response = await apiFetch(api("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), ...(market.capabilities.handedness ? { handedness: attendee.handedness } : {}) })) : undefined, ...(customGroup ? { groupPayment } : {}), ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.appointment?.id) throw new Error(data.message || t("That time is no longer available."));
       if (typeof data.rememberToken === "string" && data.rememberToken) {
         const next: RememberedBooker = { token: data.rememberToken, firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(), email: form.email.trim(), handedness };
         saveRememberedBooker(next); setRemembered(next); setEditingDetails(false);
       }
+      const group = data.group && Array.isArray(data.group.attendees) ? (data.group as ConfirmedGroup) : null;
+      const groupSize = group ? group.attendees.length + 1 : 1;
+      setConfirmed({
+        appointmentId: String(data.appointment.id),
+        token: typeof data.bookingToken === "string" ? data.bookingToken : "",
+        lessonName: service.name,
+        when: videoReview || !slot ? t("Review due {date}", { date: reviewDueDate(service).label }) : `${dateFor(slot.week, slot.day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })}, ${time(slot.start)}`,
+        business: brandName,
+        booker: { name: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(), email: form.email.trim() },
+        group,
+        // What paying online would cost them: their share, the whole group,
+        // or the lesson. The server works out the real charge from the booking.
+        amountDue: group ? (group.payment === "split" ? Math.round((group.total - Math.round((group.total / groupSize) * 100) / 100 * (groupSize - 1)) * 100) / 100 : group.total) : service.priceMode === "free" ? 0 : Number(service.price) || 0,
+        priceLabel: group ? "" : price(service, catalogue.account),
+      });
       setSubmitState("done"); onBookingComplete?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : t("Could not confirm the booking.")); setSubmitState("error"); }
   }
@@ -297,7 +331,8 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const shopBusiness = publicBookingRoute().business;
   const shopHref = catalogue.shopLinked && shopBusiness && !customer ? publicShopHref(shopBusiness) : "";
   if (catalogueState === "ready" && !market.capabilities.publicBooking) return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><h1>{t("This booking page is not available.")}</h1></div></main></BookingFrame>;
-  if (submitState === "done") return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><Check size={24} /><h1>{t("Booking confirmed")}</h1><p>{videoReview ? t("Your confirmation is on its way by email. Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.", { customerSingular: terms.customerSingular.toLowerCase(), staffSingular: terms.staffSingular.toLowerCase() }) : t("Your confirmation is on its way by email.")}</p><button className="primary-button" onClick={() => { setSubmitState("idle"); setSlot(null); setNotes(""); setAttendees(blankAttendees(service)); }} type="button">{t("Book another {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</button></div></main></BookingFrame>;
+  const bookAnother = () => { setSubmitState("idle"); setConfirmed(null); setSlot(null); setNotes(""); setGroupPayment(""); setAttendees(blankAttendees(service)); };
+  if (submitState === "done" && confirmed) return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div>{videoReview ? <p className="booking-confirmed-help">{t("Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.", { customerSingular: terms.customerSingular.toLowerCase(), staffSingular: terms.staffSingular.toLowerCase() })}</p> : null}<BookingConfirmed account={catalogue.account} api={api} booking={confirmed} onBookAnother={bookAnother} onlinePayments={catalogue.onlinePayments} /></main></BookingFrame>;
 
   return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}>
     <div className="booking-brand">{catalogue.brand.showLogo && catalogue.brand.logoPreview ? <img src={catalogue.brand.logoPreview} alt={t("{brandName} logo", { brandName })} /> : <strong>{brandName}</strong>}<em>{catalogue.account.venueShortName}</em></div>
@@ -305,7 +340,7 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
     <div className="booking-columns booking-progressive-flow">
       <section className="booking-progressive-section is-open"><div className="booking-progressive-title"><span className="booking-progressive-title-label">1. {terms.serviceSingular}</span><span className="booking-progressive-title-state">{catalogueState === "loading" ? loadingLabel() : service ? changeButton(() => chooseService("")) : t("In progress")}</span></div><div className="booking-progressive-body"><div className="service-picker">{catalogueState === "missing" ? <p role="alert">{t("This booking page is not available. The link may be out of date: ask the business for its current booking link.")}</p> : catalogueState === "error" ? <p role="alert">{t("Booking is unavailable. Please try again shortly.")}</p> : catalogueState === "loading" ? <Loading what={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular.toLowerCase() })} /> : services.length ? (service ? [service] : services).map((candidate) => <button className={candidate.id === serviceId ? "selected-service" : ""} key={candidate.id} onClick={() => chooseService(candidate.id === serviceId ? "" : candidate.id)} type="button"><strong>{candidate.name}</strong><em>{t("{duration} minutes @ {candidate}", { duration: candidate.duration, candidate: price(candidate, catalogue.account) })}</em>{candidate.description ? <small>{candidate.description}</small> : null}{candidate.lessonNote || candidate.location ? <small>{candidate.lessonNote || candidate.location}</small> : null}</button>) : <p>{t("No public {serviceSingular} types are active.", { serviceSingular: terms.serviceSingular.toLowerCase() })}</p>}</div></div></section>
       <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{videoReview ? t("2. Turnaround") : t("2. Date & Time")}</span><span className="booking-progressive-title-state">{!service ? t("Locked") : videoReview ? t("No time needed") : slot ? changeButton(() => setSlot(null)) : slotsState === "loading" ? loadingLabel() : t("In progress")}</span></div>{service && videoReview ? <div className="booking-progressive-body"><div className="booking-review-turnaround"><p>{t("Send your swing from the player portal once you have booked. There is no appointment to attend.")}</p><p><strong>{t("Back with you by {label}", { label: reviewDueDate(service).label })}</strong>{" "}{reviewDueDate(service).days === 1 ? t("— within 1 day.") : t("— within {days} days.", { days: reviewDueDate(service).days })}</p></div></div> : service && slot ? <div className="booking-progressive-body"><WeekSlots week={week} slots={[slot]} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => time(candidate.start)} isSelected={() => true} onSelect={() => setSlot(null)} emptyLabel="" />{slotCoach ? <p className="booking-slot-coach">{t("With {name}", { name: slotCoach.name })}</p> : null}</div> : service ? <div className="booking-progressive-body">{coachChoices.length > 1 ? <fieldset className="booking-handedness booking-coach-picker"><legend>{t("Who would you like?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={terms.staffSingular}><button aria-checked={!coachId} className={!coachId ? "selected-handedness" : ""} onClick={() => chooseCoach("")} role="radio" type="button">{t("Anyone available")}</button>{coachChoices.map((coach) => <button aria-checked={coachId === coach.id} className={coachId === coach.id ? "selected-handedness" : ""} key={coach.id} onClick={() => chooseCoach(coach.id)} role="radio" type="button">{coach.name}</button>)}</div></fieldset> : null}<div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>{t("Previous week")}</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>{t("Next week")}</span><ArrowRight size={15} /></button></div><WeekSlots week={week} placeholder={slotsState === "loading" ? <Loading what={t("available times")} /> : slotsState === "error" ? <p role="alert">{t("Available times could not be loaded.")}</p> : null} slots={availableSlots} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => `${time(candidate.start)}${candidate.remainingSpots ? t(" · {remainingSpots} spots left", { remainingSpots: candidate.remainingSpots }) : ""}`} isSelected={(candidate) => slot?.week === candidate.week && slot?.day === candidate.day && slot?.start === candidate.start} onSelect={(candidate) => { setSlot(candidate); setError((current) => (current === NO_BAY_FOR_SWING ? "" : current)); }} emptyLabel={t("No public times available this week.")} /></div> : null}</section>
-      <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{t("3. Your Information")}</span><span className="booking-progressive-title-state">{readyForDetails ? t("In progress") : t("Locked")}</span></div>{readyForDetails ? <div className="booking-progressive-body">{customGroup && service ? <><GroupAttendees account={catalogue.account} askHandedness={askHandedness} attendees={attendees} booker={bookerDetails} bookerSwing={askHandedness ? <SwingToggle label={t("Which way you swing")} onChange={setHandedness} value={handedness} /> : null} onChange={setAttendees} service={service} /><div className="booking-form">{notesBox}</div></> : <div className="booking-form">{bookerDetails}{swingChoice}{notesBox}</div>}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? t("Confirming…") : t("Confirm {serviceSingular}", { serviceSingular: terms.serviceSingular })}</button></div> : null}</section>
+      <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{t("3. Your Information")}</span><span className="booking-progressive-title-state">{readyForDetails ? t("In progress") : t("Locked")}</span></div>{readyForDetails ? <div className="booking-progressive-body">{customGroup && service ? <><GroupAttendees account={catalogue.account} askHandedness={askHandedness} attendees={attendees} booker={bookerDetails} bookerSwing={askHandedness ? <SwingToggle label={t("Which way you swing")} onChange={setHandedness} value={handedness} /> : null} groupPayment={groupPayment} onChange={setAttendees} onGroupPayment={setGroupPayment} service={service} /><div className="booking-form">{notesBox}</div></> : <div className="booking-form">{bookerDetails}{swingChoice}{notesBox}</div>}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? t("Confirming…") : t("Confirm booking")}</button></div> : null}</section>
     </div>
   </main></BookingFrame>;
 }

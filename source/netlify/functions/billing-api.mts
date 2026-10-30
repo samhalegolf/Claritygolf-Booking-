@@ -2895,10 +2895,30 @@ function groupShareSourceId(bookingId: string, attendeeId: string) {
   return `${bookingId}:${attendeeId}`;
 }
 
+/** The tax an invoice the server raises on its own is written with: the business's invoice settings, else its country's. */
+async function invoiceTaxDefaults(accountId: string) {
+  const settingsRows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, { filters: ["key=in.(accountInvoiceSettingsJson,accountCountry)"] }),
+  });
+  const map = Object.fromEntries((settingsRows as Array<{ key: string; value: string }>).map((row) => [row.key, row.value]));
+  let invoiceSettings: Record<string, unknown> = {};
+  try {
+    invoiceSettings = map.accountInvoiceSettingsJson ? JSON.parse(map.accountInvoiceSettingsJson) : {};
+  } catch {
+    invoiceSettings = {};
+  }
+  const tax = taxDefaultsForCountry(map.accountCountry);
+  return {
+    taxRate: Number.isFinite(Number(invoiceSettings.taxRate)) ? Number(invoiceSettings.taxRate) : tax.taxRate,
+    taxInclusive: typeof invoiceSettings.taxInclusive === "boolean" ? invoiceSettings.taxInclusive : tax.taxInclusive,
+  };
+}
+
 /** The share lines matching `sourceFilter` (a PostgREST condition on source_id) whose invoice still stands. */
 async function liveGroupShareInvoices(accountId: string, sourceFilter: string) {
   const lines = (await supabase("billing_invoice_items", {
-    query: `select=invoice_id,source_id,line_total&account_id=eq.${encodeFilter(accountId)}&source_type=eq.group_share&${sourceFilter}`,
+    // Oldest first, so "the" share for a person is always the same one.
+    query: `select=invoice_id,source_id,line_total&account_id=eq.${encodeFilter(accountId)}&source_type=eq.group_share&${sourceFilter}&order=created_at.asc`,
   })) as Array<Record<string, unknown>>;
   if (!lines.length) return [];
   const invoiceIds = [...new Set(lines.map((line) => String(line.invoice_id ?? "")).filter(Boolean))];
@@ -2936,19 +2956,7 @@ export async function ensureGroupShareInvoice(
   const [existing] = await liveGroupShareInvoices(accountId, `source_id=eq.${encodeFilter(sourceId)}`);
   let invoice = existing ? await getInvoiceWithItems(accountId, existing.invoiceId) : null;
   if (!invoice) {
-    const settingsRows = await supabase("settings", {
-      query: settingsSelectQuery(accountId, { filters: ["key=in.(accountInvoiceSettingsJson,accountCountry)"] }),
-    });
-    const map = Object.fromEntries((settingsRows as Array<{ key: string; value: string }>).map((row) => [row.key, row.value]));
-    let invoiceSettings: Record<string, unknown> = {};
-    try {
-      invoiceSettings = map.accountInvoiceSettingsJson ? JSON.parse(map.accountInvoiceSettingsJson) : {};
-    } catch {
-      invoiceSettings = {};
-    }
-    const tax = taxDefaultsForCountry(map.accountCountry);
-    const taxRate = Number.isFinite(Number(invoiceSettings.taxRate)) ? Number(invoiceSettings.taxRate) : tax.taxRate;
-    const taxInclusive = typeof invoiceSettings.taxInclusive === "boolean" ? invoiceSettings.taxInclusive : tax.taxInclusive;
+    const { taxRate, taxInclusive } = await invoiceTaxDefaults(accountId);
     invoice = await createInvoice(accountId, {
       autoNumber: true,
       status: "sent",
@@ -2967,6 +2975,20 @@ export async function ensureGroupShareInvoice(
         serviceDate,
       }],
     });
+    // Two at once -- a friend tapping Pay while the booker emails their
+    // invite, or a double tap -- can each find no invoice and make one. Keep
+    // one (a paid one if there is, else the oldest) and void the rest, so a
+    // share is never owed twice or counted twice off the booker's amount.
+    const live = await liveGroupShareInvoices(accountId, `source_id=eq.${encodeFilter(sourceId)}`);
+    if (live.length > 1) {
+      const keep = live.find((share) => share.status === "paid") || live[0];
+      for (const extra of live) {
+        if (extra.invoiceId !== keep.invoiceId && extra.status !== "paid") {
+          await updateInvoiceStatus(accountId, extra.invoiceId, { status: "void" });
+        }
+      }
+      if (keep.invoiceId !== invoice?.id) invoice = await getInvoiceWithItems(accountId, keep.invoiceId);
+    }
   }
   if (!invoice) return null;
   let payUrl = "";
@@ -2987,6 +3009,112 @@ export async function voidGroupShareInvoices(accountId: string, bookingId: strin
     if (share.status === "paid") continue;
     await updateInvoiceStatus(accountId, share.invoiceId, { status: "void" });
   }
+}
+
+// --- The booker paying online -------------------------------------------------
+//
+// From the booking page's confirmation screen. Which invoice depends on what
+// they are paying for:
+//
+//   their share of a split group -> a share invoice of their own, attendee
+//     "booker", the same kind each friend gets. The lesson is then fully
+//     covered by shares and nothing is left on the booking itself.
+//   anything else (a private lesson, or a group they are covering) -> one
+//     invoice for the whole lesson on a booking line, exactly as if the coach
+//     had invoiced it, so Billing shows the lesson as invoiced.
+
+export type BookerPayment = {
+  bookingId: string;
+  /** Pay a share (split group) rather than the whole lesson. */
+  share: boolean;
+  amount: number;
+  name: string;
+  email: string;
+  description: string;
+  week: unknown;
+  day: unknown;
+};
+
+/** The booker's invoice for this booking, if one stands. */
+async function bookerInvoice(accountId: string, payment: Pick<BookerPayment, "bookingId" | "share">) {
+  if (payment.share) {
+    const [share] = await liveGroupShareInvoices(accountId, `source_id=eq.${encodeFilter(groupShareSourceId(payment.bookingId, "booker"))}`);
+    return share ? getInvoiceWithItems(accountId, share.invoiceId) : null;
+  }
+  const owner = (await bookingLinkOwners(accountId, [payment.bookingId])).find((candidate) => !candidate.voided);
+  return owner ? getInvoiceWithItems(accountId, owner.invoiceId) : null;
+}
+
+/**
+ * Where the booker pays: their invoice for this booking (made on first use,
+ * reused after) and its Stripe link. `paid` when it is already settled, and no
+ * link then. Throws when card payments are not set up -- the page only offers
+ * Pay now when they are, so that is a real error, not a fallback.
+ */
+export async function ensureBookerPayment(accountId: string, payment: BookerPayment, origin: string) {
+  const amount = round2(Number(payment.amount) || 0);
+  if (!payment.bookingId || amount <= 0) {
+    throw Object.assign(new Error("There is nothing to pay online for this booking."), { status: 400 });
+  }
+  if (payment.share) {
+    // The coach has already invoiced this lesson themselves: paying a share
+    // here as well would pay for it twice.
+    if ((await bookingLinkOwners(accountId, [payment.bookingId])).some((owner) => !owner.voided)) {
+      throw Object.assign(new Error("This lesson is already on an invoice from your coach. Pay it from that invoice, or on the day."), { status: 409 });
+    }
+    const share = await ensureGroupShareInvoice(accountId, { ...payment, attendeeId: "booker", amount }, origin);
+    if (!share) throw Object.assign(new Error("Payment could not be started."), { status: 500 });
+    const invoice = await getInvoiceWithItems(accountId, share.invoiceId);
+    if (invoice?.status === "paid") return { paid: true, payUrl: "" };
+    if (!share.payUrl) throw Object.assign(new Error("Card payments are not available right now. You can pay on the day."), { status: 503 });
+    return { paid: false, payUrl: share.payUrl };
+  }
+  let invoice = await bookerInvoice(accountId, payment);
+  if (!invoice) {
+    const { taxRate, taxInclusive } = await invoiceTaxDefaults(accountId);
+    const serviceDate = calendarItemDate(payment.week, payment.day);
+    try {
+      invoice = await createInvoice(accountId, {
+        autoNumber: true,
+        status: "sent",
+        customerName: payment.name || payment.email,
+        customerEmail: payment.email,
+        dueDate: serviceDate,
+        taxInclusive,
+        items: [{ sourceType: "booking", sourceId: payment.bookingId, description: payment.description, quantity: 1, unitPrice: amount, taxRate, serviceDate }],
+      });
+    } catch (error) {
+      // Two taps at once: the other made the invoice first, and this one's
+      // booking link was refused. Use theirs.
+      if ((error as { code?: string })?.code !== "BOOKING_ALREADY_INVOICED") throw error;
+      invoice = await bookerInvoice(accountId, payment);
+    }
+  }
+  if (!invoice) throw Object.assign(new Error("Payment could not be started."), { status: 500 });
+  if (invoice.status === "paid") return { paid: true, payUrl: "" };
+  // An invoice the coach raised that covers more than this lesson (a month's
+  // lessons, say) is theirs to send. Paying it from here would pay for the rest.
+  const onlyThisLesson = (invoice.items || []).every(
+    (item) => item.sourceType === "booking" && item.sourceId === payment.bookingId,
+  );
+  if (!onlyThisLesson) {
+    throw Object.assign(new Error("This lesson is already on an invoice from your coach. Pay it from that invoice, or on the day."), { status: 409 });
+  }
+  const payUrl = await resolveInvoicePaymentLink(accountId, invoice, await resolveInvoiceBranding(accountId), origin);
+  if (!payUrl) throw Object.assign(new Error("Card payments are not available right now. You can pay on the day."), { status: 503 });
+  return { paid: false, payUrl };
+}
+
+/** The status of one person's share invoice on a lesson ("paid", "sent", ...), or "" when they have none. */
+export async function groupShareInvoiceStatus(accountId: string, bookingId: string, attendeeId: string) {
+  const [share] = await liveGroupShareInvoices(accountId, `source_id=eq.${encodeFilter(groupShareSourceId(bookingId, attendeeId))}`);
+  return share?.status || "";
+}
+
+/** Whether the booker's invoice for this booking has been paid. */
+export async function bookerPaymentPaid(accountId: string, payment: Pick<BookerPayment, "bookingId" | "share">) {
+  const invoice = await bookerInvoice(accountId, payment);
+  return invoice?.status === "paid";
 }
 
 /** How much of each lesson its invited players are invoiced for, keyed by booking id. */
@@ -3023,7 +3151,34 @@ export async function settleInvoiceCheckoutFromWebhook(accountId: string, sessio
   if (row.status === "paid" || row.status === "void") return { invoice: id, alreadySettled: row.status };
   const paid = round2((Number(row.amount_paid) || 0) + (Number(session.amount_total) || 0) / 100);
   await updateInvoiceStatus(accountId, id, { status: "paid", amountPaid: Math.min(paid, Number(row.total) || paid) });
+  await tellBookerAShareIsPaid(accountId, id);
   return { invoice: id, paid };
+}
+
+/**
+ * A friend's share of a custom group just got paid: the booker hears about it.
+ * Only after the invoice is marked paid, and never in a way that can fail the
+ * settlement -- Stripe would redeliver, and the invoice is already right.
+ */
+async function tellBookerAShareIsPaid(accountId: string, invoiceId: string) {
+  try {
+    const [line] = (await supabase("billing_invoice_items", {
+      query: `select=source_id,line_total&account_id=eq.${encodeFilter(accountId)}&invoice_id=eq.${encodeFilter(invoiceId)}&source_type=eq.group_share&limit=1`,
+    })) as Array<Record<string, unknown>>;
+    const sourceId = String(line?.source_id ?? "");
+    const split = sourceId.lastIndexOf(":");
+    if (split <= 0) return;
+    const { notifyGroupSharePaid } = await import("./notification-engine.mts");
+    await notifyGroupSharePaid({
+      accountId,
+      bookingId: sourceId.slice(0, split),
+      attendeeId: sourceId.slice(split + 1),
+      amount: Number(line?.line_total) || 0,
+      invoiceId,
+    });
+  } catch (error) {
+    console.error("billing_api:group_share_paid_notice_failed", accountId, invoiceId, error);
+  }
 }
 
 async function invoicePdfResponse(accountId: string, id: string) {
