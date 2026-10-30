@@ -1,7 +1,7 @@
 import "../../appStyles";
 import { Loading, loadingLabel } from "../shared/Loading";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, Mail, Plus, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Mail, Plus, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen, publicApi, publicBookingRoute, publicShopHref, withBusiness } from "./bookingScreen";
 import { WeekSlots } from "./WeekSlots";
@@ -160,14 +160,14 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const [remembered, setRemembered] = useState<RememberedBooker | null>(() => (customer ? null : readRememberedBooker()));
   // On unless the player unticks it -- a shared computer at the club, say.
   const [rememberMe, setRememberMe] = useState(true);
+  // The booker's fields fold into a card once their name and email are in and
+  // they click away; the card opens them again. True while they are typing.
   const [editingDetails, setEditingDetails] = useState(false);
+  const bookerFields = useRef<HTMLDivElement>(null);
   // Booking for a partner or a friend, for this visit only. The remembered
   // player stays remembered, and this booking is not remembered over them.
   const [forSomeoneElse, setForSomeoneElse] = useState(false);
   const [form, setForm] = useState<Form>(() => (remembered ? rememberedForm(remembered) : customerForm(customer)));
-  // A Player Portal customer whose name and email are already on file is shown
-  // as a card, like a remembered player, rather than as prefilled fields.
-  const signedInComplete = Boolean(customer?.name?.trim() && customer?.email?.trim());
   const [handedness, setHandedness] = useState<Handedness>(() => remembered?.handedness ?? "right");
   const [notes, setNotes] = useState("");
   const [attendees, setAttendees] = useState<Attendee[]>([]);
@@ -281,10 +281,15 @@ export default function PublicBookingApp({ customer, onBookingComplete, accountI
   const brandName = catalogue.account.businessName || catalogue.account.coachName || market.product.name;
   const terms = market.terminology;
   const askHandedness = market.capabilities.handedness;
-  // The booker's details: a card when they are known (remembered, or signed in
-  // to the Player Portal), the fields otherwise. A custom group shows them as
-  // the first place in its list of who's coming, everything else above notes.
-  const bookerDetails = <>{remembered && forSomeoneElse ? <div className="booking-remembered"><p><strong>{t("Booking for someone else")}</strong></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookAsRemembered} type="button">{t("Book as {name} instead", { name: remembered.firstName })}</button></div></div> : null}{(remembered && !forSomeoneElse || signedInComplete) && !editingDetails ? <div className="booking-remembered"><p><strong>{t("Booking as {name}", { name: `${form.firstName} ${form.lastName}`.trim() })}</strong><small>{form.email}</small></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={() => setEditingDetails(true)} type="button">{t("Edit details")}</button>{remembered ? <><button className="booking-progressive-change" onClick={bookForSomeoneElse} type="button">{t("Book for someone else")}</button><button className="booking-progressive-change" onClick={forgetMe} type="button">{t("Forget me")}</button></> : null}</div></div> : (["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? t("First name *") : key === "lastName" ? t("Last name *") : key === "phone" ? t("Phone") : t("Email *")} />)}{!customer && !remembered ? <label className="booking-remember"><input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />{t("Remember me on this device")}</label> : null}</>;
+  // The booker's details: a card once their name and email are in -- remembered,
+  // signed in to the Player Portal, or just typed and clicked away from -- and
+  // the fields otherwise. The card's chevron opens the fields again; leaving
+  // them folds it back. A custom group shows this as the first place in its
+  // list of who's coming, everything else above notes.
+  const detailsComplete = Boolean(form.firstName.trim() && form.lastName.trim() && VALID_EMAIL.test(form.email.trim()));
+  const openDetails = () => { setEditingDetails(true); requestAnimationFrame(() => bookerFields.current?.querySelector("input")?.focus()); };
+  const leaveDetails = (event: FocusEvent<HTMLDivElement>) => { if (detailsComplete && !event.currentTarget.contains(event.relatedTarget)) setEditingDetails(false); };
+  const bookerDetails = <>{remembered && forSomeoneElse ? <div className="booking-remembered"><p><strong>{t("Booking for someone else")}</strong></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookAsRemembered} type="button">{t("Book as {name} instead", { name: remembered.firstName })}</button></div></div> : null}{detailsComplete && !editingDetails ? <div className="booking-remembered"><button aria-expanded={false} aria-label={t("Edit details")} className="booking-remembered-card" onClick={openDetails} title={t("Edit details")} type="button"><span><strong>{t("Booking as {name}", { name: `${form.firstName} ${form.lastName}`.trim() })}</strong><small>{form.email}</small></span><ChevronDown size={18} /></button>{remembered && !forSomeoneElse ? <div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookForSomeoneElse} type="button">{t("Book for someone else")}</button><button className="booking-progressive-change" onClick={forgetMe} type="button">{t("Forget me")}</button></div> : null}</div> : <div className="booking-booker-fields" onBlur={leaveDetails} onFocus={() => setEditingDetails(true)} ref={bookerFields}>{(["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? t("First name *") : key === "lastName" ? t("Last name *") : key === "phone" ? t("Phone") : t("Email *")} />)}</div>}{!customer && !remembered ? <label className="booking-remember"><input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />{t("Remember me on this device")}</label> : null}</>;
   const swingChoice = askHandedness ? <fieldset className="booking-handedness"><legend>{t("Which way do you swing?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={t("Handedness")}>{handednessOptions.map((option) => <button aria-checked={handedness === option.value} aria-describedby={`handedness-tip-${option.value}`} className={handedness === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => setHandedness(option.value)} role="radio" type="button">{option.label}<span className="booking-handedness-tip" id={`handedness-tip-${option.value}`} role="tooltip">{option.explainer}</span></button>)}</div></fieldset> : null;
   const notesBox = <textarea aria-label={t("Notes for your {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })} className="booking-notes" maxLength={800} onChange={(event) => setNotes(event.target.value)} placeholder={t("Notes for your {staffSingular} (optional) — anything useful before the booking", { staffSingular: terms.staffSingular.toLowerCase() })} value={notes} />;
   // The shop needs the business named in the path; a bare legacy link has none
