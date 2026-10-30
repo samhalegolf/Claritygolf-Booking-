@@ -1,7 +1,10 @@
 // What the booker sees once their booking is made: the booking, each friend
 // on a group booking with a way to send them their invite, and paying -- now
 // or on the day. The booking is already made by the time this shows; nothing
-// here can unmake it, and nothing here is required.
+// here can unmake it, and nothing here is required. The booker chose how to
+// pay before confirming (booking.payment): paying now, the Stripe page is
+// already open and this screen waits on it; on the day, it says so, and the
+// choice can still be changed here.
 import { useEffect, useRef, useState } from "react";
 import { Check, Mail, Share2, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
@@ -10,6 +13,13 @@ import { t, tn } from "../../lib/i18n";
 
 export type ConfirmedFriend = { id: string; name: string; url: string };
 export type ConfirmedGroup = { payment: "booker" | "split"; total: number; attendees: ConfirmedFriend[] };
+/**
+ * How the booker chose to pay before confirming. "now" with a payUrl is a
+ * Stripe page already open for this booking; with `paid`, Stripe said it was
+ * already settled; with `error`, the payment could not be started and the
+ * booker is told, with the Pay button there to try again.
+ */
+export type ConfirmedPayment = { choice: "now" | "day"; payUrl?: string; paid?: boolean; error?: string };
 export type ConfirmedBooking = {
   appointmentId: string;
   /** What the screen acts with. Empty if the server could not issue one: then there is nothing to send with. */
@@ -23,6 +33,7 @@ export type ConfirmedBooking = {
   amountDue: number;
   /** The lesson's price as the page quotes it, for a private lesson. */
   priceLabel: string;
+  payment?: ConfirmedPayment | null;
 };
 
 type Invite = { method: "email" | "link"; email?: string };
@@ -59,7 +70,7 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
   const [manualLink, setManualLink] = useState<{ id: string; text: string } | null>(null);
 
   // "now", "day", or "pkg:<package id>".
-  const [payChoice, setPayChoice] = useState<string>("");
+  const [payChoice, setPayChoice] = useState<string>(booking.payment?.choice ?? "");
   const [offers, setOffers] = useState<PackageOffer[]>([]);
   // The package order in flight, once Pay with a package is pressed, and what it left.
   const [packageOrder, setPackageOrder] = useState<{ orderId: string; offer: PackageOffer } | null>(null);
@@ -67,9 +78,11 @@ export function BookingConfirmed({ booking, account, onlinePayments, api, onBook
   // Bought, but no credit was spent on this lesson (the pass is waiting for
   // the coach to assign it): the screen must not say the lesson is covered.
   const [packageCovered, setPackageCovered] = useState(true);
-  const [payState, setPayState] = useState<"idle" | "starting" | "waiting" | "paid">("idle");
-  const [payError, setPayError] = useState("");
-  const [payUrl, setPayUrl] = useState("");
+  const [payState, setPayState] = useState<"idle" | "starting" | "waiting" | "paid">(
+    booking.payment?.paid ? "paid" : booking.payment?.payUrl ? "waiting" : "idle",
+  );
+  const [payError, setPayError] = useState(booking.payment?.error ?? "");
+  const [payUrl, setPayUrl] = useState(booking.payment?.payUrl ?? "");
   const polling = useRef<number | null>(null);
 
   const post = async (path: string, body: Record<string, unknown>) => {
