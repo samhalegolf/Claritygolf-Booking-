@@ -211,7 +211,14 @@ const catalog: Record<string, string> = {
   "Your player portal keeps every review, video and practice block for good — sign in any time:": "プレーヤーポータルでは、すべてのレビュー、動画、練習ブロックをいつでもご覧いただけます。サインインはこちら：",
   "Your purchase from {businessName}": "{businessName}でのご購入",
   "Your sign-in email was changed": "サインイン用メールアドレスが変更されました",
-  "Your swing review is ready": "スイングレビューの準備ができました"
+  "Your swing review is ready": "スイングレビューの準備ができました",
+  "covered by {name}": "{name}さんが負担",
+  "{total} for the group · {covered}": "グループで{total} · {covered}",
+  "Someone in your group": "グループのどなたか",
+  "{name} paid their share": "{name}さんが自分の分を支払いました",
+  "{name} has paid {amount} towards {service} on {date}.": "{name}さんが{date}の{service}の{amount}を支払いました。",
+  "{name} has paid their share of {service} on {date}.": "{name}さんが{date}の{service}の自分の分を支払いました。",
+  "Anyone who hasn't paid ahead can pay on the day.": "事前に支払っていない方は当日お支払いいただけます。"
 };
 
 export default catalog;

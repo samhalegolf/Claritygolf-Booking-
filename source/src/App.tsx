@@ -394,7 +394,6 @@ import {
 import {
   BOOKING_SCREENS,
   bookingScreenPathsFor,
-  getBookingScreenId,
   getBookingScreenIframeCode,
   getBookingScreenPublicUrl,
 } from "./modules/public-booking/bookingScreens";
@@ -486,9 +485,7 @@ import { CalendarView } from "./modules/calendar/CalendarView";
 import { useCalendarState } from "./modules/calendar/useCalendarState";
 import { useCalendarInteraction } from "./modules/calendar/useCalendarInteraction";
 import { useWorkspaceData } from "./modules/workspace/useWorkspaceData";
-import { PublicBookingSection, } from "./modules/booking/bookingModel";
 import { View } from "./modules/shared/appView";
-import { useBookingFlow } from "./modules/booking/useBookingFlow";
 import {
   DIAGNOSTIC_EVENT_LIMIT,
   DiagnosticTab,
@@ -2203,13 +2200,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     calendarLocationFilterId,
     activeWeekRef,
     weekDays,
-    weekTitle,
   } = calendarState;
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
-  const [bookingServiceId, setBookingServiceId] = useState("");
-  const [bookingDaySelected, setBookingDaySelected] = useState(false);
-  const [bookingStart, setBookingStart] = useState<number | null>(null);
-  const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
   const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [selectedBookingScreenId, setSelectedBookingScreenId] = useState<string>(BOOKING_SCREENS[0]?.id || "main");
   const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
@@ -3286,10 +3278,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
   const publicServices = publicBookingEnabled ? bookableServices.filter((service) => service.visibility === "public") : [];
-  const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
-  const currentScreenPublicServices = publicServices.filter((service) =>
-    (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
-  );
   // A coach's calendar offers only the lesson types that coach teaches.
   const quickCreateServices =
     effectiveCalendarPerspective === "location"
@@ -3674,15 +3662,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   useEffect(() => {
     if (pointerSession) setCalendarHover(null);
   }, [pointerSession]);
-
-  useEffect(() => {
-    if (bookingServiceId && !currentScreenPublicServices.some((service) => service.id === bookingServiceId)) {
-      setBookingServiceId("");
-      setBookingDaySelected(false);
-      setBookingStart(null);
-      setOpenPublicBookingSection("appointment");
-    }
-  }, [bookingServiceId, currentScreenPublicServices]);
 
   async function refreshNotificationHistory() {
     if (authStatus !== "authenticated") return;
@@ -4803,6 +4782,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       customGroup: movedItem.customGroup,
       attendees: movedItem.attendees,
       calculatedPrice: movedItem.calculatedPrice,
+      groupPayment: movedItem.groupPayment,
     };
     const dockRect = dockRef.current?.getBoundingClientRect();
     const meta = dragPreviewMetaRef.current;
@@ -5824,6 +5804,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       customGroup: booking.customGroup,
       attendees: booking.attendees,
       calculatedPrice: booking.calculatedPrice,
+      groupPayment: booking.groupPayment,
     };
     const animation = options.animateFromDock ? buildDockPlacementAnimation(booking.id, item.id, candidate) : null;
 
@@ -11711,12 +11692,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setShowServiceEditor(false);
       setServiceEditor(emptyServiceEditor());
     }
-    if (bookingServiceId === service.id) {
-      setBookingServiceId("");
-      setBookingDaySelected(false);
-      setBookingStart(null);
-      setOpenPublicBookingSection("appointment");
-    }
     setPendingServiceAction(null);
     const packageSuffix =
       packageReferenceCount > 0
@@ -11737,12 +11712,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setEditingServiceId(null);
       setShowServiceEditor(false);
       setServiceEditor(emptyServiceEditor());
-    }
-    if (bookingServiceId === service.id) {
-      setBookingServiceId("");
-      setBookingDaySelected(false);
-      setBookingStart(null);
-      setOpenPublicBookingSection("appointment");
     }
     setPendingServiceAction(null);
     setServiceListTab("archived");
@@ -14128,45 +14097,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     </Suspense>
   );
 
-  const bookingFlow = useBookingFlow({
-    currentScreenPublicServices,
-    bookingServiceId,
-    bookingBrandWords,
-    bookingBrandName,
-    brandSettings,
-    clients,
-    serviceBookingOptions,
-    activeWeek,
-    isGroupServiceSlotMatch,
-    hasCollision,
-    accountAvailability,
-    fallbackCoachId,
-    lookBusy,
-    items,
-    services,
-    locations,
-    coachAccount,
-    coachProfiles,
-    accountCoachProfiles,
-    accountLocations,
-    bookingStart,
-    bookingDaySelected,
-    openPublicBookingSection,
-    weekDays,
-    isActiveGroupBooking,
-    setToast,
-    setOpenPublicBookingSection,
-    setBookingServiceId,
-    setBookingDaySelected,
-    setBookingStart,
-    activeAccountId,
-    setItems,
-    carveBusyBlocksForAppointment,
-    closeCalendarDetails,
-    setActiveView,
-    moveWeek,
-    weekTitle,
-  });
 
 
   const bookingSettingsPanel = (
@@ -14184,7 +14114,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         copyBookingScreenValue={copyBookingScreenValue}
         copiedBookingScreenLinkId={copiedBookingScreenLinkId}
         copiedBookingScreenIframeId={copiedBookingScreenIframeId}
-        bookingFlow={bookingFlow}
         bookingNoticeDraftSummary={bookingNoticeDraftSummary}
         bookingNoticeDraftHours={bookingNoticeDraftHours}
         lookBusyIsLocked={lookBusyIsLocked}
@@ -14374,7 +14303,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 <strong>{attendee.name}</strong>
                 <span>{attendee.email || t("Manual attendee")}</span>
               </div>
-              <em>{customGroupStatusLabel(attendee.status)}</em>
+              <em>{customGroupStatusLabel(attendee.status, attendee.invitedVia)}</em>
               {(attendee.status === "manual" || attendee.status === "invited") && (
                 <button className="icon-button small" onClick={() => removeSelectedCustomGroupAttendee(attendee.id)} aria-label={t("Remove {name}", { name: attendee.name })}>
                   <X size={14} />

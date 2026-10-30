@@ -42,6 +42,8 @@ export type CustomGroupAttendee = {
   email?: string;
   status: CustomGroupAttendeeStatus;
   token?: string;
+  /** How the booker sent them their invite: our email, or a link they shared. */
+  invitedVia?: "email" | "link";
 };
 
 export type CalendarItem = {
@@ -87,6 +89,8 @@ export type CalendarItem = {
   customGroup?: true;
   attendees?: CustomGroupAttendee[];
   calculatedPrice?: number;
+  /** Who pays for a custom group: the booker for everyone, or split evenly. Missing reads as split. */
+  groupPayment?: "booker" | "split";
 };
 
 /**
@@ -146,6 +150,8 @@ export type PendingBooking = {
   customGroup?: true;
   attendees?: CustomGroupAttendee[];
   calculatedPrice?: number;
+  /** Who pays for a custom group: the booker for everyone, or split evenly. Missing reads as split. */
+  groupPayment?: "booker" | "split";
 };
 
 export type PlacementAnimation = {
@@ -185,8 +191,10 @@ export type CalendarHoverPreview = {
   adminEmailStatus: string;
 };
 
-export function customGroupStatusLabel(status: CustomGroupAttendeeStatus) {
+export function customGroupStatusLabel(status: CustomGroupAttendeeStatus, invitedVia?: CustomGroupAttendee["invitedVia"]) {
   if (status === "booker") return t("Booked");
+  // The booker shared this person's link themselves, so there is no email to show.
+  if (status === "manual" && invitedVia === "link") return t("Link sent");
   if (status === "manual") return t("Manual");
   if (status === "confirmed") return t("Confirmed");
   return t("Invited");
@@ -807,6 +815,7 @@ function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
         customGroup: item.customGroup === true,
         attendees: Array.isArray(item.attendees) ? item.attendees : [],
         calculatedPrice: Number(item.calculatedPrice ?? 0),
+        groupPayment: item.groupPayment ?? "",
       }))
       .sort((first, second) => first.id.localeCompare(second.id)),
   );

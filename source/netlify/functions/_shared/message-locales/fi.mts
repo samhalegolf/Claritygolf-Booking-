@@ -211,7 +211,14 @@ const catalog: Record<string, string> = {
   "Your player portal keeps every review, video and practice block for good — sign in any time:": "Pelaajaportaalissasi kaikki arviot, videot ja harjoitusjaksot säilyvät pysyvästi – kirjaudu sisään milloin vain:",
   "Your purchase from {businessName}": "Ostoksesi: {businessName}",
   "Your sign-in email was changed": "Kirjautumissähköpostisi on vaihdettu",
-  "Your swing review is ready": "Swing-arviosi on valmis"
+  "Your swing review is ready": "Swing-arviosi on valmis",
+  "covered by {name}": "{name} maksaa",
+  "{total} for the group · {covered}": "{total} ryhmälle · {covered}",
+  "Someone in your group": "Joku ryhmästäsi",
+  "{name} paid their share": "{name} maksoi osuutensa",
+  "{name} has paid {amount} towards {service} on {date}.": "{name} maksoi {amount} tunnista {service} ({date}).",
+  "{name} has paid their share of {service} on {date}.": "{name} maksoi osuutensa tunnista {service} ({date}).",
+  "Anyone who hasn't paid ahead can pay on the day.": "Ne, jotka eivät ole maksaneet etukäteen, voivat maksaa paikan päällä."
 };
 
 export default catalog;

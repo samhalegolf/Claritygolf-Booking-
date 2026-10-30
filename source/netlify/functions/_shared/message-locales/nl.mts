@@ -211,7 +211,14 @@ const catalog: Record<string, string> = {
   "Your player portal keeps every review, video and practice block for good — sign in any time:": "In je spelersportal bewaar je elke review, video en elk oefenblok voorgoed — log in wanneer je wilt:",
   "Your purchase from {businessName}": "Je aankoop bij {businessName}",
   "Your sign-in email was changed": "Je inlog-e-mailadres is gewijzigd",
-  "Your swing review is ready": "Je swingreview staat klaar"
+  "Your swing review is ready": "Je swingreview staat klaar",
+  "covered by {name}": "betaald door {name}",
+  "{total} for the group · {covered}": "{total} voor de groep · {covered}",
+  "Someone in your group": "Iemand uit je groep",
+  "{name} paid their share": "{name} heeft zijn of haar deel betaald",
+  "{name} has paid {amount} towards {service} on {date}.": "{name} heeft {amount} betaald voor {service} op {date}.",
+  "{name} has paid their share of {service} on {date}.": "{name} heeft zijn of haar deel van {service} op {date} betaald.",
+  "Anyone who hasn't paid ahead can pay on the day.": "Wie nog niet vooraf heeft betaald, kan op de dag zelf betalen."
 };
 
 export default catalog;

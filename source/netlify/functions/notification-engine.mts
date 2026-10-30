@@ -21,6 +21,7 @@ import type {
   NotificationVariantId,
 } from "./_shared/notification-templates.mts";
 import { cleanEmail, cleanString, cleanText, env } from "./_shared/values.mts";
+import { cleanGroupPayment, customGroupInviteUrl, evenShare, friendShareAmount } from "./_shared/group-invite.mts";
 
 type BookingAction = "booking" | "rescheduled" | "cancelled" | "updated" | "reminder" | "test";
 type NotificationChannel = "client" | "coach" | "admin";
@@ -46,6 +47,12 @@ type NotifyInput = {
   clientOnly?: boolean;
   /** Makes a deliberate resend a new send rather than a replay of the first. */
   idempotencyNonce?: string;
+  /**
+   * Send this one custom group attendee their invite and nothing else: the
+   * booker sending it from their confirmation screen. No client, coach or
+   * admin email goes with it.
+   */
+  inviteAttendeeId?: string;
 };
 
 export function sameNotificationRecipient(left: unknown, right: unknown) {
@@ -201,6 +208,8 @@ async function readSettings(accountId: string) {
   // "missing_recipient" — the coach's own address belongs in their account
   // settings, not in this file.
   return {
+    // The business these settings are for, so links built from them can name it.
+    accountId,
     notificationEmail: cleanEmail(s.notificationEmail, env("CLARITY_NOTIFICATION_EMAIL", "")),
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
     replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", ""))),
@@ -290,25 +299,31 @@ function moneyLabel(amount: number, settings: any) {
   }
 }
 
-/** One person's even share of a custom group, as a number; 0 when there is nothing to share. */
-function customGroupShareAmount(appt: any) {
-  const groupSize = appt.customGroup && Array.isArray(appt.attendees) ? appt.attendees.length : 0;
-  const total = Number(appt.calculatedPrice) || 0;
-  return groupSize && total > 0 ? Math.round((total / groupSize) * 100) / 100 : 0;
+/** The booker's first name, for "covered by Sam". */
+function bookerFirstName(appt: any) {
+  return String(appt.client || appt.title || "").trim().split(/\s+/)[0] || "";
 }
 
 /**
  * A custom group's price, and each person's even share of it. Everyone on the
  * booking counts, the booker included. Empty for any other booking.
+ *
+ * When the booker is paying for everyone there is no share to ask for, so
+ * sharePrice says who is covering it instead. The invite template reads "so
+ * your share is {{sharePrice}}", which then reads "so your share is covered by
+ * Sam" -- right for a coach's own wording too, without a second template.
  */
 function customGroupPricing(appt: any, settings: any) {
-  const groupSize = appt.customGroup && Array.isArray(appt.attendees) ? appt.attendees.length : 0;
+  const size = appt.customGroup && Array.isArray(appt.attendees) ? appt.attendees.length : 0;
   const total = Number(appt.calculatedPrice) || 0;
-  if (!groupSize || total <= 0) return { groupSize: groupSize ? String(groupSize) : "", totalPrice: "", sharePrice: "" };
+  if (!size || total <= 0) return { groupSize: size ? String(size) : "", totalPrice: "", sharePrice: "" };
+  const mt = messageText(settings.messageLanguage);
   return {
-    groupSize: String(groupSize),
+    groupSize: String(size),
     totalPrice: moneyLabel(total, settings),
-    sharePrice: moneyLabel(customGroupShareAmount(appt), settings),
+    sharePrice: appt.groupPayment === "booker"
+      ? mt("covered by {name}", { name: bookerFirstName(appt) })
+      : moneyLabel(evenShare(appt), settings),
   };
 }
 
@@ -438,6 +453,7 @@ function normaliseAppointment(raw: any = {}, clientFallback = "Client") {
     customGroup: raw.customGroup === true || raw.customGroupEnabled === true || attendees.length > 0,
     attendees,
     calculatedPrice: Number.isFinite(Number(raw.calculatedPrice)) ? Number(raw.calculatedPrice) : 0,
+    groupPayment: cleanGroupPayment(raw.groupPayment),
     status:
       raw.status === "completed" || raw.status === "cancelled" || raw.status === "no_show"
         ? raw.status
@@ -465,21 +481,17 @@ function customGroupRows(appt: any, variables: Record<string, string>, mt: Retur
     [mt("Group"), names],
     [
       mt("Price"),
-      variables.totalPrice
-        ? mt("{total} for the group · {share} each", { total: variables.totalPrice, share: variables.sharePrice })
-        : "",
+      !variables.totalPrice
+        ? ""
+        : appt.groupPayment === "booker"
+          ? mt("{total} for the group · {covered}", { total: variables.totalPrice, covered: variables.sharePrice })
+          : mt("{total} for the group · {share} each", { total: variables.totalPrice, share: variables.sharePrice }),
     ],
   ];
 }
 
 function customGroupConfirmUrl(token: string, settings: any) {
-  try {
-    const url = new URL("/api/custom-group-confirm", settings.siteUrl || "https://claritygolf.app");
-    url.searchParams.set("token", token);
-    return url.toString();
-  } catch {
-    return "";
-  }
+  return customGroupInviteUrl(settings.siteUrl, settings.accountId, token);
 }
 
 /**
@@ -511,7 +523,8 @@ function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVari
     [mt("Where"), variables.venue],
     ...customGroupRows(appt, variables, mt),
   ];
-  const payAhead = payUrl || settings.bankAccount || settings.paymentInstructions
+  // Nothing to pay ahead when the booker is covering the group.
+  const payAhead = friendShareAmount(appt) > 0 && (payUrl || settings.bankAccount || settings.paymentInstructions)
     ? [
         variables.sharePrice
           ? mt("Paying ahead is optional. To pay your share of {share} before the lesson:", { share: variables.sharePrice })
@@ -1100,10 +1113,12 @@ export async function notifyBookingEvent(input: NotifyInput) {
     );
   }
 
-  async function sendCustomGroupInvite(attendee: any) {
+  // `keySalt` makes a deliberate send (the booker pressing Send) a new email
+  // rather than a replay the provider drops as a duplicate of the last one.
+  async function sendCustomGroupInvite(attendee: any, keySalt = "") {
     const recipient = cleanEmail(attendee?.email, "");
     const token = cleanString(attendee?.token, "", 220);
-    if (!recipient || !token || attendee?.status !== "invited") return;
+    if (!recipient || !token || (attendee?.status !== "invited" && attendee?.status !== "confirmed")) return;
     const kind = `${action}_custom_group_invite_email`;
     if (!settings.sendClientEmail) {
       const invite = customGroupInviteBody(attendee, appt, settings, variables);
@@ -1117,21 +1132,25 @@ export async function notifyBookingEvent(input: NotifyInput) {
     // invite: it goes out with the bank details instead.
     const mt = messageText(settings.messageLanguage);
     let payUrl = "";
-    try {
-      const { ensureGroupShareInvoice } = await import("./billing-api.mts");
-      const share = await ensureGroupShareInvoice(accountId, {
-        bookingId: appt.id,
-        attendeeId: cleanString(attendee?.id, "", 120),
-        name: cleanString(attendee?.name, "", 120),
-        email: recipient,
-        amount: customGroupShareAmount(appt),
-        description: `${variables.service} · ${variables.date} · ${mt("Share for {name}", { name: cleanString(attendee?.name, "", 120) || recipient })}`,
-        week: appt.week,
-        day: appt.day,
-      }, settings.bookingUrl || "https://book.claritygolf.app");
-      payUrl = share?.payUrl || "";
-    } catch (error) {
-      console.error("notification_engine:group_share_invoice_failed", appt.id, error);
+    // No share invoice when the booker is covering the group: there is
+    // nothing for this person to pay.
+    if (friendShareAmount(appt) > 0) {
+      try {
+        const { ensureGroupShareInvoice } = await import("./billing-api.mts");
+        const share = await ensureGroupShareInvoice(accountId, {
+          bookingId: appt.id,
+          attendeeId: cleanString(attendee?.id, "", 120),
+          name: cleanString(attendee?.name, "", 120),
+          email: recipient,
+          amount: friendShareAmount(appt),
+          description: `${variables.service} · ${variables.date} · ${mt("Share for {name}", { name: cleanString(attendee?.name, "", 120) || recipient })}`,
+          week: appt.week,
+          day: appt.day,
+        }, settings.bookingUrl || "https://book.claritygolf.app");
+        payUrl = share?.payUrl || "";
+      } catch (error) {
+        console.error("notification_engine:group_share_invoice_failed", appt.id, error);
+      }
     }
     const invite = customGroupInviteBody(attendee, appt, settings, variables, payUrl);
     const result = await deliverEmail({
@@ -1141,7 +1160,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       html: invite.html,
       text: invite.text,
       replyTo: settings.replyToEmail || settings.contactEmail,
-      idempotencyKey: `${kind}-${appt.id}-${hash(token || recipient).slice(0, 24)}`,
+      idempotencyKey: `${kind}-${appt.id}-${hash(`${token || recipient}${keySalt ? `:${recipient}:${keySalt}` : ""}`).slice(0, 24)}`,
     });
     const status = result.sent ? "sent" : "failed";
     results.push({ channel: "custom_group_invite", recipient, subject: invite.subject, kind, status, ...result });
@@ -1150,6 +1169,18 @@ export async function notifyBookingEvent(input: NotifyInput) {
 
   if (action === "test") {
     await sendAndRecord("client", cleanEmail(input.testRecipient, appt.email), subjects.client);
+    return results;
+  }
+
+  // The booker sending one friend their invite from the confirmation screen.
+  // Only that invite: the booking's own emails went when it was made.
+  if (input.inviteAttendeeId) {
+    const attendee = (appt.attendees || []).find(
+      (candidate: any) => cleanString(candidate?.id, "", 120) === cleanString(input.inviteAttendeeId, "", 120),
+    );
+    if (attendee && appt.customGroup && appt.status !== "cancelled") {
+      await sendCustomGroupInvite(attendee, cleanString(input.idempotencyNonce, "", 120));
+    }
     return results;
   }
 
@@ -1300,6 +1331,68 @@ export async function notifyBookingEvent(input: NotifyInput) {
   }
 
   return results;
+}
+
+/**
+ * Tell the booker that someone they invited has paid their share online.
+ *
+ * Called once a share invoice is marked paid (see billing-api's webhook
+ * settlement). Only for a friend's share -- the booker paying their own needs
+ * no email about it, Stripe's receipt covers that. Never throws: a payment that
+ * landed must not be undone by an email that didn't.
+ */
+export async function notifyGroupSharePaid(input: { accountId: string; bookingId: string; attendeeId: string; amount: number; invoiceId: string }) {
+  try {
+    const attendeeId = cleanString(input.attendeeId, "", 120);
+    if (!input.accountId || !input.bookingId || !attendeeId || attendeeId === "booker") return null;
+    const [row] = await supabase("calendar_items", {
+      query: `select=id,kind,week,day,start,duration,service_id,client,title,email,status,coach_id,coach,location,custom_group&account_id=eq.${encodeURIComponent(input.accountId)}&id=eq.${encodeURIComponent(input.bookingId)}&limit=1`,
+    });
+    if (!row || row.kind !== "appointment") return null;
+    const group = typeof row.custom_group === "string" ? JSON.parse(row.custom_group) : row.custom_group || {};
+    const settings = await readSettings(input.accountId);
+    const mt = messageText(settings.messageLanguage);
+    const appt = normaliseAppointment({ ...row, ...group }, mt("Client"));
+    const recipient = cleanEmail(appt.email, "");
+    if (!recipient || appt.status === "cancelled") return null;
+    const payer = (appt.attendees || []).find((attendee: any) => attendee.id === attendeeId);
+    const payerName = cleanString(payer?.name, "", 120) || mt("Someone in your group");
+    const services = await readServices(input.accountId);
+    const service = services.find((candidate: any) => candidate.id === appt.serviceId);
+    const serviceName = cleanText(service?.name, mt("Golf Lesson"), 160);
+    const variables = variablesFor("updated", appt, null, serviceName, settings, service);
+    const amount = moneyLabel(Number(input.amount) || 0, settings);
+    const subject = mt("{name} paid their share", { name: payerName });
+    const intro = amount
+      ? mt("{name} has paid {amount} towards {service} on {date}.", { name: payerName, amount, service: serviceName, date: variables.date })
+      : mt("{name} has paid their share of {service} on {date}.", { name: payerName, service: serviceName, date: variables.date });
+    const after = mt("Anyone who hasn't paid ahead can pay on the day.");
+    const brandName = escapeHtml(settings.businessName || settings.coachName || "Clarity Golf");
+    const rows: Array<[string, string]> = [
+      [mt("Lesson"), serviceName],
+      [mt("When"), `${variables.date}, ${variables.time}`],
+      [mt("Where"), variables.venue],
+      ...customGroupRows(appt, variables, mt),
+    ];
+    const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:28px;line-height:1.15;color:#121d14">${escapeHtml(subject)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div><p style="margin:0;color:#526054">${escapeHtml(after)}</p></div></div></div>`;
+    const text = [subject, "", intro, "", ...rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`), "", after].join("\n");
+    const kind = "group_share_paid_email";
+    const result = await deliverEmail({
+      accountId: input.accountId,
+      to: recipient,
+      subject,
+      html,
+      text,
+      replyTo: settings.replyToEmail || settings.contactEmail,
+      idempotencyKey: `${kind}-${hash(input.invoiceId).slice(0, 24)}`,
+    });
+    const status = result.sent ? "sent" : "failed";
+    await recordNotification({ accountId: input.accountId, personKey: `email:${recipient}`, calendarItemId: appt.id, recipient, subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
+    return { sent: result.sent === true };
+  } catch (error) {
+    console.error("notification_engine:group_share_paid_failed", input.bookingId, error);
+    return null;
+  }
 }
 
 export function inferBookingAction(previous: any, next: any): BookingAction | null {

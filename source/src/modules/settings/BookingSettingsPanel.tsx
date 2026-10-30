@@ -3,19 +3,11 @@ import { t, tn } from "../../lib/i18n";
 import { EditableSettingsBlock, SettingsGroup } from "./SettingsLayout";
 import { ClarityAdmin, ClarityBookingPages, ClaritySessions } from "../shared/ClarityIcons";
 import { Check, Copy, ExternalLink, Eye } from "lucide-react";
-import { BookingFlowView } from "../booking/BookingFlowView";
 import { MIN_BOOKING_NOTICE_PRESETS_HOURS } from "./bookingNotice";
-import type { KeyboardEvent } from "react";
-import type { BookingForm, PublicBookingSection } from "../booking/bookingModel";
-import type { AvailabilityWindow, BookingSlot, BookingStatus, CalendarItem, SlotCandidate, WeekDay } from "../calendar/calendarModel";
-import type { ClientSummary } from "../clients/clientMatching";
 import type { NotificationSettings } from "../notifications/notificationSettings";
-import type { Service } from "../services/serviceModel";
-import type { View } from "../shared/appView";
-import type { Toast } from "../shared/toast";
-import type { BrandSettings, CoachAccount, CoachProfile, Location, ThemeMode } from "../workspace/workspaceModel";
+import type { CoachAccount } from "../workspace/workspaceModel";
 import type { EditableBlockStatus } from "./SettingsLayout";
-import type { Dispatch, JSX, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 
 export type BookingSettingsPanelProps = {
   selectedBookingScreen: { label: string; publicUrl: string; iframeCode: string; id: string; path: string; };
@@ -30,7 +22,6 @@ export type BookingSettingsPanelProps = {
   copyBookingScreenValue: (value: string, kind: "url" | "iframe", screenId: string) => void;
   copiedBookingScreenLinkId: string | null;
   copiedBookingScreenIframeId: string | null;
-  bookingFlow: { bookingCardScheme: ThemeMode; showBookingBrandLogo: boolean; bookingBrandPrimary: string; bookingBrandSecondary: string | undefined; isAppointmentSectionOpen: boolean; isAppointmentStepComplete: boolean; setPublicBookingSection: (section: PublicBookingSection) => void; visiblePublicServices: Service[]; handlePublicBookingServiceSelect: (serviceId: string) => void; appointmentSummaryName: string; appointmentSummaryDuration: string; appointmentSummaryDescription: string; appointmentSummaryLessonNote: string; isDateTimeSectionOpen: boolean; isDateTimeStepComplete: boolean; selectedBookingService: Service | null; visibleBookingSlots: BookingSlot[]; isGroupBookingTimeSelection: boolean; bookingDay: number; handlePublicBookingTimeSelect: (slot: BookingSlot) => void; dateTimeSummaryLine: string; dateTimeSummaryLocation: string; isInformationSectionOpen: boolean; showCapturedCustomerDetailsSummary: boolean; bookingForm: BookingForm; updateBookingForm: (field: keyof BookingForm, value: string) => void; handleBookingMatchKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void; bookingClientSuggestion: ClientSummary | null; showBookingClientSuggestion: boolean; applyBookingClient: (client: ClientSummary) => void; customGroupAttendeePanel: JSX.Element | null; bookingSubmitError: string; isInformationStepComplete: boolean; confirmPublicBooking: () => Promise<void>; bookingCustomerSummaryName: string; bookingCustomerSummaryContact: string; currentScreenPublicServices: Service[]; bookingServiceId: string; bookingBrandWords: string[]; bookingBrandName: string; brandSettings: BrandSettings; clients: ClientSummary[]; serviceBookingOptions: (service: Service) => { coachId: string; locationId: string; }[]; activeWeek: number; isGroupServiceSlotMatch: (service: Service | null | undefined, week: number, day: number, start: number) => boolean; hasCollision: (candidate: SlotCandidate, ignoreId?: string, service?: Service, options?: { candidateCoachId?: string; candidateLocationId?: string; }) => boolean; accountAvailability: AvailabilityWindow[][]; fallbackCoachId: string; lookBusy: boolean; items: CalendarItem[]; services: Service[]; locations: Location[]; coachAccount: CoachAccount; coachProfiles: CoachProfile[]; accountCoachProfiles: CoachProfile[]; accountLocations: Location[]; bookingStart: number | null; bookingDaySelected: boolean; openPublicBookingSection: PublicBookingSection; weekDays: WeekDay[]; isActiveGroupBooking: (status: BookingStatus | undefined) => boolean; setToast: Dispatch<SetStateAction<Toast | null>>; setOpenPublicBookingSection: Dispatch<SetStateAction<PublicBookingSection>>; setBookingServiceId: Dispatch<SetStateAction<string>>; setBookingDaySelected: Dispatch<SetStateAction<boolean>>; setBookingStart: Dispatch<SetStateAction<number | null>>; activeAccountId: string; setItems: Dispatch<SetStateAction<CalendarItem[]>>; carveBusyBlocksForAppointment: (nextItems: CalendarItem[], appointment: SlotCandidate) => CalendarItem[]; closeCalendarDetails: () => void; setActiveView: Dispatch<SetStateAction<View>>; moveWeek: (delta: number) => void; weekTitle: string; };
   bookingNoticeDraftSummary: string;
   bookingNoticeDraftHours: number;
   lookBusyIsLocked: boolean;
@@ -59,7 +50,6 @@ export function BookingSettingsPanel(props: BookingSettingsPanelProps) {
     copyBookingScreenValue,
     copiedBookingScreenLinkId,
     copiedBookingScreenIframeId,
-    bookingFlow,
     bookingNoticeDraftSummary,
     bookingNoticeDraftHours,
     lookBusyIsLocked,
@@ -83,7 +73,18 @@ export function BookingSettingsPanel(props: BookingSettingsPanelProps) {
             <strong>{t("As your device shows it")}</strong>
           </div>
         </summary>
-        <BookingFlowView bookingFlow={bookingFlow} />
+        {/* The real booking page, not a copy of it: whatever a player sees on
+            the selected booking screen is what shows here. A copy drifted every
+            time the page changed. Anything booked here is a real booking. */}
+        {selectedBookingScreen ? (
+          <div className="booking-screen-preview booking-page-live-preview">
+            <iframe
+              src={selectedBookingScreen.publicUrl}
+              title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
+            />
+            <p className="field-help">{t("This is your live booking page. Anything you book here is a real booking.")}</p>
+          </div>
+        ) : null}
       </details>
       <EditableSettingsBlock
         id="booking-page-notice-block"
@@ -253,15 +254,6 @@ export function BookingSettingsPanel(props: BookingSettingsPanelProps) {
                         )}
                         {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? t("Copied iframe") : t("Copy iframe")}
                       </button>
-                    </div>
-                    <div className="booking-screen-preview">
-                      <div className="settings-field">
-                        <span>{t("Preview iframe")}</span>
-                        <iframe
-                          src={selectedBookingScreen.publicUrl}
-                          title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
-                        />
-                      </div>
                     </div>
                   </div>
                 )}
