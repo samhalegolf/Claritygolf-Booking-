@@ -323,12 +323,15 @@ export function buildBookingSetInput(input: OptixBookingInput) {
     // even when unset, and owner_user_id was tied to the token kind, so the
     // combination that Optix accepts -- one id, not both -- could not be
     // expressed no matter what the environment said.
-    // On a cancel of an existing booking neither identity is sent even when
-    // configured: the booking belongs to whoever made it (often the customer),
-    // and asserting Clarity's own identity on someone else's booking is how a
-    // cancel could turn into a reassignment.
-    ...(input.memberId && !cancelOfExistingBooking ? { account: { member_id: input.memberId } } : {}),
-    ...(input.ownerUserId && !cancelOfExistingBooking ? { owner_user_id: input.ownerUserId } : {}),
+    // A cancel carries whatever identity the caller gives it, the same as a
+    // move. Stripping the identity from every cancel (meant to keep Clarity's
+    // identity off a customer's own booking) also stripped it from the release
+    // of bays Clarity booked itself, and Optix answered every one of those
+    // with "Internal server error" while the identical request without
+    // is_canceled moved the same booking fine. A caller cancelling someone
+    // else's booking passes no identity (see cancelOptixCustomerBooking).
+    ...(input.memberId ? { account: { member_id: input.memberId } } : {}),
+    ...(input.ownerUserId ? { owner_user_id: input.ownerUserId } : {}),
     source: input.source || "Clarity Booking",
     title,
     // Keep the Optix note intentionally simple: only the person on the

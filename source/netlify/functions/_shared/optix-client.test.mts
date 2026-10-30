@@ -135,15 +135,17 @@ test("a cancel of an existing booking needs no resource, identity or external id
   assert.equal(payload.bookings[0].is_canceled, true);
   assert.ok(!("resource_id" in payload.bookings[0]), "no resource id may be invented for a cancel");
   assert.ok(!("external_id" in payload.bookings[0]), "no external id may be rewritten by a cancel");
-  assert.ok(!("account" in payload) && !("owner_user_id" in payload), "a cancel must not assert an identity");
+  assert.ok(!("account" in payload) && !("owner_user_id" in payload), "no identity may be invented for a cancel");
 });
 
-test("a cancel never asserts Clarity's identity even when one is configured", () => {
-  // Sending account/owner on someone else's booking is how a cancel could
-  // turn into a reassignment.
+test("a cancel of Clarity's own bay booking carries Clarity's identity, like a move", () => {
+  // Releasing a bay Clarity booked is the same booking set as moving it, plus
+  // is_canceled. Withholding the identity here is what Optix refused with
+  // "Internal server error" on every bay release.
   const payload: any = buildBookingSetInput({ ...cancelInput, memberId: "member-123", ownerUserId: "user-456" });
-  assert.ok(!("account" in payload));
-  assert.ok(!("owner_user_id" in payload));
+  assert.deepEqual(payload.account, { member_id: "member-123" });
+  assert.equal(payload.owner_user_id, "user-456");
+  assert.equal(payload.bookings[0].is_canceled, true);
 });
 
 test("a cancel without a booking id still validates like a creation", () => {

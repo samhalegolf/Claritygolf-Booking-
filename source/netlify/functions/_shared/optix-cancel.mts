@@ -1,40 +1,16 @@
 import { getDatabase } from "./database.mts";
 
 import {
-  buildOptixAppointmentInput,
   datePartsForSlot,
   optixAppointmentFingerprint,
   wallClockToUnixSeconds,
-  type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
-import { OptixSyncError, syncOptixBooking } from "./optix-client.mts";
+import { OptixSyncError, syncOptixBooking, type OptixBookingInput } from "./optix-client.mts";
 import { optixConfigForAccount } from "./optix-credentials.mts";
 
 function db() {
   return getDatabase();
-}
-
-function rowToAppointment(row: any): ClarityOptixAppointment {
-  return {
-    id: String(row.id || ""),
-    kind: row.kind || "appointment",
-    week: Number(row.week || 0),
-    day: Number(row.day || 0),
-    start: Number(row.start || 0),
-    duration: Number(row.duration || 0),
-    title: row.title || "",
-    client: row.client || "",
-    note: row.note || "",
-    serviceId: row.service_id || "",
-    locationId: row.location_id || "",
-    location: row.location && typeof row.location === "object" ? row.location : null,
-    status: "cancelled",
-    email: row.email || "",
-    phone: row.phone || "",
-    coachId: row.coach_id || "",
-    personId: row.person_id || "",
-  };
 }
 
 function rowToSyncRecord(row: any): OptixSyncRecord {
@@ -61,13 +37,6 @@ export type OptixBayCancellationResult = {
   optixBookingId?: string;
 };
 
-/**
- * Cancel a bay booking before its Clarity lesson is removed.
- *
- * No sync row means no Clarity-created bay booking exists, so deletion may
- * continue. Once a bay booking ID exists, failure is deliberately surfaced and
- * the Clarity lesson must remain present for a safe retry.
- */
 export type OptixCustomerCancellationInput = {
   /** The Optix booking_id from calendar_items.external_booking_id. */
   externalBookingId: string;
@@ -122,6 +91,21 @@ export async function cancelOptixCustomerBooking(
   return { ok: true, optixBookingId: bookingId };
 }
 
+/**
+ * Release the bay booking Clarity made for a lesson.
+ *
+ * No sync row, or one without a booking id, means Clarity never booked a bay,
+ * so there is nothing to release. Once a booking id exists a refusal is
+ * thrown, with the row marked failed, and the caller decides whether that
+ * blocks what it was doing.
+ *
+ * The request is built from the ledger row alone: the booking Optix gave
+ * Clarity, which bay, and the times it was last confirmed at. The lesson is
+ * read only for a title, and for whose Optix token to use on rows that
+ * predate account scoping. So a refused release can be retried after the
+ * lesson has been deleted -- which is exactly when it most needs retrying,
+ * because the delete goes ahead on a refusal (see deleteCalendarItemById).
+ */
 export async function cancelOptixBayForCalendarItem(
   calendarItemId: string,
 ): Promise<OptixBayCancellationResult> {
@@ -149,26 +133,37 @@ export async function cancelOptixBayForCalendarItem(
     };
   }
 
-  const appointmentRows = await db().sql`
-    SELECT id, account_id, kind, week, day, start, duration, title, client, note,
-           service_id, location_id, location, email, phone, coach_id, person_id
+  const lessonRows = await db().sql`
+    SELECT account_id, client, title
     FROM calendar_items
     WHERE id = ${cleanId}
-      AND kind = 'appointment'
     LIMIT 1
   `;
-  if (!appointmentRows[0]) {
+  const lesson = lessonRows[0] || null;
+  // The business the bay was booked for decides whose Optix token releases it.
+  const accountId = String(syncRows[0].account_id || lesson?.account_id || "");
+  if (!accountId) {
     throw new OptixSyncError(
       "validation_failed",
-      "The Clarity lesson was not found, so its Optix bay booking could not be cancelled safely.",
+      "Neither the bay record nor the lesson says which business this bay booking belongs to, so it could not be released.",
     );
   }
-
-  const appointment = rowToAppointment(appointmentRows[0]);
-  // The lesson's own business decides whose Optix token releases its bay.
-  const config = await optixConfigForAccount(String(appointmentRows[0].account_id || ""));
-  const request = buildOptixAppointmentInput(appointment, existing, config);
-  request.isCanceled = true;
+  const config = await optixConfigForAccount(accountId);
+  // The same booking set a move sends, plus is_canceled. Clarity's identity
+  // goes with it: this is Clarity's own booking.
+  const request: OptixBookingInput = {
+    memberId: config.memberId,
+    ownerUserId: config.ownerUserId,
+    bookingId: existing.optixBookingId,
+    bookingSessionId: existing.optixBookingSessionId || null,
+    resourceIds: existing.resourceId ? [existing.resourceId] : [],
+    startTimestamp: existing.startTimestamp,
+    endTimestamp: existing.endTimestamp,
+    externalId: `clarity:${cleanId}`,
+    title: String(lesson?.client || lesson?.title || "").trim() || "Clarity Booking",
+    source: "Clarity Booking",
+    isCanceled: true,
+  };
 
   try {
     const result = await syncOptixBooking(request, config.read);
@@ -209,7 +204,7 @@ export async function cancelOptixBayForCalendarItem(
     `;
     throw new OptixSyncError(
       syncError.code,
-      `The lesson was not cancelled because its Optix bay booking could not be released: ${syncError.message}`,
+      `Optix did not release the bay booking: ${syncError.message}`,
       { status: syncError.status, retryable: syncError.retryable, cause: syncError },
     );
   }
