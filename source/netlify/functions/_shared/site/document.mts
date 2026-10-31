@@ -409,9 +409,37 @@ export function blockStyleIsPlain(style: SiteBlockStyle): boolean {
   return style.theme === "default" && !style.background && !style.video && style.height === "auto" && style.width === "inherit";
 }
 
-/** An address a page may frame: https only. */
+/** An address a page may frame: https only. Pasted iframe code gives up its src. */
 export function cleanEmbedUrl(input: unknown): string {
-  return cleanImageUrl(input);
+  return cleanImageUrl(embedSource(input).url || input);
+}
+
+export const MAX_EMBED_CODE = 12_000;
+
+/**
+ * What a coach pasted into an embed field: an address, an <iframe> snippet
+ * (its src and height are taken, the rest dropped), or any other HTML, kept
+ * as code to draw in a sandboxed frame. A pasted <iframe> with an http src is
+ * refused: the page is https and the browser would block it anyway.
+ */
+export function embedSource(input: unknown): { url: string; code: string; height: number } {
+  const value = String(input ?? "").trim().slice(0, MAX_EMBED_CODE);
+  if (!value) return { url: "", code: "", height: 0 };
+  const iframe = value.match(/<iframe\b[^>]*>/i);
+  if (iframe) {
+    const src = iframe[0].match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+    const height =
+      Number(iframe[0].match(/\bheight\s*=\s*["']?(\d{2,5})/i)?.[1]) ||
+      Number(iframe[0].match(/min-height\s*:\s*(\d{2,5})px/i)?.[1]) ||
+      Number(iframe[0].match(/height\s*:\s*(\d{2,5})px/i)?.[1]) ||
+      0;
+    const url = cleanImageUrl(src);
+    // One iframe is an address; more than one, or a script beside it, is code.
+    if (url && !/<script\b/i.test(value) && (value.match(/<iframe\b/gi) || []).length === 1) return { url, code: "", height };
+  }
+  if (/^https?:\/\//i.test(value) && !/\s|</.test(value)) return { url: cleanImageUrl(value), code: "", height: 0 };
+  if (/<[a-z][\s\S]*>/i.test(value)) return { url: "", code: value, height: 0 };
+  return { url: cleanImageUrl(value), code: "", height: 0 };
 }
 
 /** An Instagram username, with or without its @ or address: letters, digits, dots and underscores. */
@@ -493,7 +521,8 @@ export type SiteFaqBlock = BlockBase & { type: "faq"; heading: string; intro: st
 export type SiteCtaBlock = BlockBase & { type: "cta"; heading: string; text: string; button: SiteButton | null; tone: "primary" | "surface" };
 export type SiteVideoBlock = BlockBase & { type: "video"; heading: string; youtubeId: string; caption: string };
 /** Anything else that lives in a frame: another booking system, a form, a map, a player. */
-export type SiteEmbedBlock = BlockBase & { type: "embed"; heading: string; text: string; url: string; height: number };
+/** Another site's thing, framed: by address, or as pasted embed code drawn in a sandboxed frame of its own. */
+export type SiteEmbedBlock = BlockBase & { type: "embed"; heading: string; text: string; url: string; code: string; height: number };
 /** One place lessons happen: where it is, when, and how to book there. */
 export type SiteVenue = {
   id: string;
@@ -652,29 +681,50 @@ export const RESERVED_PAGE_SLUGS = [
   "private-lessons",
 ];
 
-/** A page's address: lower-case letters, digits and hyphens, never reserved. */
-export function cleanPageSlug(value: unknown, fallback = ""): string {
-  const slug = String(value ?? "")
+/** How deep a page's address may go: "articles/how-to-practice" is two parts, "videos/v/flow" three. */
+export const MAX_SLUG_DEPTH = 3;
+
+function cleanSlugPart(value: string): string {
+  return value
     .trim()
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
-  if (!slug || RESERVED_PAGE_SLUGS.includes(slug)) return fallback;
+}
+
+/**
+ * A page's address: lower-case letters, digits and hyphens, in up to three
+ * parts separated by slashes ("articles/how-to-practice"), so a site moved
+ * from elsewhere keeps the addresses search engines and old links know. The
+ * first part is never one of Clarity's own paths.
+ */
+export function cleanPageSlug(value: unknown, fallback = ""): string {
+  const parts = String(value ?? "")
+    .trim()
+    .split("/")
+    .map(cleanSlugPart)
+    .filter(Boolean)
+    .slice(0, MAX_SLUG_DEPTH);
+  const slug = parts.join("/").slice(0, 120);
+  if (!slug || RESERVED_PAGE_SLUGS.includes(parts[0])) return fallback;
   return slug;
 }
 
-/** `wanted`, or wanted-2, wanted-3 … until it is not among `taken`. */
+/** `wanted`, or wanted-2, wanted-3 … until it is not among `taken`. A nested address counts up its last part. */
 export function uniquePageSlug(wanted: string, taken: Iterable<string>): string {
   const used = new Set(taken);
   const base = cleanPageSlug(wanted, "page");
   if (!used.has(base)) return base;
+  const parts = base.split("/");
+  const last = parts.pop() || "page";
+  const prefix = parts.length ? `${parts.join("/")}/` : "";
   for (let n = 2; n < 1000; n += 1) {
-    const candidate = `${base.slice(0, 56)}-${n}`;
+    const candidate = `${prefix}${last.slice(0, 56)}-${n}`;
     if (!used.has(candidate)) return candidate;
   }
-  return `${base.slice(0, 48)}-${Date.now().toString(36)}`;
+  return `${prefix}${last.slice(0, 48)}-${Date.now().toString(36)}`;
 }
 
 export type SitePageKind = "page" | "article" | "video";
@@ -696,6 +746,10 @@ export type SitePageContent = {
   version: number;
   /** The meta description search engines quote. */
   description: string;
+  /** The browser tab and search result title. Empty: the page's name and the business's. */
+  seoTitle: string;
+  /** The picture shown when the page is shared (og:image). Empty: the cover, or the business's logo. */
+  socialImage: SiteImage | null;
   summary: string;
   cover: SiteImage | null;
   /** YYYY-MM-DD, or "". */
@@ -713,6 +767,24 @@ export type SitePageCard = SitePageMeta & Pick<SitePageContent, "summary" | "cov
 /** What an index shows of a page: its meta and the fields a card draws. */
 export function sitePageCard<T extends SitePageMeta & { content: SitePageContent }>({ content, ...meta }: T): SitePageCard {
   return { ...meta, summary: content.summary, cover: content.cover, date: content.date, video: content.video };
+}
+
+/**
+ * What a page says about itself to search engines and link previews: its
+ * title, description and picture, with the fallbacks every page gets. The
+ * public page sets these in the browser and the edge function writes them
+ * into the HTML it serves, from this one place.
+ */
+export function sitePageMeta(site: {
+  page: Pick<SitePageMeta, "slug" | "title"> & { content: Pick<SitePageContent, "seoTitle" | "description" | "summary" | "socialImage" | "cover" | "video"> };
+  business: { name: string; logo?: string };
+}): { title: string; description: string; image: string } {
+  const { page, business } = site;
+  const title = page.content.seoTitle || (page.slug === HOME_PAGE_SLUG ? business.name : `${page.title || page.slug} · ${business.name}`);
+  const description = page.content.description || page.content.summary;
+  const logo = business.logo && /^https?:/.test(business.logo) ? business.logo : "";
+  const image = page.content.socialImage?.url || page.content.cover?.url || youtubeThumbnail(page.content.video) || logo;
+  return { title: title.slice(0, 200), description: description.slice(0, 300), image };
 }
 
 /** The picture YouTube keeps for a video, for a card with no cover of its own. */
@@ -915,14 +987,19 @@ function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlock
         caption: text(input.caption, 300),
       };
     case "embed": {
-      const height = Number(input.height);
+      // A url and code are both read through embedSource, so pasting iframe
+      // code into either field lands the same way.
+      const source = embedSource(input.url);
+      const code = source.url ? "" : embedSource(input.code).code || source.code;
+      const height = Number(input.height) || source.height;
       return {
         id,
         type: "embed",
         heading: text(input.heading, 160),
         text: text(input.text, 600),
-        url: cleanEmbedUrl(input.url),
-        height: Number.isFinite(height) ? Math.min(MAX_BOOKING_HEIGHT, Math.max(200, Math.round(height))) : 600,
+        url: source.url,
+        code: String(code || "").slice(0, MAX_EMBED_CODE),
+        height: Number.isFinite(height) && height > 0 ? Math.min(MAX_BOOKING_HEIGHT, Math.max(200, Math.round(height))) : 600,
       };
     }
     case "venues":
@@ -1098,6 +1175,8 @@ export function cleanSitePageContent(value: unknown): SitePageContent {
   return {
     version: SITE_DOCUMENT_VERSION,
     description: text(input.description, 300),
+    seoTitle: text(input.seoTitle, 120),
+    socialImage: cleanImage(input.socialImage),
     summary: text(input.summary, 400),
     cover: cleanImage(input.cover),
     date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "",
@@ -1124,6 +1203,7 @@ export function cleanSitePageMeta(value: unknown, index = 0): SitePageMeta {
 export function sitePageImageUrls(content: SitePageContent): string[] {
   const urls: string[] = [];
   if (content.cover) urls.push(content.cover.url);
+  if (content.socialImage) urls.push(content.socialImage.url);
   for (const block of content.blocks) {
     if (block.style.background) urls.push(block.style.background.url);
     if (block.type === "hero" && block.image) urls.push(block.image.url);
@@ -1209,7 +1289,7 @@ function newBlockFields(type: SiteBlockType): SiteBlockInput {
     case "video":
       return { id, type, heading: "", youtubeId: "", caption: "" };
     case "embed":
-      return { id, type, heading: "", text: "", url: "", height: 600 };
+      return { id, type, heading: "", text: "", url: "", code: "", height: 600 };
     case "venues":
       return {
         id,

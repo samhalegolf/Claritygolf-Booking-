@@ -71,6 +71,11 @@ export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta
   return readJson(await apiFetch("/api/site/site", jsonInit("PUT", { settings, pages })));
 }
 
+/** Bring a Squarespace site over. The report says what was found and what could not be. */
+export async function importSite(url: string, preset: string): Promise<SavedSite & { report: string[] }> {
+  return readJson(await apiFetch("/api/site/import", jsonInit("POST", { url, preset })));
+}
+
 export async function publishSite(): Promise<SavedSite> {
   return readJson(await apiFetch("/api/site/publish", jsonInit("POST")));
 }

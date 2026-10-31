@@ -139,6 +139,52 @@ Articles, Videos, Shop (with the bag icon in the header) and Contact
 preset (orange on white, Manrope and Poppins). A "Book a lesson (venues)"
 page preset adds the venues page to any site.
 
+## Bringing a site over from Squarespace
+
+Under the template chooser, "Or bring over a site you already have"
+takes the old site's address and a look. The importer
+(`netlify/functions/_shared/site/import-squarespace.mts`, route
+`POST /api/site/import`) reads the sitemap, then every page twice: its
+`?format=json` (the collection, and for a blog post or video lesson the
+item with its body, date, summary, picture and search settings) and its
+HTML (the title and meta tags, and for a plain page its sections, which
+Squarespace 7.1 keeps out of the JSON). Each page becomes a page at the
+same address, nested where the old one was ("articles/how-to-practice"),
+so old links and search results keep working: blog posts as articles,
+video lessons as video pages with the YouTube id read from the page, the
+blog index as an Articles block, the video library as a Videos block, the
+store as a Shop block, and a plain page's sections as blocks chosen by
+their shape (a hero, cards, a logo row, review screenshots, an Instagram
+grid, venues with hours and a booking frame each, a contact block, text
+and pictures). The business's own Clarity booking frames become Booking
+blocks; any other frame an Embed. Pictures are downloaded and uploaded
+into the site's bucket so the site outlives the old one. The old header's
+menu order, social links and button carry over. What could not be placed
+is reported, never invented, and the result replaces the draft without
+publishing anything.
+
+## Page addresses, titles and sharing
+
+A page's address may be nested up to three parts deep. Every page has a
+search title (empty: the page's name and the business's), a description
+and a sharing picture (empty: the cover, the video's thumbnail, or the
+logo). The browser sets these when the page loads; for crawlers and link
+previews that do not run JavaScript, the edge function
+`netlify/edge-functions/site-meta.ts` reads the public API for any site
+page and writes the title, description, Open Graph tags and canonical
+link into the served HTML. On a business's own domain, `/sitemap.xml`
+lists its published pages (`GET /api/site/public/sitemap`).
+
+## Embeds and the live preview
+
+An embed block, and a venue's "other booking system" field, take an
+https address or pasted embed code. An `<iframe>` snippet gives up its
+address and height; anything else (a script, a widget) is kept as code
+and drawn in a sandboxed frame of its own with no origin, so it can draw
+and talk to its servers but never read the page or its visitor's cookies.
+The editor's preview shows the real booking page, shop, map and embeds,
+inert: a click lands on the block, not inside the frame.
+
 ## How it is built
 
 | Piece | Where |
@@ -157,6 +203,8 @@ page preset adds the venues page to any site.
 | Section style to CSS variables | `src/modules/site-builder/siteTheme.ts` |
 | Domains panel | `src/modules/site-builder/DomainPanel.tsx` |
 | Public page | `src/modules/site-builder/PublicSitePage.tsx`, routed from `src/boot.tsx` |
+| Meta tags for crawlers, sitemap on a custom domain | `netlify/edge-functions/site-meta.ts` |
+| Squarespace import | `netlify/functions/_shared/site/import-squarespace.mts` |
 
 `sites` holds the parts every page shares (theme, header, footer), one row
 per business; `site_pages` holds one row per page (address, title, kind,
@@ -218,9 +266,9 @@ next one and swaps it in without a reload; Back and Forward work.
 
 ## Not done yet, on purpose
 
-- The public page is drawn by the browser, like the rest of the app. Search
-  engines that run JavaScript (Google does) index it; a server-rendered
-  copy for the ones that do not is a follow-up.
+- The public page is drawn by the browser, like the rest of the app. The
+  edge function gives crawlers the page's title, description and sharing
+  tags; the page's words themselves are not server-rendered.
 - A booking block in the preview is a labelled box rather than the live
   widget, so editing never books anything and the preview stays light.
 - Pictures pasted by address are used as given; only uploads are shrunk.

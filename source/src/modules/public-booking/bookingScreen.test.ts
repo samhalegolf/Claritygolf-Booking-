@@ -44,14 +44,18 @@ test("a business's website is /<business>/site and its pages sit under it", () =
   assert.deepEqual(publicSiteRoute("/riverside/site/about"), { business: "riverside", slug: "about" });
   assert.equal(publicSiteRoute("/riverside"), null);
   assert.equal(publicSiteRoute("/riverside/shop"), null);
-  assert.equal(publicSiteRoute("/riverside/site/about/extra"), null);
+  assert.deepEqual(publicSiteRoute("/riverside/site/articles/how-to-practice"), { business: "riverside", slug: "articles/how-to-practice" }, "a nested address is one page");
+  assert.deepEqual(publicSiteRoute("/riverside/site/videos/v/flow"), { business: "riverside", slug: "videos/v/flow" });
+  assert.equal(publicSiteRoute("/riverside/site/a/b/c/d"), null, "four parts deep is no page");
   assert.equal(publicSiteRoute("/group-lessons/site"), null, "a booking screen is not a business");
   assert.equal(publicSiteRoute("/"), null);
 });
 
-test("on a business's own domain the root is home and one segment is a page", () => {
+test("on a business's own domain the root is home and a path of up to three parts is a page", () => {
   assert.equal(customDomainPageSlug("/"), "home");
   assert.equal(customDomainPageSlug("/about"), "about");
   assert.equal(customDomainPageSlug("/About/"), "about");
-  assert.equal(customDomainPageSlug("/about/extra"), "");
+  assert.equal(customDomainPageSlug("/articles/how-to-practice"), "articles/how-to-practice");
+  assert.equal(customDomainPageSlug("/instructional-videos/v/flow"), "instructional-videos/v/flow");
+  assert.equal(customDomainPageSlug("/a/b/c/d"), "");
 });

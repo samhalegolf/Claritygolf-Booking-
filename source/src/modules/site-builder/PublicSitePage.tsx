@@ -16,16 +16,23 @@ import { customDomainPageSlug, publicSiteRoute } from "../public-booking/booking
 import { Loading } from "../shared/Loading";
 import { fetchPublicSite, type PublicSite } from "./siteApi";
 import { SiteRenderer } from "./SiteRenderer";
+import { sitePageMeta } from "./siteTheme";
 import { customDomainPagePath, publicSitePath } from "./siteTheme";
 import "./site.css";
 
 const FONT_LINK_ID = "site-fonts";
 
+/** A <meta name> or, for the og:* family, <meta property>. An empty content removes the tag. */
 function setMeta(name: string, content: string) {
-  let tag = document.head.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+  const attribute = name.startsWith("og:") || name.startsWith("twitter:") ? "property" : "name";
+  let tag = document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${name}"]`);
+  if (!content) {
+    tag?.remove();
+    return;
+  }
   if (!tag) {
     tag = document.createElement("meta");
-    tag.name = name;
+    tag.setAttribute(attribute, name);
     document.head.appendChild(tag);
   }
   tag.content = content;
@@ -92,8 +99,15 @@ export default function PublicSitePage({ business, host, slug }: { business?: st
   // The tab's title, the description search engines quote, and the fonts.
   useEffect(() => {
     if (!site) return;
-    document.title = site.page.slug === HOME_PAGE_SLUG ? site.business.name : `${site.page.title} · ${site.business.name}`;
-    setMeta("description", site.page.content.description);
+    const meta = sitePageMeta(site);
+    document.title = meta.title;
+    setMeta("description", meta.description);
+    setMeta("og:title", meta.title);
+    setMeta("og:description", meta.description);
+    setMeta("og:type", site.page.kind === "article" ? "article" : "website");
+    setMeta("og:image", meta.image);
+    setMeta("og:url", window.location.origin + pagePath(site.page.slug));
+    setMeta("twitter:card", meta.image ? "summary_large_image" : "summary");
     const fonts = googleFontsUrl(site.settings.theme);
     let link = document.getElementById(FONT_LINK_ID) as HTMLLinkElement | null;
     if (fonts) {

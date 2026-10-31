@@ -8,7 +8,8 @@ import { readSandboxAccount } from "./_shared/sandbox.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { db, readSettingsMap } from "./_shared/settings-store.mts";
 import { cleanEmail, cleanString } from "./_shared/values.mts";
-import { SITE_PAGE_PRESETS, cleanPageSlug, sitePageImageUrls } from "./_shared/site/document.mts";
+import { HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageImageUrls, sitePageMeta } from "./_shared/site/document.mts";
+import { importSquarespaceSite } from "./_shared/site/import-squarespace.mts";
 import {
   attachDomainToSite,
   checkDomainDns,
@@ -216,6 +217,29 @@ async function handlePublicForm(req: Request) {
   return json({ ok: true });
 }
 
+/** The pages of a published site on its own domain, for search engines. */
+async function handleSitemap(req: Request) {
+  const url = new URL(req.url);
+  const host = cleanString(url.searchParams.get("host"), "", 253).toLowerCase();
+  const resolved = await resolvePublicBusiness(req, "", host);
+  const site = resolved ? await readPublishedSite(resolved.accountId, HOME_PAGE_SLUG) : null;
+  if (!resolved || !site) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain" } });
+  const origin = `https://${host}`;
+  const entries = site.pages
+    .map((page) => `  <url><loc>${origin}${page.slug === HOME_PAGE_SLUG ? "/" : `/${page.slug}`}</loc></url>`)
+    .join("\n");
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
+  return new Response(xml, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/xml; charset=utf-8",
+      "Netlify-CDN-Cache-Control": `public, durable, max-age=${PUBLIC_CACHE_SECONDS}, stale-while-revalidate=${PUBLIC_STALE_SECONDS}`,
+      "Cache-Control": "public, max-age=0, must-revalidate",
+      "Netlify-Cache-Tag": publicCacheTag(resolved.accountId),
+    },
+  });
+}
+
 async function handlePublic(req: Request) {
   const url = new URL(req.url);
   const slug = cleanPageSlug(url.searchParams.get("page"), "home");
@@ -231,16 +255,19 @@ async function handlePublic(req: Request) {
   const settings = await readSettingsMap(accountId);
   const logo = settings.brandLogoPreview || "";
   const account = coachAccountFromSettings(settings, accountId) as { businessName?: string };
+  const business = {
+    slug: identity.slug,
+    name: cleanString(account.businessName, identity.businessName),
+    logo: logo.startsWith("data:image/") && logo.length < 400_000 ? logo : "",
+    showLogo: settings.brandShowLogo !== "false",
+  };
   const body = {
     settings: site.settings,
     page: site.page,
     pages: site.pages,
-    business: {
-      slug: identity.slug,
-      name: cleanString(account.businessName, identity.businessName),
-      logo: logo.startsWith("data:image/") && logo.length < 400_000 ? logo : "",
-      showLogo: settings.brandShowLogo !== "false",
-    },
+    business,
+    // What the edge writes into the served HTML for crawlers and link previews.
+    meta: { ...sitePageMeta({ page: site.page, business }), kind: site.page.kind },
   };
   return json(body, 200, {
     "Netlify-CDN-Cache-Control": `public, durable, max-age=${PUBLIC_CACHE_SECONDS}, stale-while-revalidate=${PUBLIC_STALE_SECONDS}`,
@@ -292,6 +319,10 @@ export default async function handler(req: Request) {
       if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       return await handlePublicForm(req);
     }
+    if (action === "public/sitemap") {
+      if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return await handleSitemap(req);
+    }
 
     const actor = await requireCoachActor(req);
     if (!actor.isAdmin) {
@@ -331,6 +362,24 @@ export default async function handler(req: Request) {
       const body = await readBody(req);
       const uploaded = await uploadSiteImage(accountId, { type: body.type, dataBase64: body.dataBase64 });
       return json({ url: uploaded.url, bytes: uploaded.bytes }, 201);
+    }
+
+    // Bring a site over from Squarespace: its pages, articles, videos and
+    // words, at the same addresses. The result replaces the draft; nothing is
+    // published until the coach presses Publish.
+    if (action === "import" && req.method === "POST") {
+      const body = await readBody(req);
+      const current = await readSite(accountId);
+      const imported = await importSquarespaceSite({
+        url: cleanString(body.url, "", 300),
+        preset: cleanString(body.preset, "", 40) || current?.settings.theme.preset || "classic",
+        bookingSlug: (await readAccountIdentity(accountId)).slug,
+        upload: async (type, dataBase64) => (await uploadSiteImage(accountId, { type, dataBase64 })).url,
+      });
+      const saved = await saveSite(accountId, { settings: imported.settings, pages: imported.pages });
+      const keep = saved.pages.flatMap((page) => [...sitePageImageUrls(page.content), ...(page.publishedContent ? sitePageImageUrls(page.publishedContent) : [])]);
+      await sweepUnusedSiteImages(accountId, keep);
+      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), report: imported.report });
     }
 
     if (action === "domains" && req.method === "POST") {

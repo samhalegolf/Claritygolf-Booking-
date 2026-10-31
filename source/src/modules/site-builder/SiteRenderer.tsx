@@ -60,7 +60,7 @@ export type SiteBusiness = { slug: string; name: string; logo: string; showLogo:
 
 export type SiteSelection = "site" | "header" | "footer" | "page" | { block: string };
 
-export type PreviewLabels = { booking: string; map: string; shop: string; embed: string; noArticles: string; noVideos: string; noPage: string };
+export type PreviewLabels = { noArticles: string; noVideos: string; noPage: string };
 
 export type SiteRendererProps = {
   settings: SiteSettings;
@@ -217,27 +217,27 @@ function YouTubeFrame({ videoId, title, preview }: { videoId: string; title: str
   );
 }
 
-/** A framed address, or the preview's stand-in for one. */
-function Frame({ src, title, height, className, preview, label }: { src: string; title: string; height: number; className: string; preview: boolean; label: string }) {
-  if (preview) {
-    return (
-      <div className="site-placeholder is-embed" style={{ height: Math.min(height, 420) }}>
-        <span>{label}</span>
-      </div>
-    );
-  }
-  return <iframe className={className} src={src} title={title} style={{ height }} loading="lazy" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox" allow="payment; web-share; clipboard-write; geolocation" />;
+/**
+ * A framed address, or pasted embed code drawn in a frame of its own. The
+ * editor's preview shows the real thing, inert: a click lands on the block,
+ * not inside the frame, so editing never books or buys anything.
+ */
+function Frame({ src, code, title, height, className, preview }: { src: string; code?: string; title: string; height: number; className: string; preview: boolean }) {
+  const frame = src ? (
+    <iframe className={className} src={src} title={title} style={{ height }} loading="lazy" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox" allow="payment; web-share; clipboard-write; geolocation" />
+  ) : code ? (
+    // Pasted code runs with no origin of its own: it can draw and talk to its
+    // own servers, never read this page or its visitor's cookies.
+    <iframe className={className} srcDoc={`<!doctype html><meta charset="utf-8"><style>html,body{margin:0}</style>${code}`} title={title} style={{ height }} loading="lazy" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" allow="payment; web-share" />
+  ) : (
+    <div className="site-placeholder is-embed" style={{ height: Math.min(height, 420) }} />
+  );
+  return preview ? <div className="site-frame-inert">{frame}</div> : frame;
 }
 
-function MapFrame({ address, preview, label }: { address: string; preview: boolean; label: string }) {
-  if (preview) {
-    return (
-      <div className="site-placeholder is-map">
-        <span>{label}</span>
-      </div>
-    );
-  }
-  return <iframe className="site-map" src={`https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`} title={address} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />;
+function MapFrame({ address, preview }: { address: string; preview: boolean }) {
+  const frame = <iframe className="site-map" src={`https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`} title={address} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />;
+  return preview ? <div className="site-frame-inert">{frame}</div> : frame;
 }
 
 type LinkProps = { href: string; onClick?: (event: MouseEvent) => void; target?: string; rel?: string };
@@ -699,11 +699,7 @@ function Block({
       return (
         <section className="site-container site-embed">
           {sectionHead(block.heading, block.text)}
-          {block.url ? (
-            <Frame src={block.url} title={block.heading || "Embedded page"} height={block.height} className="site-embed-frame" preview={preview} label={previewLabels?.embed || "Embed"} />
-          ) : (
-            <div className="site-placeholder is-embed" />
-          )}
+          <Frame src={block.url} code={block.code} title={block.heading || "Embed"} height={block.height} className="site-embed-frame" preview={preview} />
         </section>
       );
     case "booking": {
@@ -716,7 +712,7 @@ function Block({
               <Button button={{ label: block.buttonLabel || "Book now", href: url, style: "primary" }} />
             </div>
           ) : (
-            <Frame src={url} title={block.heading || "Book"} height={block.height} className="site-booking-frame" preview={preview} label={previewLabels?.booking || "Booking"} />
+            <Frame src={url} title={block.heading || "Book"} height={block.height} className="site-booking-frame" preview={preview} />
           )}
         </section>
       );
@@ -730,7 +726,7 @@ function Block({
               <div className="site-venue" key={venue.id}>
                 <Heading level={3} text={venue.name} />
                 {venue.address ? <p className="site-venue-address">{venue.address}</p> : null}
-                {venue.showMap && venue.address ? <MapFrame address={venue.address} preview={preview} label={previewLabels?.map || "Map"} /> : null}
+                {venue.showMap && venue.address ? <MapFrame address={venue.address} preview={preview} /> : null}
                 {venue.hours ? (
                   <div className="site-venue-hours">
                     <Paragraphs text={venue.hours} />
@@ -738,9 +734,9 @@ function Block({
                 ) : null}
                 <Paragraphs text={venue.text} />
                 {venue.booking !== "none" ? (
-                  <Frame src={bookingPageUrl(business.slug, venue.booking)} title={venue.name || "Book"} height={venue.height} className="site-booking-frame" preview={preview} label={previewLabels?.booking || "Booking"} />
+                  <Frame src={bookingPageUrl(business.slug, venue.booking)} title={venue.name || "Book"} height={venue.height} className="site-booking-frame" preview={preview} />
                 ) : venue.embedUrl ? (
-                  <Frame src={venue.embedUrl} title={venue.name || "Book"} height={venue.height} className="site-embed-frame" preview={preview} label={previewLabels?.embed || "Embed"} />
+                  <Frame src={venue.embedUrl} title={venue.name || "Book"} height={venue.height} className="site-embed-frame" preview={preview} />
                 ) : null}
               </div>
             ))}
@@ -758,7 +754,7 @@ function Block({
       return (
         <section className="site-container site-shop">
           {sectionHead(block.heading, block.intro)}
-          <ShopBlock block={block} business={business} preview={preview} previewLabel={previewLabels?.shop || "Shop"} returnPath={returnPath} returnQuery={returnQuery} />
+          <ShopBlock block={block} business={business} preview={preview} returnPath={returnPath} returnQuery={returnQuery} />
         </section>
       );
     case "articles": {
@@ -898,7 +894,7 @@ function Block({
               ) : null}
             </ul>
           </div>
-          {block.showMap && block.address ? <MapFrame address={block.address} preview={preview} label={previewLabels?.map || "Map"} /> : null}
+          {block.showMap && block.address ? <MapFrame address={block.address} preview={preview} /> : null}
         </section>
       );
     case "divider":

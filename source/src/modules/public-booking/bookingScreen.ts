@@ -10,6 +10,7 @@
 // tenant's embed code carried, and gave no other tenant a booking page at all.
 // Bare legacy links (/, /group-lessons, /private-lessons) still mean "no
 // business named", which the server resolves exactly as before.
+import { MAX_SLUG_DEPTH } from "../../../netlify/functions/_shared/site/document.mts";
 import { isBookingEmbedMode } from "../shared/bookingHandoff";
 
 const SCREEN_SEGMENTS = new Set<string>(["group-lessons", "private-lessons"]);
@@ -45,12 +46,13 @@ export function publicShopBusiness(pathname = window.location.pathname) {
  * The business website page this path names, or null. The site sits beside
  * the booking page and the shop on Clarity's own hosts: /<business>/site is
  * its home page and /<business>/site/<page> any other page. A business's own
- * domain serves the same pages from its root (customDomainPageSlug).
+ * domain serves the same pages from its root (customDomainPageSlug). A page's
+ * address may be nested up to three parts deep ("articles/how-to-practice").
  */
 export function publicSiteRoute(pathname = window.location.pathname): { business: string; slug: string } | null {
-  const [first = "", second = "", third = "", fourth = ""] = pathSegments(pathname);
-  if (!first || SCREEN_SEGMENTS.has(first) || second !== "site" || fourth) return null;
-  return { business: first, slug: third || "home" };
+  const [first = "", second = "", ...rest] = pathSegments(pathname);
+  if (!first || SCREEN_SEGMENTS.has(first) || second !== "site" || rest.length > MAX_SLUG_DEPTH) return null;
+  return { business: first, slug: rest.join("/") || "home" };
 }
 
 /**
@@ -58,9 +60,9 @@ export function publicSiteRoute(pathname = window.location.pathname): { business
  * and /<page> another page. "" for a deeper path, which is no page at all.
  */
 export function customDomainPageSlug(pathname = window.location.pathname): string {
-  const [first = "", second = ""] = pathSegments(pathname);
-  if (!first) return "home";
-  return second ? "" : first;
+  const parts = pathSegments(pathname);
+  if (!parts.length) return "home";
+  return parts.length <= MAX_SLUG_DEPTH ? parts.join("/") : "";
 }
 
 /** The shop's path, keeping whatever query the page was opened with (?embed=booking). */
