@@ -1860,6 +1860,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }, [activeView, authStatus, people.length]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
+  // Settings › Website with its editor open: the editor takes the whole pane
+  // and the settings sub-nav steps aside. Owned here rather than in the panel
+  // because the sub-nav is drawn here.
+  const [websiteEditing, setWebsiteEditing] = useState(false);
+  const websiteFullPane = websiteEditing && settingsTab === "website";
   // The section last open in each menu, for the phone's swipe forward.
   const lastSettingsSectionRef = useRef<SettingsTab>("none");
   const lastBillingSectionRef = useRef<BillingSection>("none");
@@ -2394,6 +2399,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
   function switchSettingsTab(nextTab: SettingsTab) {
     if (settingsTab === nextTab) return;
+    setWebsiteEditing(false);
     if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
     if (activeEditableBlock) activeEditableBlock.editor.cancel();
     setActiveEditableBlockId(null);
@@ -17718,7 +17724,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "settings"}
             title={workspaceOverlay?.title ?? ""}
-            pageClassName={`settings-page${phoneLayout && settingsTab === "none" ? " is-phone-menu" : ""}`}
+            pageClassName={`settings-page${phoneLayout && settingsTab === "none" ? " is-phone-menu" : ""}${websiteFullPane ? " is-full-pane" : ""}`}
             onClose={closeWorkspaceOverlay}
           >
             {/* Rule 07: the sub-nav keeps its boxes. 216px column, 38px rows,
@@ -17729,7 +17735,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 Not drawn in the overlay: that is one section opened from the
                 coach profile, so a column for picking a different category is
                 offering a journey nobody started. */}
-            {workspaceOverlay?.kind !== "settings" && (!phoneLayout || settingsTab === "none") && (
+            {workspaceOverlay?.kind !== "settings" && (!phoneLayout || settingsTab === "none") && !websiteFullPane && (
             <nav className="settings-subnav" aria-label={t("Settings sections")}>
               {settingsSections.filter(
                 (section) =>
@@ -17780,6 +17786,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     onToast={(message) => setToast({ message })}
                     brandLogo={brandSettings.logoPreview}
                     brandShowLogo={brandSettings.showLogo}
+                    editing={websiteEditing}
+                    onEditingChange={setWebsiteEditing}
                   />
                 </Suspense>
               ) : null}

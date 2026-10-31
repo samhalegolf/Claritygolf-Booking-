@@ -10,6 +10,18 @@
   gap: 14px;
 }
 
+/* The editor with the whole pane: one card across every grid column. */
+.site-editor-full {
+  grid-column: 1 / -1;
+  padding: var(--c-space-6);
+}
+
+/* At rest the page fills the card, taller than the editing frame since
+   nothing sits beside it. */
+.site-preview.is-resting .site-preview-frame {
+  height: 76vh;
+}
+
 .site-builder-toolbar {
   display: flex;
   flex-wrap: wrap;
