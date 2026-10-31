@@ -25,18 +25,20 @@ const config: CapacitorConfig = {
   },
   ios: {
     contentInset: "never",
-    // Tap to Pay is out of the iPhone build until Apple grants the
-    // distribution entitlement (docs/tap-to-pay-apple-review.md). Without the
-    // ClarityTerminal plugin the page hides every Tap to Pay control. To bring
-    // it back: add "@claritygolf/capacitor-terminal" to this list, restore the
-    // proximity-reader key in ios/App/App/App.entitlements, put
-    // NSLocationWhenInUseUsageDescription and NSBluetoothAlwaysUsageDescription
-    // back in ios/App/App/Info.plist (docs/stripe-terminal-ios-setup.md), then
-    // `npm run native:sync`.
+    // Tap to Pay (ClarityTerminal) is in the build. Signing needs Apple's
+    // Tap to Pay entitlement for app.claritygolf.booking: development for
+    // local builds, distribution for TestFlight and the App Store
+    // (docs/stripe-terminal-ios-setup.md, docs/tap-to-pay-apple-review.md).
+    // Without the plugin the page hides every Tap to Pay control.
     //
     // Filesystem and Share: downloads (invoice PDFs, reports, videos) open
     // the share sheet instead of doing nothing (src/native/nativeFiles.ts).
-    includePlugins: ["@capacitor/push-notifications", "@capacitor/filesystem", "@capacitor/share"],
+    includePlugins: [
+      "@capacitor/push-notifications",
+      "@capacitor/filesystem",
+      "@capacitor/share",
+      "@claritygolf/capacitor-terminal",
+    ],
   },
   plugins: {
     // A booking alert that arrives while the app is open still shows as a

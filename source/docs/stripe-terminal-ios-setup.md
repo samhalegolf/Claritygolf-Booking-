@@ -78,15 +78,11 @@ and Stripe lets an intent succeed only once.
   approves it for the bundle id.
 - **Signing.** Set the team in Xcode for the App target. Automatic signing
   picks up the entitlement once Apple has granted it.
-- **Permissions.** While Tap to Pay is out of the iPhone build these two are
-  out of `Info.plist` too; put them back with the plugin:
-  `NSLocationWhenInUseUsageDescription` (Stripe requires location for card
-  acceptance and disables payments without it) and
+- **Permissions.** `Info.plist` carries the two strings the Terminal SDK
+  needs: `NSLocationWhenInUseUsageDescription` (Stripe requires location for
+  card acceptance and disables payments without it) and
   `NSBluetoothAlwaysUsageDescription` (App Store requires it for any app
-  linking the Terminal SDK, and it is needed for card readers later). Wording:
-  "Stripe needs to know where card payments are taken to protect against
-  fraud. Location is only used while you take a payment." and "Clarity Booking
-  uses Bluetooth to connect to supported card readers."
+  linking the Terminal SDK, and it is needed for card readers later).
 - **Review.** Apple reviews Tap to Pay apps against its Tap to Pay marketing
   and UX guidelines (the checkout button wording, the tap screen, education
   for merchants). Stripe's Tap to Pay guide (linked from the Stripe docs page
