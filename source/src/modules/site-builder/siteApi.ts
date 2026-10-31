@@ -105,6 +105,11 @@ export async function fetchPublicSite(query: { host?: string; business?: string;
   return readJson(response);
 }
 
+/** A message from the contact form. No session; the business is named by its slug. */
+export async function sendSiteForm(input: { business: string; page: string; name: string; email: string; phone: string; message: string; website: string }): Promise<void> {
+  await readJson(await fetch("/api/site/public/form", { credentials: "omit", ...jsonInit("POST", input) }));
+}
+
 // --- The shop ------------------------------------------------------------------
 //
 // The same four calls the shop page makes (public-shop.mts), from a page of

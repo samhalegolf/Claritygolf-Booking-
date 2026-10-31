@@ -63,6 +63,11 @@ function blockSnippet(block: SiteBlock): string {
     case "shop":
     case "articles":
     case "contact":
+    case "cards":
+    case "logos":
+    case "embed":
+    case "venues":
+    case "form":
       return block.heading;
     case "image":
       return block.caption || block.image?.alt || "";
@@ -315,6 +320,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       booking: t("Your booking page shows here"),
       map: t("A map shows here"),
       shop: t("Your shop shows here"),
+      embed: t("The framed page shows here"),
       noArticles: t("No articles yet. Add one with Add page › Article."),
       noPage: t("There is no page here"),
     }),

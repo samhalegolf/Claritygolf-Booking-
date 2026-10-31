@@ -7,6 +7,9 @@ import {
   MAX_SITE_BLOCKS,
   SITE_BLOCK_TYPES,
   SITE_PAGE_PRESETS,
+  blockStyleIsPlain,
+  cleanBlockStyle,
+  cleanHeader,
   cleanPageSlug,
   cleanSiteHref,
   cleanSitePageContent,
@@ -35,7 +38,7 @@ import {
 } from "./domains.mts";
 import { siteMediaPathFromUrl, siteMediaUrl, sweepUnusedSiteImages, uploadSiteImage } from "./media.mts";
 import { cleanReturnPath } from "../../public-shop.mts";
-import { accountIdForHostname, claimSiteDomain, listSitePages, readPublishedSite, readSite, saveSite } from "./store.mts";
+import { accountIdForHostname, claimSiteDomain, listSitePages, markSiteFormMessageEmailed, readPublishedSite, readSite, saveSite, saveSiteFormMessage } from "./store.mts";
 
 // --- Pages and their content ------------------------------------------------
 
@@ -187,6 +190,112 @@ const presetInput = {
   email: "hello@riverside.example",
   phone: "+64 21 000 0000",
 };
+
+test("every block carries a section style, and a plain one changes nothing", () => {
+  assert.deepEqual(cleanBlockStyle(undefined), { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit" });
+  assert.ok(blockStyleIsPlain(cleanBlockStyle({})));
+  const styled = cleanBlockStyle({
+    theme: "dark",
+    background: { url: "https://cdn.example/bg.jpg", alt: "" },
+    video: "https://cdn.example/loop.mp4?v=2",
+    overlay: 140,
+    height: "medium",
+    width: "wide",
+  });
+  assert.equal(styled.theme, "dark");
+  assert.equal(styled.background?.url, "https://cdn.example/bg.jpg");
+  assert.equal(styled.video, "https://cdn.example/loop.mp4?v=2");
+  assert.equal(styled.overlay, 90, "the overlay stops short of hiding the picture");
+  assert.equal(styled.height, "medium");
+  assert.equal(styled.width, "wide");
+  assert.ok(!blockStyleIsPlain(styled));
+  assert.equal(cleanBlockStyle({ theme: "neon", video: "https://cdn.example/not-a-video.html", overlay: -5 }).theme, "default");
+  assert.equal(cleanBlockStyle({ video: "https://cdn.example/not-a-video.html" }).video, "", "only a video file plays behind a block");
+  assert.equal(cleanBlockStyle({ overlay: -5 }).overlay, 0);
+  // The style rides on the block through cleaning, and an unknown style falls back to plain.
+  const content = cleanSitePageContent({ blocks: [{ id: "t", type: "text", heading: "Hi", body: "", style: { theme: "accent" } }, { id: "d", type: "divider" }] });
+  assert.equal(content.blocks[0].style.theme, "accent");
+  assert.ok(blockStyleIsPlain(content.blocks[1].style));
+});
+
+test("cards, logos, embeds, venues and the contact form keep only what they can draw", () => {
+  const content = cleanSitePageContent({
+    blocks: [
+      { id: "cards", type: "cards", columns: 7, items: [{ title: "One", text: "x", button: { label: "Go", href: "page:shop-page" } }, { title: "Two", button: { label: "", href: "page:shop-page" } }] },
+      { id: "logos", type: "logos", size: "huge", items: [{ caption: "PGA", href: "javascript:alert(1)" }, { caption: "TPI", href: "https://tpi.example/" }] },
+      { id: "embed", type: "embed", url: "http://plain.example/form", height: 20 },
+      { id: "embed2", type: "embed", url: "https://forms.example/f/1", height: 100000 },
+      {
+        id: "venues",
+        type: "venues",
+        columns: 3,
+        items: [
+          { name: "The Range", address: "1 Fairway Road", booking: "group-lessons", height: 10 },
+          { name: "The Club", showMap: false, booking: "nope", embedUrl: "https://maps.example/embed" },
+        ],
+      },
+      { id: "form", type: "form", askPhone: false, buttonLabel: "Send it", thanks: "Cheers" },
+    ],
+  });
+  const [cards, logos, embed, embed2, venues, form] = content.blocks;
+  assert.equal(cards.type === "cards" && cards.columns, 4, "an unknown column count falls back");
+  assert.equal(cards.type === "cards" && cards.items[0].button?.href, "page:shop-page");
+  assert.equal(cards.type === "cards" && cards.items[1].button, null, "a button without a label is dropped");
+  assert.equal(logos.type === "logos" && logos.size, "regular");
+  assert.equal(logos.type === "logos" && logos.items[0].href, "", "a script link is dropped");
+  assert.equal(logos.type === "logos" && logos.items[1].href, "https://tpi.example/");
+  assert.equal(embed.type === "embed" && embed.url, "", "a frame is https only");
+  assert.equal(embed.type === "embed" && embed.height, 200);
+  assert.ok(embed2.type === "embed" && embed2.url === "https://forms.example/f/1" && embed2.height < 100000);
+  assert.equal(venues.type === "venues" && venues.columns, 2);
+  assert.ok(venues.type === "venues" && venues.items[0].showMap, "a venue shows its map unless told not to");
+  assert.equal(venues.type === "venues" && venues.items[0].booking, "group-lessons");
+  assert.ok(venues.type === "venues" && venues.items[0].height >= 300, "a booking frame is never too short to use");
+  assert.equal(venues.type === "venues" && venues.items[1].booking, "none", "an unknown booking screen means no booking");
+  assert.equal(venues.type === "venues" && venues.items[1].embedUrl, "https://maps.example/embed");
+  assert.deepEqual(form.type === "form" && [form.askPhone, form.buttonLabel, form.thanks], [false, "Send it", "Cheers"]);
+});
+
+test("a header may sit over the first block and carry social links of known kinds", () => {
+  const header = cleanHeader({ transparent: true, social: [{ kind: "instagram", url: "https://instagram.com/x" }, { kind: "myspace", url: "https://myspace.example" }, { kind: "facebook", url: "javascript:x" }] });
+  assert.equal(header.transparent, true);
+  assert.deepEqual(header.social, [{ kind: "instagram", url: "https://instagram.com/x" }]);
+  assert.equal(cleanHeader({}).transparent, false, "a header is opaque unless asked");
+});
+
+test("a page's pictures include backdrops and the pictures on cards, logos and reviews", () => {
+  const content = cleanSitePageContent({
+    blocks: [
+      { id: "t", type: "text", body: "", style: { background: { url: "https://cdn.example/bg.jpg" } } },
+      { id: "c", type: "cards", items: [{ title: "x", image: { url: "https://cdn.example/card.jpg" } }] },
+      { id: "l", type: "logos", items: [{ caption: "x", image: { url: "https://cdn.example/logo.png" } }] },
+      { id: "r", type: "testimonials", items: [{ quote: "x", name: "y", image: { url: "https://cdn.example/review.png" } }] },
+    ],
+  });
+  assert.deepEqual(sitePageImageUrls(content).sort(), ["https://cdn.example/bg.jpg", "https://cdn.example/card.jpg", "https://cdn.example/logo.png", "https://cdn.example/review.png"]);
+});
+
+test('the "pro" template is the full coaching site: venues as its booking page, a dark review band and a contact form', () => {
+  const pro = SITE_TEMPLATES.find((template) => template.id === "pro");
+  assert.ok(pro);
+  const site = pro.build(presetInput);
+  assert.equal(site.settings.header.transparent, true);
+  const home = site.pages[0].content.blocks;
+  assert.deepEqual(home.map((block) => block.type), ["hero", "cards", "testimonials", "logos", "gallery"]);
+  assert.equal(home[2].style.theme, "dark");
+  const book = site.pages.find((page) => page.slug === "book");
+  assert.equal(book?.content.blocks[0].type, "venues");
+  assert.equal(book?.title, "Book a Lesson");
+  const contact = site.pages.find((page) => page.slug === "contact");
+  assert.ok(contact?.content.blocks.some((block) => block.type === "form"));
+  assert.ok(site.pages.some((page) => page.slug === "shop-page"), "the shop is one of its pages");
+  // Every page link on the home page leads to a page the site has.
+  const slugs = new Set(site.pages.map((page) => page.slug));
+  for (const block of home) {
+    const hrefs = block.type === "hero" ? block.buttons.map((b) => b.href) : block.type === "cards" ? block.items.map((item) => item.button?.href || "") : [];
+    for (const href of hrefs) if (href.startsWith("page:")) assert.ok(slugs.has(href.slice(5)), `${href} leads nowhere`);
+  }
+});
 
 for (const preset of SITE_PAGE_PRESETS) {
   test(`page preset "${preset.id}" builds a page the cleaner would store as is`, () => {
@@ -567,6 +676,22 @@ test("a hostname only answers for a business once it is live, and cannot be clai
     assert.equal(fresh.status, "pending");
     assert.ok(fresh.verificationToken.length >= 20);
     assert.ok(issued.every((statement) => !statement.text.includes("site_domains") || statement.text.includes("account_id") || statement.text.includes("hostname = $1")));
+  } finally {
+    setDatabaseForTests(null);
+  }
+});
+
+test("a website message is stored under its business, then marked as emailed", async () => {
+  const issued = fakeDatabase(() => []);
+  try {
+    const id = await saveSiteFormMessage("riverside", { name: "Ann", email: "ann@example.com", phone: "", message: "Hello", pageSlug: "contact" });
+    assert.match(id, /^msg-/);
+    assert.match(issued[0].text, /INSERT INTO site_form_messages/);
+    assert.deepEqual(issued[0].values.slice(0, 4), [id, "riverside", "contact", "Ann"]);
+    await markSiteFormMessageEmailed("riverside", id);
+    assert.match(issued[1].text, /UPDATE site_form_messages SET emailed = true WHERE account_id = \$1 AND id = \$2/);
+    assert.deepEqual(issued[1].values, ["riverside", id]);
+    await assert.rejects(() => saveSiteFormMessage("", { name: "x", email: "x@example.com", phone: "", message: "x", pageSlug: "home" }), /accountId is required/);
   } finally {
     setDatabaseForTests(null);
   }

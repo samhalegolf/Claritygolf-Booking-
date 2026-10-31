@@ -60,15 +60,59 @@ Clarity's shop page.
 
 ## Blocks
 
-hero, text, image, gallery, features, pricing, testimonials, faq, cta
-(call to action), video (YouTube), booking (the Clarity widget, embedded or
-as a button), shop (packages and vouchers, bought on the page), articles
+hero, text, image, gallery (with an optional button), features, cards (a
+picture, heading, line and button each, 2 to 4 across), logos (small
+pictures in a row, a caption each, for certifications and partners),
+pricing, testimonials (with a picture or screenshot per review and an
+optional button), faq, cta (call to action), video (YouTube), embed
+(another website's form, map or player in a frame, https only), booking
+(the Clarity widget, embedded or as a button), venues (each place the
+coach works, side by side: map, hours, a line, and either a Clarity
+booking screen or another system's framed page), form (a message to the
+business), shop (packages and vouchers, bought on the page), articles
 (the site's article pages as cards), contact (email, phone, address, hours,
 optional map), divider.
 
 Every block has an id, and `#<id>` works as a link anywhere on the page
 (menu links, buttons), which is how "Lessons" in the header reaches the
 pricing block. The id is shown above a block's fields in the editor.
+
+### Section style
+
+Every block carries a section style, edited under "Section: colours,
+backdrop and size" at the bottom of its inspector. Colours: same as the
+page, a light panel (the theme's surface colour), white, dark (the text
+colour as background, white text) or accent (the primary colour). A
+picture or a muted, looping video can sit behind the block, darkened by a
+chosen amount; text over a backdrop is white unless the block is light or
+white. Height sets a minimum (small, medium, large) and content width can
+override the theme's for that one block. A plain style adds nothing to
+the markup, so untouched blocks render as before.
+
+The header can be transparent: it sits over the first block with no
+background of its own, in light text when that block is dark, and scrolls
+away with it (a transparent header is never sticky). The header and
+footer can carry social links (Instagram, Facebook, YouTube, TikTok, X,
+LinkedIn), drawn as icons.
+
+### The contact form
+
+A form block takes a name, email, optional phone and a message. The
+server keeps it in `site_form_messages` and emails it to the business's
+contact address (Settings › Business), falling back to the notification
+address, with reply-to set to the visitor. A hidden field no person sees
+catches bots: when it is filled the request is answered ok and dropped.
+
+## Templates
+
+Five starting sites: Classic, Academy, Studio, Performance and Pro. Pro is
+modelled on a working coaching site (samhalegolf.com): a transparent
+header over a profile hero, what is offered as four cards, reviews on a
+dark band, certifications as logos, an Instagram gallery; then a Book
+page of venues with maps and booking side by side, Group Coaching,
+Articles, Shop and Contact (with the form). It uses the "Ember" theme
+preset (orange on white, Manrope and Poppins). A "Book a lesson (venues)"
+page preset adds the venues page to any site.
 
 ## How it is built
 
@@ -78,11 +122,13 @@ pricing block. The id is shown above a block's fields in the editor.
 | Templates (a whole starting site) | `netlify/functions/_shared/site/templates.mts` |
 | Hostname rules, DNS check, Netlify attach | `netlify/functions/_shared/site/domains.mts` |
 | Image uploads to the `site-media` bucket | `netlify/functions/_shared/site/media.mts` |
-| Tables | `netlify/functions/_shared/site/store.mts`, migrations `20261031000300_create_site_pages` and `20261031000400_site_multiple_pages` |
+| Tables | `netlify/functions/_shared/site/store.mts`, migrations `20261031000300_create_site_pages`, `20261031000400_site_multiple_pages` and `20261031000500_site_form_messages` |
 | Routes | `netlify/functions/site.mts` |
 | Renderer (editor preview and public page share it) | `src/modules/site-builder/SiteRenderer.tsx`, `site.css` |
 | Editor | `src/modules/site-builder/SiteBuilderPanel.tsx`, `Inspectors.tsx`, `fields.tsx` |
 | Shop block | `src/modules/site-builder/ShopBlock.tsx` |
+| Contact form block | `src/modules/site-builder/FormBlock.tsx` |
+| Section style to CSS variables | `src/modules/site-builder/siteTheme.ts` |
 | Domains panel | `src/modules/site-builder/DomainPanel.tsx` |
 | Public page | `src/modules/site-builder/PublicSitePage.tsx`, routed from `src/boot.tsx` |
 

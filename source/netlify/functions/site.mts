@@ -5,8 +5,9 @@ import { requireCoachActor, resolvePublicAccount } from "./_shared/coach-auth.mt
 import { coachAccountFromSettings } from "./_shared/coach-account.mts";
 import { json } from "./_shared/http.mts";
 import { readSandboxAccount } from "./_shared/sandbox.mts";
+import { deliverEmail } from "./_shared/email-delivery.mts";
 import { db, readSettingsMap } from "./_shared/settings-store.mts";
-import { cleanString } from "./_shared/values.mts";
+import { cleanEmail, cleanString } from "./_shared/values.mts";
 import { SITE_PAGE_PRESETS, cleanPageSlug, sitePageImageUrls } from "./_shared/site/document.mts";
 import {
   attachDomainToSite,
@@ -25,11 +26,13 @@ import {
   deleteSiteDomain,
   listSiteDomains,
   listSitePages,
+  markSiteFormMessageEmailed,
   publishSite,
   readPublishedSite,
   readSite,
   readSiteDomain,
   saveSite,
+  saveSiteFormMessage,
   unpublishSite,
   updateSiteDomainStatus,
   type SiteDomainRecord,
@@ -53,9 +56,11 @@ import { SITE_TEMPLATES } from "./_shared/site/templates.mts";
  *   POST   /api/site/domains/check     look the DNS records up, attach when right   { id }
  *   DELETE /api/site/domains?id=       release a hostname
  *
- * And the one stranger's route, cached at the CDN and purged on publish:
+ * And the strangers' routes. The read is cached at the CDN and purged on
+ * publish; the form is never cached:
  *
  *   GET    /api/site/public?host=  |  ?business=   [&page=<slug>]   one published page
+ *   POST   /api/site/public/form                                     a message from the contact form
  *
  * The pages are drawn by the browser (src/modules/site-builder), which is
  * why this answers with documents rather than HTML.
@@ -156,26 +161,68 @@ async function coachState(accountId: string) {
   };
 }
 
-async function handlePublic(req: Request) {
-  const url = new URL(req.url);
-  const business = cleanString(url.searchParams.get("business"), "", 120);
-  const host = cleanString(url.searchParams.get("host") || req.headers.get("host") || "", "", 253)
+/**
+ * The business a public request is about: named by ?business= on Clarity's
+ * own hosts, or by the hostname on the business's own domain (only once that
+ * domain is live). Nothing for neither.
+ */
+async function resolvePublicBusiness(req: Request, business: string, hostParam: string): Promise<{ accountId: string; slug: string; businessName: string } | null> {
+  const host = cleanString(hostParam || req.headers.get("host") || "", "", 253)
     .toLowerCase()
     .replace(/:\d+$/, "");
-  const slug = cleanPageSlug(url.searchParams.get("page"), "home");
-  let accountId = "";
-  let identity = { slug: "", businessName: "" };
   if (business) {
     const account = await resolvePublicAccount(business);
-    if (account) {
-      accountId = account.id;
-      identity = { slug: account.slug || business, businessName: account.businessName };
-    }
-  } else if (host) {
-    accountId = await accountIdForHostname(host);
-    if (accountId) identity = await readAccountIdentity(accountId);
+    return account ? { accountId: account.id, slug: account.slug || business, businessName: account.businessName } : null;
   }
-  if (!accountId) return json({ error: "not_found", message: "There is no page at this address." }, 404);
+  if (!host) return null;
+  const accountId = await accountIdForHostname(host);
+  if (!accountId) return null;
+  const identity = await readAccountIdentity(accountId);
+  return { accountId, slug: identity.slug, businessName: identity.businessName };
+}
+
+/** The honeypot and the caps are the whole of the spam defence: a form, not a fortress. */
+async function handlePublicForm(req: Request) {
+  const body = await readBody(req);
+  const resolved = await resolvePublicBusiness(req, cleanString(body.business, "", 120), cleanString(body.host, "", 253));
+  if (!resolved) return json({ error: "not_found", message: "There is no page at this address." }, 404);
+  // A field people never see, filled in by things that are not people.
+  if (cleanString(body.website, "", 10)) return json({ ok: true });
+  const name = cleanString(body.name, "", 120);
+  const email = cleanEmail(body.email, "");
+  const phone = cleanString(body.phone, "", 40);
+  const message = cleanString(body.message, "", 4000);
+  if (!name || !email || !message) return json({ error: "invalid", message: "Your name, email and a message are needed." }, 400);
+  const pageSlug = cleanPageSlug(body.page, "home");
+  const accountId = resolved.accountId;
+  const id = await saveSiteFormMessage(accountId, { name, email, phone, message, pageSlug });
+
+  const settings = await readSettingsMap(accountId);
+  const account = coachAccountFromSettings(settings, accountId) as { businessName?: string; contactEmail?: string };
+  const to = cleanEmail(account.contactEmail, "") || cleanEmail(settings.notificationEmail, "") || cleanEmail(process.env.CLARITY_NOTIFICATION_EMAIL, "");
+  if (to) {
+    const lines = [`From: ${name} <${email}>`, phone ? `Phone: ${phone}` : "", `Page: ${pageSlug}`, "", message];
+    const result = await deliverEmail({
+      accountId,
+      to,
+      subject: `Website message from ${name}`,
+      text: lines.filter((line, index) => line || index > 2).join("\n"),
+      replyTo: email,
+      idempotencyKey: `site-form-${id}`,
+    });
+    if (result.sent) await markSiteFormMessageEmailed(accountId, id);
+    else console.warn("site_form:email_not_sent", accountId, result.reason, result.error);
+  }
+  return json({ ok: true });
+}
+
+async function handlePublic(req: Request) {
+  const url = new URL(req.url);
+  const slug = cleanPageSlug(url.searchParams.get("page"), "home");
+  const resolved = await resolvePublicBusiness(req, cleanString(url.searchParams.get("business"), "", 120), cleanString(url.searchParams.get("host"), "", 253));
+  if (!resolved) return json({ error: "not_found", message: "There is no page at this address." }, 404);
+  const accountId = resolved.accountId;
+  const identity = { slug: resolved.slug, businessName: resolved.businessName };
 
   const site = await readPublishedSite(accountId, slug);
   if (!site) return json({ error: "not_published", message: "This site is not published yet." }, 404);
@@ -240,6 +287,10 @@ export default async function handler(req: Request) {
     if (action === "public") {
       if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       return await handlePublic(req);
+    }
+    if (action === "public/form") {
+      if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      return await handlePublicForm(req);
     }
 
     const actor = await requireCoachActor(req);
