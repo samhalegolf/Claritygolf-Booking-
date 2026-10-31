@@ -10,7 +10,7 @@ import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { isTerminalPath } from "./modules/clarity-terminal/terminalApi";
-import { publicShopBusiness, publicSiteBusiness } from "./modules/public-booking/bookingScreen";
+import { customDomainPageSlug, publicShopBusiness, publicSiteRoute } from "./modules/public-booking/bookingScreen";
 import { isClarityHost } from "../netlify/functions/_shared/site/document.mts";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { prefetchCalendarState } from "./modules/workspace/calendarStatePrefetch";
@@ -64,9 +64,9 @@ import { t } from "./lib/i18n";
 // business's page. Decided before everything else: on such a domain there is
 // no login, no booking widget and no Clarity home page to fall through to.
 const customDomainHost = isClarityHost(window.location.hostname) ? "" : window.location.hostname;
-// The same page on Clarity's own hosts, at /<business>/site.
-const publicSiteSlug = customDomainHost ? "" : publicSiteBusiness();
-const publicSite = Boolean(customDomainHost || publicSiteSlug);
+// The same site on Clarity's own hosts, at /<business>/site[/<page>].
+const siteRoute = customDomainHost ? { business: "", slug: customDomainPageSlug() } : publicSiteRoute();
+const publicSite = Boolean(customDomainHost || siteRoute);
 
 // The booking embed is public by design -- it is the widget clients book
 // through. It wins over everything below, including any session.
@@ -212,7 +212,7 @@ function Root() {
   if (publicSite) {
     return (
       <Suspense fallback={<Loading size="screen" label="" />}>
-        <PublicSitePage business={publicSiteSlug || undefined} host={customDomainHost || undefined} />
+        <PublicSitePage business={siteRoute?.business || undefined} host={customDomainHost || undefined} slug={siteRoute?.slug ?? "home"} />
       </Suspense>
     );
   }

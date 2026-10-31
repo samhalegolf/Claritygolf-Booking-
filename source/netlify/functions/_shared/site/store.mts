@@ -1,5 +1,6 @@
 /**
- * The site tables: one page per business, and the domains that serve it.
+ * The site tables: a business's site settings, its pages, and the domains
+ * that serve it.
  *
  * Every read and write takes an account id, and the public read resolves a
  * hostname to a business before it reads anything. There is no way to read a
@@ -9,18 +10,30 @@
 import { randomBytes } from "node:crypto";
 
 import { db } from "../settings-store.mts";
-import { cleanSiteDocument, type SiteDocument } from "./document.mts";
+import {
+  HOME_PAGE_SLUG,
+  cleanSitePageContent,
+  cleanSitePageMeta,
+  cleanSiteSettings,
+  type SitePage,
+  type SitePageCard,
+  type SitePageContent,
+  type SitePageMeta,
+  type SiteSettings,
+} from "./document.mts";
 
-export const HOME_PAGE_SLUG = "home";
+export { HOME_PAGE_SLUG };
 
-export type SitePageRecord = {
-  id: string;
-  accountId: string;
-  slug: string;
-  document: SiteDocument;
-  publishedDocument: SiteDocument | null;
+export type SiteRecord = {
+  settings: SiteSettings;
+  publishedSettings: SiteSettings | null;
   publishedAt: string | null;
-  createdAt: string;
+  updatedAt: string;
+};
+
+export type SitePageRecord = SitePage & {
+  publishedContent: SitePageContent | null;
+  publishedAt: string | null;
   updatedAt: string;
 };
 
@@ -38,14 +51,23 @@ export type SiteDomainRecord = {
   createdAt: string;
 };
 
-type PageRow = {
-  id: string;
-  account_id: string;
-  slug: string;
+type SiteRow = {
   document: unknown;
   published_document: unknown;
   published_at: string | Date | null;
-  created_at: string | Date;
+  updated_at: string | Date;
+};
+
+type PageRow = {
+  id: string;
+  slug: string;
+  title: string;
+  kind: string;
+  in_nav: boolean;
+  sort_order: number;
+  document: unknown;
+  published_document: unknown;
+  published_at: string | Date | null;
   updated_at: string | Date;
 };
 
@@ -63,7 +85,7 @@ type DomainRow = {
 
 const iso = (value: string | Date | null | undefined) => (value ? new Date(value).toISOString() : null);
 
-function parseDocument(value: unknown): unknown {
+function parseJson(value: unknown): unknown {
   if (typeof value === "string") {
     try {
       return JSON.parse(value);
@@ -74,16 +96,25 @@ function parseDocument(value: unknown): unknown {
   return value ?? {};
 }
 
-function pageFromRow(row: PageRow): SitePageRecord {
-  const published = parseDocument(row.published_document);
+function siteFromRow(row: SiteRow): SiteRecord {
   return {
-    id: row.id,
-    accountId: row.account_id,
-    slug: row.slug,
-    document: cleanSiteDocument(parseDocument(row.document)),
-    publishedDocument: row.published_document ? cleanSiteDocument(published) : null,
+    settings: cleanSiteSettings(parseJson(row.document)),
+    publishedSettings: row.published_document ? cleanSiteSettings(parseJson(row.published_document)) : null,
     publishedAt: iso(row.published_at),
-    createdAt: iso(row.created_at) || "",
+    updatedAt: iso(row.updated_at) || "",
+  };
+}
+
+function metaFromRow(row: Pick<PageRow, "id" | "slug" | "title" | "kind" | "in_nav" | "sort_order">): SitePageMeta {
+  return cleanSitePageMeta({ id: row.id, slug: row.slug, title: row.title, kind: row.kind, inNav: row.in_nav, sortOrder: row.sort_order });
+}
+
+function pageFromRow(row: PageRow): SitePageRecord {
+  return {
+    ...metaFromRow(row),
+    content: cleanSitePageContent(parseJson(row.document)),
+    publishedContent: row.published_document ? cleanSitePageContent(parseJson(row.published_document)) : null,
+    publishedAt: iso(row.published_at),
     updatedAt: iso(row.updated_at) || "",
   };
 }
@@ -104,66 +135,193 @@ function domainFromRow(row: DomainRow): SiteDomainRecord {
 
 const token = (bytes: number) => randomBytes(bytes).toString("base64url");
 
-// --- Pages ------------------------------------------------------------------
+export class SiteInputError extends Error {
+  status = 400;
+  code = "invalid_site";
+}
 
-export async function readSitePage(accountId: string, slug = HOME_PAGE_SLUG): Promise<SitePageRecord | null> {
+export class PageSlugTakenError extends Error {
+  status = 409;
+  code = "slug_taken";
+}
+
+// --- The site and its pages -------------------------------------------------
+
+export async function readSite(accountId: string): Promise<SiteRecord | null> {
   if (!accountId) return null;
   const rows = (await db().sql`
-    SELECT id, account_id, slug, document, published_document, published_at, created_at, updated_at
-    FROM site_pages
-    WHERE account_id = ${accountId} AND slug = ${slug}
+    SELECT document, published_document, published_at, updated_at
+    FROM sites
+    WHERE account_id = ${accountId}
     LIMIT 1
-  `) as PageRow[];
-  return rows[0] ? pageFromRow(rows[0]) : null;
+  `) as SiteRow[];
+  return rows[0] ? siteFromRow(rows[0]) : null;
 }
 
-/** Save the draft. Creates the page the first time; the published copy is untouched. */
-export async function saveSitePage(accountId: string, document: unknown, slug = HOME_PAGE_SLUG): Promise<SitePageRecord> {
-  if (!accountId) throw new Error("saveSitePage: accountId is required");
-  const clean = cleanSiteDocument(document);
+export async function listSitePages(accountId: string): Promise<SitePageRecord[]> {
+  if (!accountId) return [];
   const rows = (await db().sql`
-    INSERT INTO site_pages (id, account_id, slug, document, updated_at)
-    VALUES (${`page-${token(9)}`}, ${accountId}, ${slug}, ${JSON.stringify(clean)}::jsonb, NOW())
-    ON CONFLICT (account_id, slug) DO UPDATE
-      SET document = EXCLUDED.document,
-          updated_at = NOW()
-    RETURNING id, account_id, slug, document, published_document, published_at, created_at, updated_at
+    SELECT id, slug, title, kind, in_nav, sort_order, document, published_document, published_at, updated_at
+    FROM site_pages
+    WHERE account_id = ${accountId}
+    ORDER BY sort_order ASC, created_at ASC
   `) as PageRow[];
-  return pageFromRow(rows[0]);
+  return rows.map(pageFromRow);
 }
 
-/** Make the draft the page strangers see. */
-export async function publishSitePage(accountId: string, slug = HOME_PAGE_SLUG): Promise<SitePageRecord | null> {
-  if (!accountId) return null;
+/**
+ * Save the whole draft: the settings and every page, in one transaction.
+ *
+ * The list sent is the list that remains: a page the coach removed in the
+ * editor is deleted here, a page without an id is new. The home page must
+ * be among them, and no two pages may share an address. The published copies
+ * are untouched.
+ */
+export async function saveSite(accountId: string, input: { settings: unknown; pages: unknown }): Promise<{ site: SiteRecord; pages: SitePageRecord[] }> {
+  if (!accountId) throw new Error("saveSite: accountId is required");
+  const settings = cleanSiteSettings(input.settings);
+  const rawPages = Array.isArray(input.pages) ? input.pages.slice(0, 60) : [];
+  const pages = rawPages.map((entry, index) => {
+    const raw = (entry || {}) as Record<string, unknown>;
+    return { ...cleanSitePageMeta(raw, index), sortOrder: index, content: cleanSitePageContent(raw.content) };
+  });
+  if (!pages.some((page) => page.slug === HOME_PAGE_SLUG)) throw new SiteInputError("The home page cannot be removed.");
+  const slugs = new Set<string>();
+  for (const page of pages) {
+    if (slugs.has(page.slug)) throw new SiteInputError(`Two pages have the address "${page.slug}". Give one of them another address.`);
+    slugs.add(page.slug);
+  }
+
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO sites (account_id, document, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (account_id) DO UPDATE SET document = EXCLUDED.document, updated_at = NOW()`,
+      [accountId, JSON.stringify(settings)],
+    );
+    const existing = new Set(
+      ((await client.query(`SELECT id FROM site_pages WHERE account_id = $1`, [accountId])).rows as Array<{ id: string }>).map((row) => row.id),
+    );
+    const kept: string[] = [];
+    for (const page of pages) {
+      const id = page.id && existing.has(page.id) ? page.id : `page-${token(9)}`;
+      kept.push(id);
+      await client.query(
+        `INSERT INTO site_pages (id, account_id, slug, title, kind, in_nav, sort_order, document, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+         ON CONFLICT (id) DO UPDATE
+           SET slug = EXCLUDED.slug,
+               title = EXCLUDED.title,
+               kind = EXCLUDED.kind,
+               in_nav = EXCLUDED.in_nav,
+               sort_order = EXCLUDED.sort_order,
+               document = EXCLUDED.document,
+               updated_at = NOW()
+         WHERE site_pages.account_id = $2`,
+        [id, accountId, page.slug, page.title, page.kind, page.inNav, page.sortOrder, JSON.stringify(page.content)],
+      );
+    }
+    await client.query(`DELETE FROM site_pages WHERE account_id = $1 AND NOT (id = ANY($2::text[]))`, [accountId, kept]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if ((error as { code?: string })?.code === "23505") {
+      throw new PageSlugTakenError("Two pages have the same address. Give one of them another address.");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+  const [site, saved] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+  return { site: site!, pages: saved };
+}
+
+/**
+ * Make the draft the site strangers see: the settings and every page at
+ * once. Each page's meta rides along in its published copy, so a title or
+ * address changed afterwards stays private until the next publish.
+ */
+export async function publishSite(accountId: string): Promise<boolean> {
+  if (!accountId) return false;
   const rows = (await db().sql`
+    UPDATE sites
+    SET published_document = document, published_at = NOW(), updated_at = NOW()
+    WHERE account_id = ${accountId}
+    RETURNING account_id
+  `) as Array<{ account_id: string }>;
+  if (!rows.length) return false;
+  await db().sql`
     UPDATE site_pages
-    SET published_document = document,
+    SET published_document = document || jsonb_build_object('slug', slug, 'title', title, 'kind', kind, 'inNav', in_nav, 'sortOrder', sort_order),
         published_at = NOW(),
         updated_at = NOW()
-    WHERE account_id = ${accountId} AND slug = ${slug}
-    RETURNING id, account_id, slug, document, published_document, published_at, created_at, updated_at
-  `) as PageRow[];
-  return rows[0] ? pageFromRow(rows[0]) : null;
+    WHERE account_id = ${accountId}
+  `;
+  return true;
 }
 
-/** Take the page down. The draft stays, so publishing again is one click. */
-export async function unpublishSitePage(accountId: string, slug = HOME_PAGE_SLUG): Promise<SitePageRecord | null> {
-  if (!accountId) return null;
+/** Take the site down. The drafts stay, so publishing again is one click. */
+export async function unpublishSite(accountId: string): Promise<boolean> {
+  if (!accountId) return false;
   const rows = (await db().sql`
+    UPDATE sites
+    SET published_document = NULL, published_at = NULL, updated_at = NOW()
+    WHERE account_id = ${accountId}
+    RETURNING account_id
+  `) as Array<{ account_id: string }>;
+  if (!rows.length) return false;
+  await db().sql`
     UPDATE site_pages
-    SET published_document = NULL,
-        published_at = NULL,
-        updated_at = NOW()
-    WHERE account_id = ${accountId} AND slug = ${slug}
-    RETURNING id, account_id, slug, document, published_document, published_at, created_at, updated_at
-  `) as PageRow[];
-  return rows[0] ? pageFromRow(rows[0]) : null;
+    SET published_document = NULL, published_at = NULL, updated_at = NOW()
+    WHERE account_id = ${accountId}
+  `;
+  return true;
 }
 
-/** The published page only. The draft never leaves the account's own session. */
-export async function readPublishedSitePage(accountId: string, slug = HOME_PAGE_SLUG): Promise<SiteDocument | null> {
-  const page = await readSitePage(accountId, slug);
-  return page?.publishedDocument ?? null;
+export type PublishedSite = {
+  settings: SiteSettings;
+  /** Every published page's card, in menu order. */
+  pages: SitePageCard[];
+  /** The page asked for, or null when there is none at that address. */
+  page: SitePage | null;
+};
+
+/**
+ * The published site, and one of its pages. The drafts never leave the
+ * account's own session. A page's meta comes from its published copy (see
+ * publishSite); a copy from before that carried it falls back to the columns.
+ */
+export async function readPublishedSite(accountId: string, slug: string): Promise<PublishedSite | null> {
+  if (!accountId) return null;
+  const site = await readSite(accountId);
+  if (!site?.publishedSettings) return null;
+  const rows = (await db().sql`
+    SELECT id, slug, title, kind, in_nav, sort_order, published_document
+    FROM site_pages
+    WHERE account_id = ${accountId} AND published_document IS NOT NULL
+    ORDER BY sort_order ASC, created_at ASC
+  `) as Array<Pick<PageRow, "id" | "slug" | "title" | "kind" | "in_nav" | "sort_order" | "published_document">>;
+  const pages = rows.map((row) => {
+    const published = parseJson(row.published_document) as Record<string, unknown>;
+    const meta = cleanSitePageMeta({
+      id: row.id,
+      slug: published.slug ?? row.slug,
+      title: published.title ?? row.title,
+      kind: published.kind ?? row.kind,
+      inNav: published.inNav ?? row.in_nav,
+      sortOrder: published.sortOrder ?? row.sort_order,
+    });
+    return { ...meta, content: cleanSitePageContent(published) };
+  });
+  const wanted = slug || HOME_PAGE_SLUG;
+  const page = pages.find((candidate) => candidate.slug === wanted) || null;
+  return {
+    settings: site.publishedSettings,
+    pages: pages.map(({ content, ...meta }) => ({ ...meta, summary: content.summary, cover: content.cover, date: content.date })),
+    page,
+  };
 }
 
 // --- Domains ----------------------------------------------------------------

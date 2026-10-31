@@ -18,6 +18,18 @@ import { cleanString } from "./_shared/values.mts";
 //
 // The work is in billing-api.mts (Online shop), next to the till it reuses.
 
+/** A same-origin path (/shop, /riverside/site/shop), or "" for anything else. */
+export function cleanReturnPath(value: unknown): string {
+  const path = cleanString(value, "", 300);
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return "";
+  try {
+    const url = new URL(path, "https://example.invalid");
+    return url.origin === "https://example.invalid" ? url.pathname : "";
+  } catch {
+    return "";
+  }
+}
+
 async function readBody(req: Request) {
   try {
     const raw = await req.text();
@@ -37,10 +49,14 @@ export default async function handler(req: Request) {
 
     if (!action && req.method === "GET") return json(await publicOnlineShop(account.id));
     if (action === "checkout" && req.method === "POST") {
+      const body = await readBody(req);
       return json(
-        await startOnlineOrder(account.id, await readBody(req), {
+        await startOnlineOrder(account.id, body, {
           origin: url.origin,
           business: account.slug || business,
+          // A page of the business's website may ask to get the buyer back.
+          // A path on this origin only: never another host.
+          returnPath: cleanReturnPath(body.returnPath),
         }),
       );
     }

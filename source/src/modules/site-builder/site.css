@@ -822,3 +822,191 @@ h3.site-heading {
     display: grid;
   }
 }
+
+/* --- Pages --------------------------------------------------------------- */
+
+.site-nav a[aria-current="page"] {
+  color: var(--site-primary);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+
+.site-root.is-busy .site-main {
+  opacity: 0.6;
+}
+
+.site-missing {
+  padding-block: var(--site-section-gap);
+  text-align: center;
+}
+
+.site-article-date {
+  margin: 0;
+  color: var(--site-muted);
+  font-size: 0.95rem;
+}
+
+.site-article-date + .site-block {
+  margin-top: calc(var(--site-section-gap) * -0.6);
+}
+
+/* --- Articles ------------------------------------------------------------ */
+
+.site-article-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 24px;
+}
+
+.site-article-card {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border-radius: var(--site-radius);
+  background: var(--site-surface);
+  text-decoration: none;
+  color: inherit;
+}
+
+.site-article-card img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.site-article-card-body {
+  display: grid;
+  gap: 6px;
+  padding: 20px 22px 24px;
+}
+
+.site-article-card time {
+  color: var(--site-muted);
+  font-size: 0.85rem;
+}
+
+.site-article-card strong {
+  font-family: var(--site-heading-font);
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+.site-article-card-body > span {
+  color: var(--site-muted);
+}
+
+/* --- Shop ---------------------------------------------------------------- */
+
+.site-shop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+}
+
+.site-shop-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px;
+  border: 1px solid var(--site-line);
+  border-radius: var(--site-radius);
+  background: var(--site-surface);
+}
+
+.site-shop-card strong {
+  font-family: var(--site-heading-font);
+  font-size: 1.2rem;
+}
+
+.site-shop-card p,
+.site-shop-detail {
+  color: var(--site-muted);
+}
+
+.site-shop-price {
+  font-family: var(--site-heading-font);
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.site-shop-card .site-button {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.site-shop-form {
+  display: grid;
+  gap: 14px;
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid var(--site-line);
+  border-radius: var(--site-radius);
+  background: var(--site-surface);
+}
+
+.site-shop-form-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.site-shop-form-head strong {
+  font-family: var(--site-heading-font);
+  font-size: 1.2rem;
+  margin-right: auto;
+}
+
+.site-shop-change {
+  border: 0;
+  background: transparent;
+  color: var(--site-muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.site-shop-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.95rem;
+}
+
+.site-shop-form input,
+.site-shop-form textarea {
+  /* The order form's fields fill their card: a visitor's form on the
+     business's page, not a coach-app field sized to its content. */
+  inline-size: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--site-line);
+  border-radius: calc(var(--site-radius) * 0.6);
+  background: var(--site-bg);
+  color: var(--site-text);
+  font: inherit;
+}
+
+.site-shop-note {
+  margin: 0;
+  color: var(--site-muted);
+  font-size: 0.95rem;
+}
+
+.site-shop-error {
+  margin: 0;
+  color: var(--site-accent);
+}
+
+.site-shop-receipt {
+  display: grid;
+  gap: 10px;
+  width: min(560px, 100%);
+  padding: 28px;
+  border-radius: var(--site-radius);
+  background: var(--site-surface);
+}
+
+.site-shop-code code {
+  font-size: 1.3rem;
+  letter-spacing: 0.08em;
+}

@@ -1,9 +1,10 @@
-// A page, drawn.
+// A page of a site, drawn.
 //
 // The one renderer for both the editor's preview and the public page. In
-// preview mode a click on a block selects it instead of following links, and
-// the heavy embeds (booking widget, map) are stood in for by a labelled box
-// so the preview stays light and never books anything.
+// preview mode a click on a block selects it instead of following links, a
+// click on a page link switches the editor to that page, and the heavy
+// embeds (booking widget, map) are stood in for by a labelled box so the
+// preview stays light and never books anything.
 
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import {
@@ -31,28 +32,48 @@ import {
   Youtube,
   Zap,
 } from "lucide-react";
-import type {
-  SiteBlock,
-  SiteButton,
-  SiteDocument,
-  SiteFeatureIcon,
-  SiteSocialKind,
+import {
+  HOME_PAGE_SLUG,
+  pageSlugFromHref,
+  type SiteBlock,
+  type SiteButton,
+  type SiteFeatureIcon,
+  type SitePage,
+  type SitePageCard,
+  type SiteSettings,
+  type SiteSocialKind,
 } from "../../../netlify/functions/_shared/site/document.mts";
+import { ShopBlock } from "./ShopBlock";
 import { bookingPageUrl, siteThemeClassName, siteThemeStyle } from "./siteTheme";
 
 export type SiteBusiness = { slug: string; name: string; logo: string; showLogo: boolean };
 
-export type SiteSelection = "page" | "header" | "footer" | { block: string };
+export type SiteSelection = "site" | "header" | "footer" | "page" | { block: string };
+
+export type PreviewLabels = { booking: string; map: string; shop: string; noArticles: string; noPage: string };
 
 export type SiteRendererProps = {
-  document: SiteDocument;
+  settings: SiteSettings;
+  page: SitePage;
+  /** Every page of the site, in menu order: the menu and the article index read it. */
+  pages: SitePageCard[];
   business: SiteBusiness;
   /** "preview" inside the editor; "public" on the page itself. */
   mode: "preview" | "public";
+  /** Where a page of the site lives, as a path for its links. */
+  pagePath: (slug: string) => string;
+  /** A click on a page of the site. The preview switches page; the public page fetches it in place. */
+  onNavigate?: (slug: string) => void;
   selected?: SiteSelection;
   onSelect?: (selection: SiteSelection) => void;
-  /** Preview only: the words on the stand-in boxes, in the coach's language. */
-  previewLabels?: { booking: string; map: string };
+  /** The words on the stand-in boxes, in the coach's language. Preview only. */
+  previewLabels?: PreviewLabels;
+  /** Public only: the query the page was opened with, so the shop can pick up a returning order. */
+  returnQuery?: URLSearchParams;
+  /** Public only: the address names no page. The header and footer still draw around a note. */
+  missingPage?: boolean;
+  /** Public only: the next page is on its way. */
+  busy?: boolean;
 };
 
 const FEATURE_ICONS: Record<SiteFeatureIcon, typeof Flag> = {
@@ -89,7 +110,15 @@ function isSelected(selected: SiteSelection | undefined, target: SiteSelection) 
   return selected.block === target.block;
 }
 
-const external = (href: string) => (/^https?:/.test(href) ? { target: "_blank", rel: "noreferrer" } : {});
+/** A date as the visitor's browser writes it. */
+export function formatSiteDate(date: string): string {
+  if (!date) return "";
+  try {
+    return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  } catch {
+    return date;
+  }
+}
 
 /** Paragraphs from text: blank lines separate them, single newlines break. */
 function Paragraphs({ text, className = "" }: { text: string; className?: string }) {
@@ -111,25 +140,51 @@ function Paragraphs({ text, className = "" }: { text: string; className?: string
   );
 }
 
-function Button({ button, className = "" }: { button: SiteButton | null; className?: string }) {
-  if (!button) return null;
-  const classes = `site-button is-${button.style} ${className}`.trim();
-  if (!button.href) return <span className={`${classes} is-unlinked`}>{button.label}</span>;
-  return (
-    <a className={classes} href={button.href} {...external(button.href)}>
-      {button.label}
-    </a>
-  );
-}
-
 function Heading({ level, text, className = "" }: { level: 1 | 2 | 3; text: string; className?: string }) {
   if (!text) return null;
   const Tag = `h${level}` as const;
   return <Tag className={`site-heading ${className}`.trim()}>{text}</Tag>;
 }
 
-export function SiteRenderer({ document, business, mode, selected, onSelect, previewLabels }: SiteRendererProps) {
+type LinkProps = { href: string; onClick?: (event: MouseEvent) => void; target?: string; rel?: string };
+
+/** How every link on the page is drawn: a page of the site, or somewhere else. */
+function makeLinkProps(pagePath: (slug: string) => string, onNavigate?: (slug: string) => void) {
+  return (href: string): LinkProps => {
+    const slug = pageSlugFromHref(href);
+    if (slug) {
+      return {
+        href: pagePath(slug),
+        onClick: onNavigate
+          ? (event) => {
+              event.preventDefault();
+              onNavigate(slug);
+            }
+          : undefined,
+      };
+    }
+    if (/^https?:/.test(href)) return { href, target: "_blank", rel: "noreferrer" };
+    return { href: href || "#" };
+  };
+}
+
+export function SiteRenderer({
+  settings,
+  page,
+  pages,
+  business,
+  mode,
+  pagePath,
+  onNavigate,
+  selected,
+  onSelect,
+  previewLabels,
+  returnQuery,
+  missingPage,
+  busy,
+}: SiteRendererProps) {
   const preview = mode === "preview";
+  const linkProps = makeLinkProps(pagePath, onNavigate);
   const select = (selection: SiteSelection) => (event: MouseEvent) => {
     if (!preview || !onSelect) return;
     event.preventDefault();
@@ -147,12 +202,25 @@ export function SiteRenderer({ document, business, mode, selected, onSelect, pre
     </div>
   );
 
-  const { header, footer, theme } = document;
+  const Button = ({ button, className = "" }: { button: SiteButton | null; className?: string }) => {
+    if (!button) return null;
+    const classes = `site-button is-${button.style} ${className}`.trim();
+    if (!button.href) return <span className={`${classes} is-unlinked`}>{button.label}</span>;
+    return (
+      <a className={classes} {...linkProps(button.href)}>
+        {button.label}
+      </a>
+    );
+  };
+
+  const { header, footer, theme } = settings;
   const showBrand = header.showLogo && business.showLogo && business.logo;
+  const menu = pages.filter((candidate) => candidate.inNav).sort((a, b) => a.sortOrder - b.sortOrder);
+  const returnPath = pagePath(page.slug);
 
   return (
     <div
-      className={`${siteThemeClassName(theme)} ${preview ? "is-preview" : ""}`}
+      className={`${siteThemeClassName(theme)} ${preview ? "is-preview" : ""}${busy ? " is-busy" : ""}`}
       style={siteThemeStyle(theme)}
       // In the preview every link is inert: the coach is editing, not browsing.
       onClickCapture={preview ? (event) => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); } : undefined}
@@ -161,14 +229,19 @@ export function SiteRenderer({ document, business, mode, selected, onSelect, pre
         "header",
         `site-header${header.sticky ? " is-sticky" : ""}`,
         <div className="site-container site-header-inner">
-          <a className="site-brand" href="#top">
+          <a className="site-brand" {...linkProps(`page:${HOME_PAGE_SLUG}`)}>
             {showBrand ? <img className="site-brand-logo" src={business.logo} alt="" /> : null}
             {header.showName || !showBrand ? <span className="site-brand-name">{business.name}</span> : null}
           </a>
-          {header.links.length ? (
+          {menu.length > 1 || header.links.length ? (
             <nav className="site-nav" aria-label="Site">
+              {menu.map((entry) => (
+                <a key={entry.slug} aria-current={entry.slug === page.slug ? "page" : undefined} {...linkProps(`page:${entry.slug}`)}>
+                  {entry.title || entry.slug}
+                </a>
+              ))}
               {header.links.map((link, index) => (
-                <a href={link.href || "#"} key={index} {...external(link.href)}>
+                <a key={`link-${index}`} {...linkProps(link.href)}>
                   {link.label}
                 </a>
               ))}
@@ -180,14 +253,35 @@ export function SiteRenderer({ document, business, mode, selected, onSelect, pre
       )}
 
       <main className="site-main">
-        {document.blocks.map((block) =>
-          frame(
-            { block: block.id },
-            `site-block site-block-${block.type}`,
-            <Block block={block} business={business} preview={preview} previewLabels={previewLabels} />,
-            block.id,
-          ),
-        )}
+        {missingPage ? (
+          <section className="site-container site-missing">
+            <h1 className="site-heading">{previewLabels?.noPage || "There is no page here"}</h1>
+          </section>
+        ) : null}
+        {!missingPage && page.kind === "article" && page.content.date ? (
+          <p className="site-container site-article-date">{formatSiteDate(page.content.date)}</p>
+        ) : null}
+        {!missingPage
+          ? page.content.blocks.map((block) =>
+              frame(
+                { block: block.id },
+                `site-block site-block-${block.type}`,
+                <Block
+                  block={block}
+                  page={page}
+                  pages={pages}
+                  business={business}
+                  preview={preview}
+                  previewLabels={previewLabels}
+                  linkProps={linkProps}
+                  Button={Button}
+                  returnPath={returnPath}
+                  returnQuery={returnQuery}
+                />,
+                block.id,
+              ),
+            )
+          : null}
       </main>
 
       {frame(
@@ -198,7 +292,7 @@ export function SiteRenderer({ document, business, mode, selected, onSelect, pre
           {footer.links.length ? (
             <nav className="site-footer-links" aria-label="Footer">
               {footer.links.map((link, index) => (
-                <a href={link.href || "#"} key={index} {...external(link.href)}>
+                <a key={index} {...linkProps(link.href)}>
                   {link.label}
                 </a>
               ))}
@@ -231,14 +325,26 @@ export function SiteRenderer({ document, business, mode, selected, onSelect, pre
 
 function Block({
   block,
+  page,
+  pages,
   business,
   preview,
   previewLabels,
+  linkProps,
+  Button,
+  returnPath,
+  returnQuery,
 }: {
   block: SiteBlock;
+  page: SitePage;
+  pages: SitePageCard[];
   business: SiteBusiness;
   preview: boolean;
-  previewLabels?: { booking: string; map: string };
+  previewLabels?: PreviewLabels;
+  linkProps: (href: string) => LinkProps;
+  Button: (props: { button: SiteButton | null; className?: string }) => ReactNode;
+  returnPath: string;
+  returnQuery?: URLSearchParams;
 }) {
   switch (block.type) {
     case "hero": {
@@ -460,6 +566,48 @@ function Block({
         </section>
       );
     }
+    case "shop":
+      return (
+        <section className="site-container site-shop">
+          <div className="site-section-head">
+            <Heading level={2} text={block.heading} />
+            <Paragraphs text={block.intro} className="site-intro" />
+          </div>
+          <ShopBlock block={block} business={business} preview={preview} previewLabel={previewLabels?.shop || "Shop"} returnPath={returnPath} returnQuery={returnQuery} />
+        </section>
+      );
+    case "articles": {
+      const articles = pages
+        .filter((candidate) => candidate.kind === "article" && candidate.slug !== page.slug)
+        .sort((a, b) => (b.date || "").localeCompare(a.date || "") || a.sortOrder - b.sortOrder)
+        .slice(0, block.limit);
+      return (
+        <section className="site-container site-articles">
+          <div className="site-section-head">
+            <Heading level={2} text={block.heading} />
+            <Paragraphs text={block.intro} className="site-intro" />
+          </div>
+          {articles.length ? (
+            <div className="site-article-grid">
+              {articles.map((article) => (
+                <a className="site-article-card" key={article.slug} {...linkProps(`page:${article.slug}`)}>
+                  {article.cover ? <img src={article.cover.url} alt={article.cover.alt} loading="lazy" /> : null}
+                  <span className="site-article-card-body">
+                    {article.date ? <time dateTime={article.date}>{formatSiteDate(article.date)}</time> : null}
+                    <strong>{article.title || article.slug}</strong>
+                    {article.summary ? <span>{article.summary}</span> : null}
+                  </span>
+                </a>
+              ))}
+            </div>
+          ) : preview ? (
+            <div className="site-placeholder">
+              <span>{previewLabels?.noArticles || "No articles yet"}</span>
+            </div>
+          ) : null}
+        </section>
+      );
+    }
     case "contact":
       return (
         <section className="site-container site-contact">
@@ -518,3 +666,4 @@ function Block({
       return null;
   }
 }
+
