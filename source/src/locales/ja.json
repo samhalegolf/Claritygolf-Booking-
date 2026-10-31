@@ -4789,5 +4789,6 @@
   "{count} more for your next lessons, whenever you like.": "次のレッスン用にあと{count}回分。いつでもご利用いただけます。",
   "Buy package · {amount}": "パッケージを購入 · {amount}",
   "Package bought": "パッケージを購入しました",
-  "Your coach will put it towards this lesson.": "コーチがこのレッスンに適用します。"
+  "Your coach will put it towards this lesson.": "コーチがこのレッスンに適用します。",
+  "Confirm & pay {amount}": "確定して{amount}を支払う"
 }

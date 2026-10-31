@@ -3031,9 +3031,10 @@
   opacity: 0.6;
 }
 
-/* "Who's paying?" under a group's price, and "Pay now / on the day" after
-   booking: the same pair of large choices. */
-.booking-group-payment {
+/* "Who's paying?" under a group's price, and "Pay now / on the day" before
+   the confirm button and again after booking: the same pair of large choices. */
+.booking-group-payment,
+.booking-pay-choice {
   display: grid;
   gap: 8px;
   margin: 6px 0 0;
@@ -3041,7 +3042,12 @@
   border: 0;
 }
 
-.booking-group-payment legend {
+.booking-pay-choice {
+  margin: 14px 0 4px;
+}
+
+.booking-group-payment legend,
+.booking-pay-choice legend {
   margin-bottom: 6px;
   font-size: var(--c-size-meta);
   font-weight: 700;
