@@ -61,14 +61,12 @@ export function ShopBlock({
   block,
   business,
   preview,
-  previewLabel,
   returnPath,
   returnQuery,
 }: {
   block: SiteShopBlock;
   business: SiteBusiness;
   preview: boolean;
-  previewLabel: string;
   /** This page's path, where the buyer comes back to after paying. */
   returnPath: string;
   returnQuery?: URLSearchParams;
@@ -151,14 +149,8 @@ export function ShopBlock({
   }
 
   if (block.mode === "embed") {
-    if (preview) {
-      return (
-        <div className="site-placeholder is-embed" style={{ height: Math.min(block.height, 420) }}>
-          <span>{previewLabel}</span>
-        </div>
-      );
-    }
-    return <iframe className="site-booking-frame" src={shopPageUrl(business.slug)} title={block.heading || "Shop"} allow="payment" style={{ height: block.height }} loading="lazy" />;
+    const frame = <iframe className="site-booking-frame" src={shopPageUrl(business.slug)} title={block.heading || "Shop"} allow="payment" style={{ height: block.height }} loading="lazy" />;
+    return preview ? <div className="site-frame-inert">{frame}</div> : frame;
   }
 
   if (order) {

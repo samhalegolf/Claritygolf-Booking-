@@ -1629,3 +1629,15 @@ h3.site-heading {
 .site-shop-address {
   white-space: pre-line;
 }
+
+/* --- Frames in the editor ----------------------------------------------------- */
+
+/* The preview shows the real booking page, map or embed, but a click on it
+   lands on the block (to select it), never inside the frame. */
+.site-frame-inert {
+  position: relative;
+}
+
+.site-frame-inert > iframe {
+  pointer-events: none;
+}

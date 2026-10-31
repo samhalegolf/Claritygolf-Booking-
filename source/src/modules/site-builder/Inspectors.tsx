@@ -13,6 +13,8 @@ import {
   cleanPageSlug,
   siteId,
   themeFromPreset,
+  MAX_EMBED_CODE,
+  embedSource,
   type SiteBlock,
   type SiteBlockStyle,
   type SiteFooter,
@@ -151,6 +153,12 @@ export function PageInspector({
       />
       {slugTaken ? <p className="workspace-save-error">{t("Another page already has this address.")}</p> : null}
       <TextArea label={t("Description for search engines")} value={content.description} rows={3} maxLength={300} onChange={(description) => setContent({ description })} />
+      <details className="site-list-item site-section-style">
+        <summary>{t("Search and sharing: title and picture")}</summary>
+        <TextInput label={t("Title for search results and the browser tab")} value={content.seoTitle} maxLength={120} onChange={(seoTitle) => setContent({ seoTitle })} help={t("Leave empty for the page's name and your business name.")} />
+        <ImageInput label={t("Picture when shared")} value={content.socialImage} onChange={(socialImage) => setContent({ socialImage })} onError={onError} />
+        <p className="site-field-help">{t("Shown by Facebook, WhatsApp and the like when this page's link is shared. Leave empty for the cover picture or your logo.")}</p>
+      </details>
       {!isHome ? <ToggleInput label={t("Show in the menu")} checked={page.inNav} onChange={(inNav) => onChange({ ...page, inNav })} /> : null}
       {!isHome ? (
         <SelectInput
@@ -711,7 +719,18 @@ function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: 
         <>
           <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
           <TextArea label={t("Text")} value={block.text} rows={2} maxLength={600} onChange={(text) => set({ text })} />
-          <TextInput label={t("Address to frame")} value={block.url} maxLength={2000} placeholder="https://…" onChange={(url) => set({ url })} help={t("Another website's booking form, map or player. It must be an https address, and some sites refuse to be framed.")} />
+          <TextArea
+            label={t("Embed code or address")}
+            value={block.code || block.url}
+            rows={4}
+            maxLength={MAX_EMBED_CODE}
+            onChange={(pasted) => {
+              // An <iframe> snippet gives up its address and height; other code is kept whole.
+              const source = embedSource(pasted);
+              set({ url: source.url, code: source.code, height: source.height || block.height });
+            }}
+            help={t("Paste the embed code another website gave you (an <iframe> or a script), or just its https address. Pasted code runs in a frame of its own and cannot see this page.")}
+          />
           <NumberInput label={t("Height in pixels")} value={block.height} min={200} max={1600} step={20} onChange={(height) => set({ height })} />
         </>
       );
@@ -753,7 +772,17 @@ function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: 
                   ]}
                 />
                 {item.booking === "none" ? (
-                  <TextInput label={t("Address to frame")} value={item.embedUrl} maxLength={2000} placeholder="https://…" onChange={(embedUrl) => update({ embedUrl })} />
+                  <TextArea
+                    label={t("Embed code or address")}
+                    value={item.embedUrl}
+                    rows={3}
+                    maxLength={MAX_EMBED_CODE}
+                    onChange={(pasted) => {
+                      const source = embedSource(pasted);
+                      update({ embedUrl: source.url, ...(source.height ? { height: source.height } : {}) });
+                    }}
+                    help={t("Another booking system's form: paste its <iframe> code or its https address.")}
+                  />
                 ) : null}
                 <NumberInput label={t("Height in pixels")} value={item.height} min={480} max={1600} step={20} onChange={(height) => update({ height })} />
               </>

@@ -37,7 +37,7 @@ import { SettingsGroup } from "../settings/SettingsLayout";
 import { BLOCK_CATALOG, blockCatalogEntry } from "./blockCatalog";
 import { DomainPanel } from "./DomainPanel";
 import { BlockInspector, FooterInspector, HeaderInspector, PageInspector, SiteInspector } from "./Inspectors";
-import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState } from "./siteApi";
+import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState, importSite } from "./siteApi";
 import { SitePreviewFrame } from "./SitePreviewFrame";
 import { SiteRenderer, type PreviewLabels, type SiteSelection } from "./SiteRenderer";
 import { bookingPageUrl } from "./siteTheme";
@@ -109,7 +109,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   const [currentSlug, setCurrentSlug] = useState(HOME_PAGE_SLUG);
   const [selected, setSelected] = useState<SiteSelection>("page");
   const [device, setDevice] = useState<"desktop" | "phone">("desktop");
-  const [busy, setBusy] = useState<"" | "save" | "publish" | "unpublish">("");
+  const [busy, setBusy] = useState<"" | "save" | "publish" | "unpublish" | "import">("");
   const [choosingTemplate, setChoosingTemplate] = useState(false);
   const [choosingPage, setChoosingPage] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -204,6 +204,32 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       applySaved(await unpublishSite(), draft);
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not take the page down."));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const [importUrl, setImportUrl] = useState("");
+  const [importPreset, setImportPreset] = useState("classic");
+  const [importReport, setImportReport] = useState<string[]>([]);
+
+  async function importFromUrl() {
+    if (!state || !importUrl.trim()) return;
+    if (draft && !window.confirm(t("Replace the whole site with the one at this address? Every page you have made here is lost."))) return;
+    setBusy("import");
+    setImportReport([]);
+    try {
+      const result = await importSite(importUrl.trim(), importPreset);
+      const next = draftFromViews(result.site.settings, result.pages);
+      applySaved(result, next);
+      setImportReport(result.report);
+      setCurrentSlug(HOME_PAGE_SLUG);
+      setSelected("page");
+      setChoosingTemplate(false);
+      onEditingChange(true);
+      onToast(result.report[0] || t("The site came over."));
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : t("The site could not be brought over."));
     } finally {
       setBusy("");
     }
@@ -320,10 +346,6 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
 
   const previewLabels = useMemo<PreviewLabels>(
     () => ({
-      booking: t("Your booking page shows here"),
-      map: t("A map shows here"),
-      shop: t("Your shop shows here"),
-      embed: t("The framed page shows here"),
       noArticles: t("No articles yet. Add one with Add page › Article."),
       noVideos: t("No videos yet. Add one with Add page › Video."),
       noPage: t("There is no page here"),
@@ -375,6 +397,30 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
             </button>
           );
         })}
+      </div>
+      <div className="site-import">
+        <h4 className="site-inspector-subtitle">{t("Or bring over a site you already have")}</h4>
+        <p className="settings-note">{t("A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.")}</p>
+        <div className="site-import-row">
+          <input value={importUrl} placeholder="https://www.yoursite.com" maxLength={300} onChange={(event) => setImportUrl(event.target.value)} />
+          <select value={importPreset} onChange={(event) => setImportPreset(event.target.value)} aria-label={t("Look")}>
+            {state.templates.map((template) => (
+              <option key={template.id} value={template.preset}>
+                {template.label}
+              </option>
+            ))}
+          </select>
+          <button className="primary-button" type="button" disabled={busy !== "" || !importUrl.trim()} onClick={() => void importFromUrl()}>
+            {busy === "import" ? t("Bringing it over…") : t("Import")}
+          </button>
+        </div>
+        {importReport.length ? (
+          <ul className="site-import-report">
+            {importReport.map((line, index) => (
+              <li key={index}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       {draft ? (
         <button className="outline-button" type="button" onClick={() => setChoosingTemplate(false)}>

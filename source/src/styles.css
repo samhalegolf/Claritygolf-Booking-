@@ -18721,3 +18721,28 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Bringing a site over from elsewhere, under the template chooser. */
+.site-import {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--c-border);
+}
+
+.site-import-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.site-import-row input {
+  flex: 1 1 260px;
+}
+
+.site-import-report {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--c-muted);
+  font-size: 0.92rem;
+}
