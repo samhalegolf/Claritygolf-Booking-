@@ -289,7 +289,7 @@ function pageLink(pathname: string): string {
  * each is a Logos block whatever it is called.
  */
 export function blocksOfSection(section: { theme: string; background: string; html: string }, options: { bookingSlug: string; first: boolean; report: string[]; siteName?: string; instagram?: string }): Imported[] {
-  const pieces = piecesOf(section.html);
+  const pieces = piecesOf(section.html).filter((piece) => !(piece.kind === "image" && piece.src === section.background));
   const style: Partial<SiteBlockStyle> = { ...styleFor(section.theme), ...(section.background ? { background: image(section.background), overlay: 40 } : {}) };
   const headings = pieces.filter((piece) => piece.kind === "heading");
   const paragraphs = pieces.filter((piece) => piece.kind === "paragraph");
@@ -367,7 +367,7 @@ export function blocksOfSection(section: { theme: string; background: string; ht
       block: { id: id("contact"), type: "contact", heading: headings[0].text, text: rest.slice(0, 600), email, phone, address: "", hours: "", showMap: false, style },
       images: [],
     });
-    for (const frame of frames) out.push(frameBlock(frame.src, options.bookingSlug, headings[0].text, style, id));
+    for (const frame of frames) out.push(frameBlock(frame.src, options.bookingSlug, "", style, id));
     return out;
   }
 
@@ -401,7 +401,7 @@ export function blocksOfSection(section: { theme: string; background: string; ht
     const heading = headings[0]?.text || "";
     const link = buttons[0];
     if (/review|feedback|testimonial|say/i.test(heading)) {
-      const items = images.slice(0, 12).map((piece) => ({ id: id("review"), quote: "", name: piece.alt.replace(/\s*review\s*$/i, "").trim(), role: "", image: image(piece.src, piece.alt) }));
+      const items = images.slice(0, 12).map((piece) => ({ id: id("review"), quote: "", name: reviewerName(piece), role: "", image: image(piece.src, piece.alt) }));
       out.push({ block: { id: id("reviews"), type: "testimonials", heading, intro: "", items, button: link ? button(link.label, link.href) : null, style }, images: items.map((item) => item.image!.url) });
     } else {
       const pictures = images.slice(0, 12).map((piece) => ({ url: piece.src, alt: piece.alt }));
@@ -467,6 +467,15 @@ export function hoursGroups(hours: string): string[] {
     if (day >= 0) last = day;
   }
   return groups.map((group) => group.join("\n"));
+}
+
+/** Who a review screenshot is from: its alt text, or the file's name ("Les+Laban+Review") when the alt is only "Google Review". */
+function reviewerName(piece: Extract<Piece, { kind: "image" }>): string {
+  const fromAlt = piece.alt.replace(/\b(google|facebook|customer)?\s*reviews?\b/gi, "").trim();
+  if (fromAlt) return fromAlt.slice(0, 80);
+  const file = decodeURIComponent(piece.src.split("/").pop() || "").replace(/\+/g, " ").replace(/\.[a-z0-9]+$/i, "");
+  const fromFile = file.replace(/\b(google|facebook|customer)?\s*reviews?\b/gi, "").replace(/[-_]/g, " ").trim();
+  return /^[A-Za-z][A-Za-z .'-]{1,60}$/.test(fromFile) && !/^(image asset|screenshot)/i.test(fromFile) ? fromFile : "";
 }
 
 function hostOf(href: string): string {
@@ -806,11 +815,8 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
   for (const link of header.links) {
     const href = mapHref(link.href);
     const slug = href.startsWith("page:") ? href.slice(5) : "";
-    if (slug && slugs.has(slug)) {
-      inNav.add(slug);
-      const page = pages.find((candidate) => candidate.slug === slug);
-      if (page && link.label) page.title = link.label.slice(0, 120);
-    } else if (href && !href.startsWith("page:")) extraLinks.push({ label: link.label, href });
+    if (slug && slugs.has(slug)) inNav.add(slug);
+    else if (href && !href.startsWith("page:")) extraLinks.push({ label: link.label, href });
   }
   const order = (page: (typeof pages)[number]) => {
     if (page.slug === HOME_PAGE_SLUG) return -1;
