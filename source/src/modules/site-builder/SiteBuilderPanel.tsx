@@ -1,10 +1,15 @@
 // Settings › Website: build the business's public page.
 //
-// Three columns: the blocks on the page (add, reorder, remove), the page
-// itself drawn live in a frame (click anything to select it), and the fields
-// of whatever is selected. Save keeps a draft nobody else sees; Publish makes
-// it the page at /<business>/site and on the business's own domain.
-import { ArrowDown, ArrowUp, Copy, Eye, Globe, Monitor, PanelBottom, PanelTop, Plus, Smartphone, Trash2 } from "lucide-react";
+// Two ways of looking at it. At rest the tab shows the page as it stands,
+// full width, with Edit top left. Edit takes the whole settings pane: the
+// settings sub-nav steps aside (the app's sidebar stays), and the editor
+// gets three columns: the blocks on the page (add, reorder, remove), the
+// page itself drawn live in a frame (click anything to select it), and the
+// fields of whatever is selected. Done returns to the resting view; an
+// unsaved draft is kept and still shown there. Save keeps a draft nobody
+// else sees; Publish makes it the page at /<business>/site and on the
+// business's own domain.
+import { ArrowDown, ArrowUp, Check, Copy, Eye, Globe, Monitor, PanelBottom, PanelTop, Pencil, Plus, Smartphone, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { googleFontsUrl, newSiteBlock, type SiteBlock, type SiteBlockType, type SiteDocument } from "../../../netlify/functions/_shared/site/document.mts";
@@ -48,7 +53,16 @@ function blockSnippet(block: SiteBlock): string {
 
 const sameDocument = (a: SiteDocument | null, b: SiteDocument | null) => JSON.stringify(a) === JSON.stringify(b);
 
-export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo }: { onToast: (message: string) => void; brandLogo: string; brandShowLogo: boolean }) {
+export type SiteBuilderPanelProps = {
+  onToast: (message: string) => void;
+  brandLogo: string;
+  brandShowLogo: boolean;
+  /** True while the editor has the whole pane. The page owns this so it can step the sub-nav aside. */
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
+};
+
+export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, editing, onEditingChange }: SiteBuilderPanelProps) {
   const [state, setState] = useState<SiteState | null>(null);
   const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState<SiteDocument | null>(null);
@@ -160,6 +174,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo }: 
     setDraft(document);
     setSelected("page");
     setChoosingTemplate(false);
+    // A fresh page is for editing, not admiring.
+    onEditingChange(true);
     setBusy("save");
     try {
       const page = await saveSiteDraft(document);
@@ -278,6 +294,154 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo }: 
     </div>
   );
 
+  const status = (
+    <div className="site-builder-status">
+      <strong>{state.page?.isPublished ? t("Published") : t("Not published")}</strong>
+      <span>{dirty ? t("Unsaved changes") : state.page?.isPublished && state.page.updatedAt > (state.page.publishedAt || "") ? t("Saved draft is newer than the published page") : t("Saved")}</span>
+    </div>
+  );
+
+  const saveButton = (
+    <button className="outline-button" type="button" onClick={() => void save()} disabled={busy !== "" || !dirty}>
+      {busy === "save" ? t("Saving...") : t("Save")}
+    </button>
+  );
+
+  const publishButton = (
+    <button className="primary-button" type="button" onClick={() => void publish()} disabled={busy !== ""}>
+      <Eye size={16} />
+      {busy === "publish" ? t("Publishing…") : t("Publish")}
+    </button>
+  );
+
+  // --- Editing: the whole pane -------------------------------------------------
+
+  if (editing && draft && !choosingTemplate) {
+    return (
+      <article className="data-card settings-section settings-website site-editor-full">
+        <div className="site-builder">
+          <div className="site-builder-toolbar">
+            <button className="outline-button" type="button" onClick={() => onEditingChange(false)}>
+              <Check size={16} />
+              {t("Done")}
+            </button>
+            {status}
+            <div className="site-builder-devices" role="group" aria-label={t("Preview size")}>
+              <button type="button" className={`icon-button${device === "desktop" ? " is-active" : ""}`} aria-label={t("Desktop")} onClick={() => setDevice("desktop")}>
+                <Monitor size={16} />
+              </button>
+              <button type="button" className={`icon-button${device === "phone" ? " is-active" : ""}`} aria-label={t("Phone")} onClick={() => setDevice("phone")}>
+                <Smartphone size={16} />
+              </button>
+            </div>
+            <div className="site-inline-actions">
+              <button className="outline-button" type="button" onClick={() => setChoosingTemplate(true)} disabled={busy !== ""}>
+                {t("Start again")}
+              </button>
+              {state.page?.isPublished ? (
+                <button className="outline-button" type="button" onClick={() => void unpublish()} disabled={busy !== ""}>
+                  {busy === "unpublish" ? t("Taking down…") : t("Take down")}
+                </button>
+              ) : null}
+              {saveButton}
+              {publishButton}
+            </div>
+          </div>
+
+          <div className="site-builder-grid">
+            <aside className="site-outline" aria-label={t("Blocks on the page")}>
+              <button type="button" className={`site-outline-row is-fixed${selected === "page" ? " is-selected" : ""}`} onClick={() => setSelected("page")}>
+                <Globe size={15} />
+                <span>{t("Page and look")}</span>
+              </button>
+              <button type="button" className={`site-outline-row is-fixed${selected === "header" ? " is-selected" : ""}`} onClick={() => setSelected("header")}>
+                <PanelTop size={15} />
+                <span>{t("Header")}</span>
+              </button>
+              <ol className="site-outline-list">
+                {draft.blocks.map((block, index) => {
+                  const entry = blockCatalogEntry(block.type);
+                  const isSelected = typeof selected === "object" && selected.block === block.id;
+                  return (
+                    <li key={block.id} className={`site-outline-row${isSelected ? " is-selected" : ""}`}>
+                      <button type="button" className="site-outline-main" onClick={() => setSelected({ block: block.id })}>
+                        <entry.Icon size={15} />
+                        <span>
+                          <strong>{entry.label}</strong>
+                          {blockSnippet(block) ? <em>{blockSnippet(block)}</em> : null}
+                        </span>
+                      </button>
+                      <span className="site-outline-actions">
+                        <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index === 0} onClick={() => moveBlock(block.id, -1)}>
+                          <ArrowUp size={14} />
+                        </button>
+                        <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === draft.blocks.length - 1} onClick={() => moveBlock(block.id, 1)}>
+                          <ArrowDown size={14} />
+                        </button>
+                        <button type="button" className="icon-button" aria-label={t("Duplicate")} onClick={() => duplicateBlock(block.id)}>
+                          <Copy size={14} />
+                        </button>
+                        <button type="button" className="icon-button" aria-label={t("Remove")} onClick={() => removeBlock(block.id)}>
+                          <Trash2 size={14} />
+                        </button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+              <div className="site-add">
+                <button type="button" className="outline-button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)}>
+                  <Plus size={16} />
+                  {t("Add a block")}
+                </button>
+                {addMenuOpen ? (
+                  <div className="site-add-menu" role="menu">
+                    {BLOCK_CATALOG.map((entry) => (
+                      <button type="button" role="menuitem" key={entry.type} onClick={() => addBlock(entry.type)}>
+                        <entry.Icon size={16} />
+                        <span>
+                          <strong>{entry.label}</strong>
+                          <em>{entry.hint}</em>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <button type="button" className={`site-outline-row is-fixed${selected === "footer" ? " is-selected" : ""}`} onClick={() => setSelected("footer")}>
+                <PanelBottom size={15} />
+                <span>{t("Footer")}</span>
+              </button>
+            </aside>
+
+            <div className={`site-preview is-${device}`}>
+              <SitePreviewFrame fontsUrl={fontsUrl} width={device === "phone" ? PHONE_WIDTH : "100%"} title={t("Preview")}>
+                <SiteRenderer document={draft} business={business} mode="preview" selected={selected} onSelect={setSelected} previewLabels={previewLabels} />
+              </SitePreviewFrame>
+            </div>
+
+            <aside className="site-inspector">
+              {selected === "page" ? <PageInspector document={draft} onChange={update} /> : null}
+              {selected === "header" ? <HeaderInspector header={draft.header} onChange={(header) => update({ ...draft, header })} bookingHref={bookingHref} /> : null}
+              {selected === "footer" ? <FooterInspector footer={draft.footer} onChange={(footer) => update({ ...draft, footer })} /> : null}
+              {selectedBlock ? (
+                <>
+                  <h3 className="site-inspector-title">{blockCatalogEntry(selectedBlock.type).label}</h3>
+                  <p className="site-field-help">
+                    {t("Link to this block with")} <code>#{selectedBlock.id}</code>
+                  </p>
+                  <BlockInspector block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} bookingHref={bookingHref} onError={onToast} />
+                </>
+              ) : null}
+            </aside>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  // --- At rest: the page, and where it lives ----------------------------------
+
   return (
     <>
       <SettingsGroup id="website" icon={Globe} section="website" title={t("Website")} className="site-builder-card">
@@ -287,123 +451,20 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo }: 
         ) : (
           <div className="site-builder">
             <div className="site-builder-toolbar">
-              <div className="site-builder-status">
-                <strong>{state.page?.isPublished ? t("Published") : t("Not published")}</strong>
-                <span>{dirty ? t("Unsaved changes") : state.page?.isPublished && state.page.updatedAt > (state.page.publishedAt || "") ? t("Saved draft is newer than the published page") : t("Saved")}</span>
-              </div>
-              <div className="site-builder-devices" role="group" aria-label={t("Preview size")}>
-                <button type="button" className={`icon-button${device === "desktop" ? " is-active" : ""}`} aria-label={t("Desktop")} onClick={() => setDevice("desktop")}>
-                  <Monitor size={16} />
-                </button>
-                <button type="button" className={`icon-button${device === "phone" ? " is-active" : ""}`} aria-label={t("Phone")} onClick={() => setDevice("phone")}>
-                  <Smartphone size={16} />
-                </button>
-              </div>
+              <button className="primary-button" type="button" onClick={() => onEditingChange(true)}>
+                <Pencil size={16} />
+                {t("Edit")}
+              </button>
+              {status}
               <div className="site-inline-actions">
-                <button className="outline-button" type="button" onClick={() => setChoosingTemplate(true)} disabled={busy !== ""}>
-                  {t("Start again")}
-                </button>
-                {state.page?.isPublished ? (
-                  <button className="outline-button" type="button" onClick={() => void unpublish()} disabled={busy !== ""}>
-                    {busy === "unpublish" ? t("Taking down…") : t("Take down")}
-                  </button>
-                ) : null}
-                <button className="outline-button" type="button" onClick={() => void save()} disabled={busy !== "" || !dirty}>
-                  {busy === "save" ? t("Saving...") : t("Save")}
-                </button>
-                <button className="primary-button" type="button" onClick={() => void publish()} disabled={busy !== ""}>
-                  <Eye size={16} />
-                  {busy === "publish" ? t("Publishing…") : t("Publish")}
-                </button>
+                {dirty ? saveButton : null}
+                {publishButton}
               </div>
             </div>
-
-            <div className="site-builder-grid">
-              <aside className="site-outline" aria-label={t("Blocks on the page")}>
-                <button type="button" className={`site-outline-row is-fixed${selected === "page" ? " is-selected" : ""}`} onClick={() => setSelected("page")}>
-                  <Globe size={15} />
-                  <span>{t("Page and look")}</span>
-                </button>
-                <button type="button" className={`site-outline-row is-fixed${selected === "header" ? " is-selected" : ""}`} onClick={() => setSelected("header")}>
-                  <PanelTop size={15} />
-                  <span>{t("Header")}</span>
-                </button>
-                <ol className="site-outline-list">
-                  {draft.blocks.map((block, index) => {
-                    const entry = blockCatalogEntry(block.type);
-                    const isSelected = typeof selected === "object" && selected.block === block.id;
-                    return (
-                      <li key={block.id} className={`site-outline-row${isSelected ? " is-selected" : ""}`}>
-                        <button type="button" className="site-outline-main" onClick={() => setSelected({ block: block.id })}>
-                          <entry.Icon size={15} />
-                          <span>
-                            <strong>{entry.label}</strong>
-                            {blockSnippet(block) ? <em>{blockSnippet(block)}</em> : null}
-                          </span>
-                        </button>
-                        <span className="site-outline-actions">
-                          <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index === 0} onClick={() => moveBlock(block.id, -1)}>
-                            <ArrowUp size={14} />
-                          </button>
-                          <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === draft.blocks.length - 1} onClick={() => moveBlock(block.id, 1)}>
-                            <ArrowDown size={14} />
-                          </button>
-                          <button type="button" className="icon-button" aria-label={t("Duplicate")} onClick={() => duplicateBlock(block.id)}>
-                            <Copy size={14} />
-                          </button>
-                          <button type="button" className="icon-button" aria-label={t("Remove")} onClick={() => removeBlock(block.id)}>
-                            <Trash2 size={14} />
-                          </button>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-                <div className="site-add">
-                  <button type="button" className="outline-button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)}>
-                    <Plus size={16} />
-                    {t("Add a block")}
-                  </button>
-                  {addMenuOpen ? (
-                    <div className="site-add-menu" role="menu">
-                      {BLOCK_CATALOG.map((entry) => (
-                        <button type="button" role="menuitem" key={entry.type} onClick={() => addBlock(entry.type)}>
-                          <entry.Icon size={16} />
-                          <span>
-                            <strong>{entry.label}</strong>
-                            <em>{entry.hint}</em>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <button type="button" className={`site-outline-row is-fixed${selected === "footer" ? " is-selected" : ""}`} onClick={() => setSelected("footer")}>
-                  <PanelBottom size={15} />
-                  <span>{t("Footer")}</span>
-                </button>
-              </aside>
-
-              <div className={`site-preview is-${device}`}>
-                <SitePreviewFrame fontsUrl={fontsUrl} width={device === "phone" ? PHONE_WIDTH : "100%"} title={t("Preview")}>
-                  <SiteRenderer document={draft} business={business} mode="preview" selected={selected} onSelect={setSelected} previewLabels={previewLabels} />
-                </SitePreviewFrame>
-              </div>
-
-              <aside className="site-inspector">
-                {selected === "page" ? <PageInspector document={draft} onChange={update} /> : null}
-                {selected === "header" ? <HeaderInspector header={draft.header} onChange={(header) => update({ ...draft, header })} bookingHref={bookingHref} /> : null}
-                {selected === "footer" ? <FooterInspector footer={draft.footer} onChange={(footer) => update({ ...draft, footer })} /> : null}
-                {selectedBlock ? (
-                  <>
-                    <h3 className="site-inspector-title">{blockCatalogEntry(selectedBlock.type).label}</h3>
-                    <p className="site-field-help">
-                      {t("Link to this block with")} <code>#{selectedBlock.id}</code>
-                    </p>
-                    <BlockInspector block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} bookingHref={bookingHref} onError={onToast} />
-                  </>
-                ) : null}
-              </aside>
+            <div className="site-preview is-desktop is-resting">
+              <SitePreviewFrame fontsUrl={fontsUrl} width="100%" title={t("Preview")}>
+                <SiteRenderer document={draft} business={business} mode="preview" previewLabels={previewLabels} />
+              </SitePreviewFrame>
             </div>
           </div>
         )}

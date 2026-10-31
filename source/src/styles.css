@@ -447,6 +447,12 @@
   padding: 0;
 }
 
+/* The website editor open: one pane, no sub-nav column. The sub-nav itself
+   is not drawn (App.tsx), so this only stops the grid reserving its space. */
+.settings-page.is-full-pane {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 @media (max-width: 820px) {
   .settings-page,
   .billing-page {
