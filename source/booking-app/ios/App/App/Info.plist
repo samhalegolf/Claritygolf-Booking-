@@ -76,5 +76,9 @@
 	<string>Clarity Voice turns what you say into commands and notes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Clarity Booking saves snapshots and videos you choose to keep to your photo library.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Stripe needs to know where card payments are taken to protect against fraud. Location is only used while you take a payment.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Clarity Booking uses Bluetooth to connect to supported card readers.</string>
 </dict>
 </plist>
