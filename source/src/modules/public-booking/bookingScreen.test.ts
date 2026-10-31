@@ -6,6 +6,7 @@ import {
   currentPublicBookingScreenId,
   publicBookingPath,
   publicBookingRoute,
+  publicSiteBusiness,
 } from "./bookingScreen";
 
 test("a public booking path names its business, then its screen", () => {
@@ -34,4 +35,14 @@ test("public booking service fallback keeps legacy main services and excludes ex
   assert.equal(appearsOnCurrentPublicBookingScreen({}, "/sam-hale-golf"), true);
   assert.equal(appearsOnCurrentPublicBookingScreen({ bookingScreenIds: [] }, "/sam-hale-golf"), false);
   assert.equal(appearsOnCurrentPublicBookingScreen({ bookingScreenIds: ["main"] }, "/sam-hale-golf"), true);
+});
+
+test("a business's website page is /<business>/site, and nothing else is", () => {
+  assert.equal(publicSiteBusiness("/riverside/site"), "riverside");
+  assert.equal(publicSiteBusiness("/Riverside/Site/"), "riverside");
+  assert.equal(publicSiteBusiness("/riverside"), "");
+  assert.equal(publicSiteBusiness("/riverside/shop"), "");
+  assert.equal(publicSiteBusiness("/riverside/site/extra"), "");
+  assert.equal(publicSiteBusiness("/group-lessons/site"), "", "a booking screen is not a business");
+  assert.equal(publicSiteBusiness("/"), "");
 });

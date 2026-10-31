@@ -34,3 +34,13 @@ interface ImportMeta {
  * place that reads it.
  */
 declare const __CLARITY_NATIVE__: boolean;
+
+/**
+ * A stylesheet as a string, for the one place that needs it: the website
+ * editor's preview frame inlines site.css into a document of its own rather
+ * than linking it, so the preview is never a request behind the page.
+ */
+declare module "*.css?inline" {
+  const css: string;
+  export default css;
+}

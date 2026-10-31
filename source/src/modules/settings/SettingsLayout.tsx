@@ -1,4 +1,4 @@
-import { Check, FlaskConical, Pencil, Webhook, X } from "lucide-react";
+import { Check, FlaskConical, Globe, Pencil, Webhook, X } from "lucide-react";
 import {
   createContext,
   type ReactNode,
@@ -406,6 +406,10 @@ export const SETTINGS_SECTIONS: Array<{
 }> = [
   { key: "business", label: t("Business"), icon: ClarityFacilitiesRooms, adminOnly: true },
   { key: "booking", label: t("Booking"), icon: ClarityCalendar },
+  // The business's public page: built from blocks, published at
+  // /<business>/site and on the business's own domain. Admin only, because
+  // it is the business's public face.
+  { key: "website", label: t("Website"), icon: Globe, adminOnly: true },
   { key: "services", label: t("Lesson types"), icon: ClarityServices },
   { key: "practice", label: t("Practice"), icon: ClarityLessonsProgrammes },
   // Two questions, two sections. Notifications is "what do we say" — the
@@ -438,6 +442,7 @@ export type SettingsTab =
   | "none"
   | "business"
   | "booking"
+  | "website"
   | "services"
   | "practice"
   | "notifications"

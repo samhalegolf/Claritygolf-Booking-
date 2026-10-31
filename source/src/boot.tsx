@@ -10,7 +10,8 @@ import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { isTerminalPath } from "./modules/clarity-terminal/terminalApi";
-import { publicShopBusiness } from "./modules/public-booking/bookingScreen";
+import { publicShopBusiness, publicSiteBusiness } from "./modules/public-booking/bookingScreen";
+import { isClarityHost } from "../netlify/functions/_shared/site/document.mts";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { prefetchCalendarState } from "./modules/workspace/calendarStatePrefetch";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
@@ -47,12 +48,25 @@ const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingRevi
 const ClarityTerminalPage = lazy(() => import("./modules/clarity-terminal/ClarityTerminalPage"));
 const ConfirmEmailScreen = lazy(() => import("./modules/auth/ConfirmEmailScreen"));
 const PaymentReturnPage = lazy(() => import("./modules/public-site/PaymentReturnPage"));
+// A business's own public page (Settings › Website). Drawn at
+// /<business>/site on Clarity's hosts, and at every path of a domain a
+// business has pointed here. It never loads the app stylesheet.
+const PublicSitePage = lazy(() => import("./modules/site-builder/PublicSitePage"));
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
 // Sandbox only, and inert until switched on in Settings › Sandbox.
 const IndustryLeakDetector = lazy(() => import("./modules/sandbox/IndustryLeakDetector"));
 import { t } from "./lib/i18n";
+
+// A hostname that is not Clarity's is a business's own domain, verified and
+// attached in Settings › Website, and the only thing it serves is that
+// business's page. Decided before everything else: on such a domain there is
+// no login, no booking widget and no Clarity home page to fall through to.
+const customDomainHost = isClarityHost(window.location.hostname) ? "" : window.location.hostname;
+// The same page on Clarity's own hosts, at /<business>/site.
+const publicSiteSlug = customDomainHost ? "" : publicSiteBusiness();
+const publicSite = Boolean(customDomainHost || publicSiteSlug);
 
 // The booking embed is public by design -- it is the widget clients book
 // through. It wins over everything below, including any session.
@@ -122,7 +136,7 @@ const publicPage: PublicPage | null =
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
 const willCheckSession =
-  !publicPage && !paymentReturn && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
+  !publicSite && !publicPage && !paymentReturn && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
 if (willCheckSession && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
@@ -165,7 +179,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicPage || paymentReturn || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
+    if (publicSite || publicPage || paymentReturn || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -194,6 +208,14 @@ function Root() {
   // revoked cookie), which drops straight back to the login screen instead of
   // leaving a workspace on screen that can no longer save anything.
   const handleSessionLost = useCallback(() => setSession(guestSession), []);
+
+  if (publicSite) {
+    return (
+      <Suspense fallback={<Loading size="screen" label="" />}>
+        <PublicSitePage business={publicSiteSlug || undefined} host={customDomainHost || undefined} />
+      </Suspense>
+    );
+  }
 
   if (paymentReturn) {
     return (

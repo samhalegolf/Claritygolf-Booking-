@@ -1,0 +1,583 @@
+/* Settings › Website: the editor's own chrome. The page being edited draws
+   with site.css inside its frame; nothing here reaches it. */
+
+.site-builder-card .settings-group-body {
+  max-width: none;
+}
+
+.site-builder {
+  display: grid;
+  gap: 14px;
+}
+
+.site-builder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.site-builder-status {
+  display: grid;
+  margin-right: auto;
+  line-height: 1.25;
+}
+
+.site-builder-status span {
+  color: var(--c-muted);
+  font-size: 13px;
+}
+
+.site-builder-devices {
+  display: flex;
+  gap: 2px;
+}
+
+.site-builder-devices .icon-button.is-active {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.site-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.site-builder-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 320px;
+  gap: 14px;
+  min-height: 70vh;
+}
+
+/* --- Outline --------------------------------------------------------------- */
+
+.site-outline {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.site-outline-list {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-outline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 6px 0 10px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-outline-row.is-fixed {
+  font-weight: 600;
+}
+
+.site-outline-row:hover {
+  background: var(--c-hover);
+}
+
+.site-outline-row.is-selected {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.site-outline-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-outline-main > span {
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.site-outline-main em {
+  overflow: hidden;
+  font-style: normal;
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.site-outline-actions {
+  display: none;
+  flex: none;
+  gap: 0;
+}
+
+.site-outline-row:hover .site-outline-actions,
+.site-outline-row.is-selected .site-outline-actions {
+  display: flex;
+}
+
+.site-outline-actions .icon-button,
+.site-list-item-actions .icon-button {
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  color: inherit;
+}
+
+.site-add {
+  position: relative;
+  margin: 4px 0 6px;
+}
+
+.site-add-menu {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 300px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
+  display: grid;
+  gap: 2px;
+}
+
+.site-add-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-add-menu button:hover {
+  background: var(--c-hover);
+}
+
+.site-add-menu button span {
+  display: grid;
+  line-height: 1.2;
+}
+
+.site-add-menu em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+/* --- Preview --------------------------------------------------------------- */
+
+.site-preview {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-page);
+  overflow: auto;
+}
+
+.site-preview-frame {
+  display: block;
+  height: calc(70vh - 28px);
+  min-height: 520px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: white;
+  max-width: 100%;
+}
+
+/* --- Inspector --------------------------------------------------------------- */
+
+.site-inspector {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 2px 4px 2px 0;
+}
+
+.site-inspector-title {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+.site-inspector-subtitle {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--c-text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.site-field input,
+.site-field select,
+.site-field textarea {
+  width: var(--c-w-prose);
+}
+
+.site-field textarea {
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.site-field-help,
+.site-inspector .site-field-help {
+  margin: 0;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+.site-fieldset {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 10px;
+}
+
+.site-fieldset legend {
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--c-text-soft);
+}
+
+.site-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.site-colours {
+  display: grid;
+  gap: 6px;
+}
+
+.site-colour {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.site-colour input {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.site-colour code {
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+.site-presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.site-preset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.site-preset.is-active {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+
+.site-preset-swatches,
+.site-template-art {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.site-preset-swatches i,
+.site-template-art i {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgb(0 0 0 / 0.12);
+}
+
+.site-image-field {
+  display: grid;
+  gap: 8px;
+}
+
+.site-image-field-label {
+  font-size: 13px;
+  color: var(--c-text-soft);
+}
+
+.site-image-field-preview {
+  width: var(--c-w-prose);
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--c-border-soft);
+}
+
+.site-image-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.site-list {
+  display: grid;
+  gap: 6px;
+}
+
+.site-list-item {
+  border: 1px solid var(--c-border-soft);
+  border-radius: 10px;
+}
+
+.site-list-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 6px 0 12px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.site-list-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.site-list-item summary > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.site-list-item-actions {
+  display: flex;
+  flex: none;
+}
+
+.site-list-item-body {
+  display: grid;
+  gap: 10px;
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--c-border-soft);
+}
+
+/* --- Templates --------------------------------------------------------------- */
+
+.site-templates {
+  display: grid;
+  gap: 14px;
+}
+
+.site-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.site-template {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-template:hover {
+  border-color: var(--c-accent);
+}
+
+.site-template strong {
+  font-size: 16px;
+}
+
+.site-template > span:last-child {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* --- Domains ----------------------------------------------------------------- */
+
+.site-domains {
+  display: grid;
+  gap: 12px;
+}
+
+.site-address-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.site-address-row > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.site-address-row > div:first-child span {
+  font-size: 13px;
+  color: var(--c-text-soft);
+}
+
+.site-address-row code {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.site-domain {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+}
+
+.site-domain-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.site-domain-head > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.site-domain-status {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--c-hover);
+  color: var(--c-text-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.site-domain-status.is-active {
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+}
+
+.site-domain-status.is-failed {
+  background: var(--c-danger-wash);
+  color: var(--c-error-text);
+}
+
+.site-dns-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.site-dns-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--c-text-soft);
+  padding: 4px 8px 4px 0;
+}
+
+.site-dns-table td {
+  padding: 6px 8px 6px 0;
+  border-top: 1px solid var(--c-border-soft);
+  vertical-align: top;
+}
+
+.site-dns-table code {
+  word-break: break-all;
+  margin-right: 4px;
+}
+
+.site-domain-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--c-text-soft);
+}
+
+.site-domain-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.site-domain-add input {
+  width: var(--c-w-email);
+}
+
+/* --- Small screens ------------------------------------------------------------ */
+
+@media (max-width: 1180px) {
+  .site-builder-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .site-outline {
+    grid-template-columns: 1fr;
+  }
+
+  .site-preview-frame {
+    height: 60vh;
+    min-height: 420px;
+  }
+
+  .site-inspector {
+    max-height: none;
+  }
+}
