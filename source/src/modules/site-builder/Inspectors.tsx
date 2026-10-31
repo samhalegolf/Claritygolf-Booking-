@@ -14,10 +14,12 @@ import {
   siteId,
   themeFromPreset,
   type SiteBlock,
+  type SiteBlockStyle,
   type SiteFooter,
   type SiteHeader,
   type SitePage,
   type SiteSettings,
+  type SiteSocialLink,
   type SiteTheme,
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
@@ -186,7 +188,10 @@ export function HeaderInspector({ header, onChange, pages, bookingHref }: { head
       <ToggleInput label={t("Show your logo")} checked={header.showLogo} onChange={(showLogo) => onChange({ ...header, showLogo })} />
       <ToggleInput label={t("Show your business name")} checked={header.showName} onChange={(showName) => onChange({ ...header, showName })} />
       <ToggleInput label={t("Stays at the top while scrolling")} checked={header.sticky} onChange={(sticky) => onChange({ ...header, sticky })} />
+      <ToggleInput label={t("Sits over the first block, with no background of its own")} checked={header.transparent} onChange={(transparent) => onChange({ ...header, transparent })} />
       <p className="site-field-help">{t("The logo is the one under Settings › Business › Business branding.")}</p>
+      <h4 className="site-inspector-subtitle">{t("Social")}</h4>
+      <SocialList links={header.social} onChange={(social) => onChange({ ...header, social })} />
       <p className="site-field-help">{t("The menu lists every page marked \"Show in the menu\", in the order of the page list. Add extra links here.")}</p>
       <h4 className="site-inspector-subtitle">{t("Extra links")}</h4>
       <LinkList links={header.links} onChange={(links) => onChange({ ...header, links })} pages={pages} bookingHref={bookingHref} />
@@ -204,27 +209,83 @@ export function FooterInspector({ footer, onChange, pages, bookingHref }: { foot
       <h4 className="site-inspector-subtitle">{t("Links")}</h4>
       <LinkList links={footer.links} onChange={(links) => onChange({ ...footer, links })} pages={pages} bookingHref={bookingHref} />
       <h4 className="site-inspector-subtitle">{t("Social")}</h4>
-      <ListEditor
-        items={footer.social.map((entry, index) => ({ ...entry, id: `social-${index}` }))}
-        onChange={(items) => onChange({ ...footer, social: items.map(({ kind, url }) => ({ kind, url })) })}
-        max={6}
-        addLabel={t("Add a social link")}
-        create={() => ({ id: siteId("social"), kind: "instagram" as const, url: "" })}
-        itemLabel={(item) => item.kind}
-        render={(item, update) => (
-          <>
-            <SelectInput
-              label={t("Network")}
-              value={item.kind}
-              onChange={(kind) => update({ kind })}
-              options={SITE_SOCIAL_KINDS.map((kind) => ({ value: kind, label: kind }))}
-            />
-            <TextInput label={t("Address")} value={item.url} maxLength={2000} placeholder="https://…" onChange={(url) => update({ url })} />
-          </>
-        )}
-      />
+      <SocialList links={footer.social} onChange={(social) => onChange({ ...footer, social })} />
       <ToggleInput label={t("Show \"Made with Clarity\"")} checked={footer.showCredit} onChange={(showCredit) => onChange({ ...footer, showCredit })} />
     </>
+  );
+}
+
+function SocialList({ links, onChange }: { links: SiteSocialLink[]; onChange: (next: SiteSocialLink[]) => void }) {
+  return (
+    <ListEditor
+      items={links.map((entry, index) => ({ ...entry, id: `social-${index}` }))}
+      onChange={(items) => onChange(items.map(({ kind, url }) => ({ kind, url })))}
+      max={6}
+      addLabel={t("Add a social link")}
+      create={() => ({ id: siteId("social"), kind: "instagram" as const, url: "" })}
+      itemLabel={(item) => item.kind}
+      render={(item, update) => (
+        <>
+          <SelectInput label={t("Network")} value={item.kind} onChange={(kind) => update({ kind })} options={SITE_SOCIAL_KINDS.map((kind) => ({ value: kind, label: kind }))} />
+          <TextInput label={t("Address")} value={item.url} maxLength={2000} placeholder="https://…" onChange={(url) => update({ url })} />
+        </>
+      )}
+    />
+  );
+}
+
+/**
+ * How a block sits on the page: its own colours, a picture or video behind
+ * it, how tall it is and how wide its content runs. The same fields on every
+ * block, folded shut so the block's own fields come first.
+ */
+function SectionStyleFields({ style, onChange, onError }: { style: SiteBlockStyle; onChange: (next: SiteBlockStyle) => void; onError: (message: string) => void }) {
+  const set = (patch: Partial<SiteBlockStyle>) => onChange({ ...style, ...patch });
+  return (
+    <details className="site-list-item site-section-style">
+      <summary>
+        <span>{t("Section: colours, backdrop and size")}</span>
+      </summary>
+      <div className="site-list-item-body">
+        <SelectInput
+          label={t("Colours")}
+          value={style.theme}
+          onChange={(theme) => set({ theme })}
+          options={[
+            { value: "default", label: t("Same as the page") },
+            { value: "light", label: t("Light panel") },
+            { value: "white", label: t("White") },
+            { value: "dark", label: t("Dark") },
+            { value: "accent", label: t("Button colour") },
+          ]}
+        />
+        <ImageInput label={t("Picture behind the block")} value={style.background} onChange={(background) => set({ background })} onError={onError} />
+        <TextInput label={t("Video behind the block")} value={style.video} maxLength={2000} placeholder="https://…/clip.mp4" onChange={(video) => set({ video })} help={t("An mp4 or webm address. It plays muted, on a loop; the picture above is shown while it loads.")} />
+        <NumberInput label={t("Darken the backdrop, percent")} value={style.overlay} min={0} max={90} step={5} onChange={(overlay) => set({ overlay })} />
+        <SelectInput
+          label={t("Height")}
+          value={style.height}
+          onChange={(height) => set({ height })}
+          options={[
+            { value: "auto", label: t("Fits its content") },
+            { value: "small", label: t("Small") },
+            { value: "medium", label: t("Medium") },
+            { value: "large", label: t("Large") },
+          ]}
+        />
+        <SelectInput
+          label={t("Content width")}
+          value={style.width}
+          onChange={(width) => set({ width })}
+          options={[
+            { value: "inherit", label: t("Same as the page") },
+            { value: "narrow", label: t("Narrow") },
+            { value: "regular", label: t("Regular") },
+            { value: "wide", label: t("Wide") },
+          ]}
+        />
+      </div>
+    </details>
   );
 }
 
@@ -310,6 +371,15 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
 }
 
 export function BlockInspector({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
+  return (
+    <>
+      <BlockFields block={block} onChange={onChange} pages={pages} bookingHref={bookingHref} onError={onError} />
+      <SectionStyleFields style={block.style} onChange={(style) => onChange({ ...block, style })} onError={onError} />
+    </>
+  );
+}
+
+function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
   const set = <B extends SiteBlock>(patch: Partial<B>) => onChange({ ...block, ...patch } as SiteBlock);
   switch (block.type) {
     case "hero":
@@ -402,6 +472,71 @@ export function BlockInspector({ block, onChange, pages, bookingHref, onError }:
             itemLabel={(item, index) => item.alt || `${t("Picture")} ${index + 1}`}
             render={(item, update) => <ImageInput label={t("Picture")} value={item.url ? { url: item.url, alt: item.alt } : null} onChange={(image) => update(image ? { url: image.url, alt: image.alt } : { url: "", alt: "" })} onError={onError} />}
           />
+          <ButtonInput label={t("Add a button")} value={block.button} onChange={(button) => set({ button })} pages={pages} bookingHref={bookingHref} />
+        </>
+      );
+    case "cards":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
+          <SelectInput
+            label={t("Columns")}
+            value={String(block.columns)}
+            onChange={(columns) => set({ columns: Number(columns) as 2 | 3 | 4 })}
+            options={[
+              { value: "2", label: "2" },
+              { value: "3", label: "3" },
+              { value: "4", label: "4" },
+            ]}
+          />
+          <ListEditor
+            items={block.items}
+            onChange={(items) => set({ items })}
+            max={8}
+            addLabel={t("Add a card")}
+            create={() => ({ id: siteId("item"), image: null, title: t("New card"), text: "", button: { label: t("Book now"), href: bookingHref, style: "primary" as const } })}
+            itemLabel={(item) => item.title}
+            render={(item, update) => (
+              <>
+                <ImageInput label={t("Picture")} value={item.image} onChange={(image) => update({ image })} onError={onError} />
+                <TextInput label={t("Title")} value={item.title} maxLength={80} onChange={(title) => update({ title })} />
+                <TextArea label={t("Text")} value={item.text} rows={3} maxLength={400} onChange={(text) => update({ text })} />
+                <ButtonInput label={t("Add a button")} value={item.button} onChange={(button) => update({ button })} pages={pages} bookingHref={bookingHref} />
+              </>
+            )}
+          />
+        </>
+      );
+    case "logos":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
+          <SelectInput
+            label={t("Size")}
+            value={block.size}
+            onChange={(size) => set({ size })}
+            options={[
+              { value: "small", label: t("Small") },
+              { value: "regular", label: t("Regular") },
+            ]}
+          />
+          <ListEditor
+            items={block.items}
+            onChange={(items) => set({ items })}
+            max={8}
+            addLabel={t("Add a logo")}
+            create={() => ({ id: siteId("item"), image: null, caption: "", href: "" })}
+            itemLabel={(item) => item.caption}
+            render={(item, update) => (
+              <>
+                <ImageInput label={t("Picture")} value={item.image} onChange={(image) => update({ image })} onError={onError} />
+                <TextInput label={t("Caption")} value={item.caption} maxLength={80} onChange={(caption) => update({ caption })} />
+                <LinkInput label={t("Goes to")} value={item.href} onChange={(href) => update({ href })} pages={pages} bookingHref={bookingHref} />
+              </>
+            )}
+          />
         </>
       );
     case "features":
@@ -464,21 +599,24 @@ export function BlockInspector({ block, onChange, pages, bookingHref, onError }:
       return (
         <>
           <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
           <ListEditor
             items={block.items}
             onChange={(items) => set({ items })}
-            max={9}
+            max={12}
             addLabel={t("Add a quote")}
-            create={() => ({ id: siteId("item"), quote: "", name: "", role: "" })}
-            itemLabel={(item) => item.name || item.quote}
+            create={() => ({ id: siteId("item"), quote: "", name: "", role: "", image: null })}
+            itemLabel={(item) => item.name || item.quote || (item.image ? t("Picture") : "")}
             render={(item, update) => (
               <>
                 <TextArea label={t("Quote")} value={item.quote} rows={4} maxLength={600} onChange={(quote) => update({ quote })} />
                 <TextInput label={t("Name")} value={item.name} maxLength={80} onChange={(name) => update({ name })} />
                 <TextInput label={t("Detail")} value={item.role} maxLength={80} placeholder={t("Member since 2024")} onChange={(role) => update({ role })} />
+                <ImageInput label={t("Picture, or a screenshot of the review")} value={item.image} onChange={(image) => update({ image })} onError={onError} />
               </>
             )}
           />
+          <ButtonInput label={t("Add a button")} value={block.button} onChange={(button) => set({ button })} pages={pages} bookingHref={bookingHref} />
         </>
       );
     case "faq":
@@ -525,6 +663,72 @@ export function BlockInspector({ block, onChange, pages, bookingHref, onError }:
           <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
           <TextInput label={t("YouTube link")} value={block.youtubeId} maxLength={400} placeholder="https://youtu.be/…" onChange={(youtubeId) => set({ youtubeId })} help={t("Paste the video's address. Only the video id is kept.")} />
           <TextInput label={t("Caption")} value={block.caption} maxLength={300} onChange={(caption) => set({ caption })} />
+        </>
+      );
+    case "embed":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Text")} value={block.text} rows={2} maxLength={600} onChange={(text) => set({ text })} />
+          <TextInput label={t("Address to frame")} value={block.url} maxLength={2000} placeholder="https://…" onChange={(url) => set({ url })} help={t("Another website's booking form, map or player. It must be an https address, and some sites refuse to be framed.")} />
+          <NumberInput label={t("Height in pixels")} value={block.height} min={200} max={1600} step={20} onChange={(height) => set({ height })} />
+        </>
+      );
+    case "venues":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
+          <SelectInput
+            label={t("Columns")}
+            value={String(block.columns)}
+            onChange={(columns) => set({ columns: columns === "1" ? 1 : 2 })}
+            options={[
+              { value: "1", label: "1" },
+              { value: "2", label: "2" },
+            ]}
+          />
+          <ListEditor
+            items={block.items}
+            onChange={(items) => set({ items })}
+            max={6}
+            addLabel={t("Add a venue")}
+            create={() => ({ id: siteId("item"), name: t("New venue"), address: "", hours: "", text: "", showMap: true, booking: "main" as const, embedUrl: "", height: 760 })}
+            itemLabel={(item) => item.name}
+            render={(item, update) => (
+              <>
+                <TextInput label={t("Name")} value={item.name} maxLength={120} onChange={(name) => update({ name })} />
+                <TextInput label={t("Address")} value={item.address} maxLength={300} onChange={(address) => update({ address })} />
+                <ToggleInput label={t("Show a map of the address")} checked={item.showMap} onChange={(showMap) => update({ showMap })} />
+                <TextArea label={t("Opening hours")} value={item.hours} rows={4} maxLength={600} onChange={(hours) => update({ hours })} />
+                <TextArea label={t("Text")} value={item.text} rows={2} maxLength={600} onChange={(text) => update({ text })} />
+                <SelectInput
+                  label={t("Booking here")}
+                  value={item.booking}
+                  onChange={(booking) => update({ booking })}
+                  options={[
+                    { value: "none" as const, label: t("None, or another system (below)") },
+                    ...SITE_BOOKING_SCREENS.map((screen) => ({ value: screen, label: BOOKING_SCREENS.find((candidate) => candidate.id === screen)?.label || screen })),
+                  ]}
+                />
+                {item.booking === "none" ? (
+                  <TextInput label={t("Address to frame")} value={item.embedUrl} maxLength={2000} placeholder="https://…" onChange={(embedUrl) => update({ embedUrl })} />
+                ) : null}
+                <NumberInput label={t("Height in pixels")} value={item.height} min={480} max={1600} step={20} onChange={(height) => update({ height })} />
+              </>
+            )}
+          />
+        </>
+      );
+    case "form":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Text")} value={block.text} rows={2} maxLength={600} onChange={(text) => set({ text })} />
+          <ToggleInput label={t("Ask for a phone number")} checked={block.askPhone} onChange={(askPhone) => set({ askPhone })} />
+          <TextInput label={t("Button text")} value={block.buttonLabel} maxLength={60} onChange={(buttonLabel) => set({ buttonLabel })} />
+          <TextArea label={t("After sending")} value={block.thanks} rows={2} maxLength={300} onChange={(thanks) => set({ thanks })} />
+          <p className="site-field-help">{t("Messages are emailed to your business contact address (Settings › Business) and kept.")}</p>
         </>
       );
     case "booking":
@@ -598,8 +802,8 @@ export function BlockInspector({ block, onChange, pages, bookingHref, onError }:
         <>
           <SelectInput
             label={t("Style")}
-            value={block.style}
-            onChange={(style) => set({ style })}
+            value={block.line}
+            onChange={(line) => set({ line })}
             options={[
               { value: "line", label: t("Line") },
               { value: "space", label: t("Gap") },

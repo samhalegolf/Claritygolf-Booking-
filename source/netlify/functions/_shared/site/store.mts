@@ -324,6 +324,26 @@ export async function readPublishedSite(accountId: string, slug: string): Promis
   };
 }
 
+// --- Messages from the contact form -----------------------------------------
+
+export type SiteFormMessage = { name: string; email: string; phone: string; message: string; pageSlug: string };
+
+/** Keep a stranger's message. Returns its id, which the email carries as its idempotency key. */
+export async function saveSiteFormMessage(accountId: string, input: SiteFormMessage): Promise<string> {
+  if (!accountId) throw new Error("saveSiteFormMessage: accountId is required");
+  const id = `msg-${token(9)}`;
+  await db().sql`
+    INSERT INTO site_form_messages (id, account_id, page_slug, name, email, phone, message)
+    VALUES (${id}, ${accountId}, ${input.pageSlug}, ${input.name}, ${input.email}, ${input.phone}, ${input.message})
+  `;
+  return id;
+}
+
+export async function markSiteFormMessageEmailed(accountId: string, id: string): Promise<void> {
+  if (!accountId || !id) return;
+  await db().sql`UPDATE site_form_messages SET emailed = true WHERE account_id = ${accountId} AND id = ${id}`;
+}
+
 // --- Domains ----------------------------------------------------------------
 
 export async function listSiteDomains(accountId: string): Promise<SiteDomainRecord[]> {

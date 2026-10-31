@@ -43,6 +43,7 @@ export type SiteFontId =
   | "dm-sans"
   | "manrope"
   | "nunito"
+  | "poppins"
   | "montserrat"
   | "space-grotesk"
   | "oswald"
@@ -66,6 +67,7 @@ export const SITE_FONTS: readonly SiteFont[] = [
   { id: "dm-sans", label: "DM Sans", family: "'DM Sans', ui-sans-serif, system-ui, sans-serif", google: "DM+Sans:wght@400;500;600;700" },
   { id: "manrope", label: "Manrope", family: "'Manrope', ui-sans-serif, system-ui, sans-serif", google: "Manrope:wght@400;500;600;700;800" },
   { id: "nunito", label: "Nunito", family: "'Nunito', ui-sans-serif, system-ui, sans-serif", google: "Nunito:wght@400;600;700;800" },
+  { id: "poppins", label: "Poppins", family: "'Poppins', ui-sans-serif, system-ui, sans-serif", google: "Poppins:wght@400;500;600;700" },
   { id: "montserrat", label: "Montserrat", family: "'Montserrat', ui-sans-serif, system-ui, sans-serif", google: "Montserrat:wght@400;500;600;700;800" },
   { id: "space-grotesk", label: "Space Grotesk", family: "'Space Grotesk', ui-sans-serif, system-ui, sans-serif", google: "Space+Grotesk:wght@400;500;600;700" },
   { id: "oswald", label: "Oswald", family: "'Oswald', ui-sans-serif, system-ui, sans-serif", google: "Oswald:wght@400;500;600;700" },
@@ -182,6 +184,19 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
       width: "narrow",
       buttons: "outline",
       spacing: "airy",
+    },
+  },
+  {
+    id: "ember",
+    label: "Ember",
+    theme: {
+      headingFont: "manrope",
+      bodyFont: "poppins",
+      colors: { background: "#ffffff", surface: "#dfe7f7", text: "#000000", muted: "#4a5057", primary: "#fe914d", onPrimary: "#ffffff", accent: "#282d30" },
+      corners: "sharp",
+      width: "wide",
+      buttons: "filled",
+      spacing: "regular",
     },
   },
   {
@@ -349,6 +364,56 @@ function cleanList<T>(value: unknown, max: number, clean: (entry: Record<string,
     .filter((entry): entry is T => entry !== null);
 }
 
+// --- Section style ----------------------------------------------------------
+
+/**
+ * How a block sits on the page: its own colour theme, a picture or a video
+ * behind it with a darkening overlay, a minimum height, and a content width.
+ * Every block has one; the defaults are "nothing special".
+ */
+export type SiteBlockStyle = {
+  theme: "default" | "light" | "white" | "dark" | "accent";
+  background: SiteImage | null;
+  /** An https address of an mp4 or webm, played muted on a loop behind the block. */
+  video: string;
+  /** How much the picture or video is darkened, 0 to 90 percent. */
+  overlay: number;
+  height: "auto" | "small" | "medium" | "large";
+  width: "inherit" | "narrow" | "regular" | "wide";
+};
+
+export function defaultBlockStyle(): SiteBlockStyle {
+  return { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit" };
+}
+
+function cleanVideoUrl(input: unknown): string {
+  const url = cleanImageUrl(input);
+  return /\.(mp4|webm|mov)(\?|$)/i.test(url) ? url : "";
+}
+
+export function cleanBlockStyle(value: unknown): SiteBlockStyle {
+  const input = (value || {}) as Record<string, unknown>;
+  const overlay = Number(input.overlay);
+  return {
+    theme: oneOf(input.theme, ["default", "light", "white", "dark", "accent"], "default"),
+    background: cleanImage(input.background),
+    video: cleanVideoUrl(input.video),
+    overlay: Number.isFinite(overlay) ? Math.min(90, Math.max(0, Math.round(overlay))) : 30,
+    height: oneOf(input.height, ["auto", "small", "medium", "large"], "auto"),
+    width: oneOf(input.width, ["inherit", "narrow", "regular", "wide"], "inherit"),
+  };
+}
+
+/** True when the style changes anything about how the block is drawn. */
+export function blockStyleIsPlain(style: SiteBlockStyle): boolean {
+  return style.theme === "default" && !style.background && !style.video && style.height === "auto" && style.width === "inherit";
+}
+
+/** An address a page may frame: https only. */
+export function cleanEmbedUrl(input: unknown): string {
+  return cleanImageUrl(input);
+}
+
 // --- Blocks -----------------------------------------------------------------
 
 /** The icons a feature may wear. Rendered by name from the lucide set. */
@@ -379,8 +444,16 @@ export type SiteBookingScreen = (typeof SITE_BOOKING_SCREENS)[number];
 export const SITE_SOCIAL_KINDS = ["instagram", "facebook", "youtube", "tiktok", "x", "linkedin"] as const;
 export type SiteSocialKind = (typeof SITE_SOCIAL_KINDS)[number];
 
-export type SiteHeroBlock = {
-  id: string;
+/** What every block carries besides its own fields. */
+type BlockBase = { id: string; style: SiteBlockStyle };
+
+/** Omit that keeps a union a union: Omit<A | B, K> would collapse it to their common keys. */
+export type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;
+
+/** A block as a template or preset writes it: everything but its style, which cleaning adds. */
+export type SiteBlockInput = DistributiveOmit<SiteBlock, "style">;
+
+export type SiteHeroBlock = BlockBase & {
   type: "hero";
   eyebrow: string;
   heading: string;
@@ -390,21 +463,44 @@ export type SiteHeroBlock = {
   height: "regular" | "tall";
   buttons: SiteButton[];
 };
-export type SiteTextBlock = { id: string; type: "text"; heading: string; body: string; align: "left" | "centre"; columns: 1 | 2 };
-export type SiteImageBlock = { id: string; type: "image"; image: SiteImage | null; caption: string; size: "inset" | "wide" | "full" };
-export type SiteGalleryBlock = { id: string; type: "gallery"; heading: string; images: SiteImage[]; columns: 2 | 3 | 4 };
+export type SiteTextBlock = BlockBase & { type: "text"; heading: string; body: string; align: "left" | "centre"; columns: 1 | 2 };
+export type SiteImageBlock = BlockBase & { type: "image"; image: SiteImage | null; caption: string; size: "inset" | "wide" | "full" };
+export type SiteGalleryBlock = BlockBase & { type: "gallery"; heading: string; images: SiteImage[]; columns: 2 | 3 | 4; button: SiteButton | null };
 export type SiteFeatureItem = { id: string; icon: SiteFeatureIcon; title: string; text: string };
-export type SiteFeaturesBlock = { id: string; type: "features"; heading: string; intro: string; items: SiteFeatureItem[]; columns: 2 | 3 };
+export type SiteFeaturesBlock = BlockBase & { type: "features"; heading: string; intro: string; items: SiteFeatureItem[]; columns: 2 | 3 };
+/** A card: a picture, a heading, a line and a button. The home page's "what we offer" tiles. */
+export type SiteCardItem = { id: string; image: SiteImage | null; title: string; text: string; button: SiteButton | null };
+export type SiteCardsBlock = BlockBase & { type: "cards"; heading: string; intro: string; items: SiteCardItem[]; columns: 2 | 3 | 4 };
+/** Small pictures in a row with a caption each: certifications, partners, press. */
+export type SiteLogoItem = { id: string; image: SiteImage | null; caption: string; href: string };
+export type SiteLogosBlock = BlockBase & { type: "logos"; heading: string; intro: string; items: SiteLogoItem[]; size: "small" | "regular" };
 export type SitePriceItem = { id: string; name: string; price: string; detail: string; features: string; button: SiteButton | null; highlighted: boolean };
-export type SitePricingBlock = { id: string; type: "pricing"; heading: string; intro: string; items: SitePriceItem[] };
-export type SiteTestimonial = { id: string; quote: string; name: string; role: string };
-export type SiteTestimonialsBlock = { id: string; type: "testimonials"; heading: string; items: SiteTestimonial[] };
+export type SitePricingBlock = BlockBase & { type: "pricing"; heading: string; intro: string; items: SitePriceItem[] };
+export type SiteTestimonial = { id: string; quote: string; name: string; role: string; image: SiteImage | null };
+export type SiteTestimonialsBlock = BlockBase & { type: "testimonials"; heading: string; intro: string; items: SiteTestimonial[]; button: SiteButton | null };
 export type SiteFaqItem = { id: string; question: string; answer: string };
-export type SiteFaqBlock = { id: string; type: "faq"; heading: string; intro: string; items: SiteFaqItem[] };
-export type SiteCtaBlock = { id: string; type: "cta"; heading: string; text: string; button: SiteButton | null; tone: "primary" | "surface" };
-export type SiteVideoBlock = { id: string; type: "video"; heading: string; youtubeId: string; caption: string };
-export type SiteBookingBlock = {
+export type SiteFaqBlock = BlockBase & { type: "faq"; heading: string; intro: string; items: SiteFaqItem[] };
+export type SiteCtaBlock = BlockBase & { type: "cta"; heading: string; text: string; button: SiteButton | null; tone: "primary" | "surface" };
+export type SiteVideoBlock = BlockBase & { type: "video"; heading: string; youtubeId: string; caption: string };
+/** Anything else that lives in a frame: another booking system, a form, a map, a player. */
+export type SiteEmbedBlock = BlockBase & { type: "embed"; heading: string; text: string; url: string; height: number };
+/** One place lessons happen: where it is, when, and how to book there. */
+export type SiteVenue = {
   id: string;
+  name: string;
+  address: string;
+  hours: string;
+  text: string;
+  showMap: boolean;
+  booking: "none" | SiteBookingScreen;
+  /** Another system's booking form for this venue, framed. Ignored when booking is set. */
+  embedUrl: string;
+  height: number;
+};
+export type SiteVenuesBlock = BlockBase & { type: "venues"; heading: string; intro: string; items: SiteVenue[]; columns: 1 | 2 };
+/** A message to the business: name, email, optional phone, and the message. Emailed to the business and kept. */
+export type SiteFormBlock = BlockBase & { type: "form"; heading: string; text: string; askPhone: boolean; buttonLabel: string; thanks: string };
+export type SiteBookingBlock = BlockBase & {
   type: "booking";
   heading: string;
   text: string;
@@ -413,8 +509,7 @@ export type SiteBookingBlock = {
   buttonLabel: string;
   height: number;
 };
-export type SiteContactBlock = {
-  id: string;
+export type SiteContactBlock = BlockBase & {
   type: "contact";
   heading: string;
   text: string;
@@ -424,15 +519,15 @@ export type SiteContactBlock = {
   hours: string;
   showMap: boolean;
 };
-export type SiteDividerBlock = { id: string; type: "divider"; style: "line" | "space"; size: "small" | "regular" | "large" };
+export type SiteDividerBlock = BlockBase & { type: "divider"; line: "line" | "space"; size: "small" | "regular" | "large" };
 /** The site's article pages, newest first, as cards. */
-export type SiteArticlesBlock = { id: string; type: "articles"; heading: string; intro: string; limit: number };
+export type SiteArticlesBlock = BlockBase & { type: "articles"; heading: string; intro: string; limit: number };
 /**
  * The business's online shop (packages and gift vouchers), on the page.
  * "cards" draws what is for sale in the site's own look and takes the order
  * here; "embed" frames Clarity's shop page instead.
  */
-export type SiteShopBlock = { id: string; type: "shop"; heading: string; intro: string; mode: "cards" | "embed"; height: number };
+export type SiteShopBlock = BlockBase & { type: "shop"; heading: string; intro: string; mode: "cards" | "embed"; height: number };
 
 export type SiteBlock =
   | SiteHeroBlock
@@ -440,11 +535,16 @@ export type SiteBlock =
   | SiteImageBlock
   | SiteGalleryBlock
   | SiteFeaturesBlock
+  | SiteCardsBlock
+  | SiteLogosBlock
   | SitePricingBlock
   | SiteTestimonialsBlock
   | SiteFaqBlock
   | SiteCtaBlock
   | SiteVideoBlock
+  | SiteEmbedBlock
+  | SiteVenuesBlock
+  | SiteFormBlock
   | SiteBookingBlock
   | SiteContactBlock
   | SiteDividerBlock
@@ -458,17 +558,24 @@ export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
   "image",
   "gallery",
   "features",
+  "cards",
+  "logos",
   "pricing",
   "testimonials",
   "faq",
   "cta",
   "video",
+  "embed",
   "booking",
+  "venues",
   "contact",
+  "form",
   "divider",
   "articles",
   "shop",
 ];
+
+export type SiteSocialLink = { kind: SiteSocialKind; url: string };
 
 export type SiteHeader = {
   showLogo: boolean;
@@ -476,9 +583,11 @@ export type SiteHeader = {
   links: SiteLink[];
   button: SiteButton | null;
   sticky: boolean;
+  /** Icons beside the button. */
+  social: SiteSocialLink[];
+  /** Drawn over the first block rather than above it, with no background of its own. */
+  transparent: boolean;
 };
-
-export type SiteSocialLink = { kind: SiteSocialKind; url: string };
 
 export type SiteFooter = {
   text: string;
@@ -613,7 +722,19 @@ const MAX_BOOKING_HEIGHT = 1600;
  */
 export function cleanSiteBlock(value: unknown, index = 0): SiteBlock | null {
   const input = (value || {}) as Record<string, unknown>;
-  const id = blockId(input.id, index);
+  const fields = cleanBlockFields(input, blockId(input.id, index));
+  return fields ? { ...fields, style: cleanBlockStyle(input.style) } : null;
+}
+
+function cleanSocial(value: unknown): SiteSocialLink[] {
+  return cleanList(value, 6, (entry) => {
+    const url = cleanSiteHref(entry.url);
+    const kind = SITE_SOCIAL_KINDS.find((known) => known === entry.kind);
+    return kind && url && /^https?:/.test(url) ? { kind, url } : null;
+  });
+}
+
+function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlockInput | null {
   switch (input.type) {
     case "hero":
       return {
@@ -649,8 +770,38 @@ export function cleanSiteBlock(value: unknown, index = 0): SiteBlock | null {
         id,
         type: "gallery",
         heading: text(input.heading, 160),
-        images: cleanImages(input.images, 12),
+        images: cleanImages(input.images, 24),
         columns: ([2, 3, 4] as const).find((count) => count === Number(input.columns)) ?? 3,
+        button: cleanButton(input.button),
+      };
+    case "cards":
+      return {
+        id,
+        type: "cards",
+        heading: text(input.heading, 160),
+        intro: text(input.intro, 600),
+        columns: ([2, 3, 4] as const).find((count) => count === Number(input.columns)) ?? 4,
+        items: cleanList(input.items, 8, (item, itemIndex) => ({
+          id: blockId(item.id, itemIndex, "item"),
+          image: cleanImage(item.image),
+          title: text(item.title, 80),
+          text: text(item.text, 400),
+          button: cleanButton(item.button),
+        })),
+      };
+    case "logos":
+      return {
+        id,
+        type: "logos",
+        heading: text(input.heading, 160),
+        intro: text(input.intro, 600),
+        size: oneOf(input.size, ["small", "regular"], "regular"),
+        items: cleanList(input.items, 8, (item, itemIndex) => ({
+          id: blockId(item.id, itemIndex, "item"),
+          image: cleanImage(item.image),
+          caption: text(item.caption, 80),
+          href: cleanSiteHref(item.href),
+        })),
       };
     case "features":
       return {
@@ -687,12 +838,15 @@ export function cleanSiteBlock(value: unknown, index = 0): SiteBlock | null {
         id,
         type: "testimonials",
         heading: text(input.heading, 160),
-        items: cleanList(input.items, 9, (item, itemIndex) => ({
+        intro: text(input.intro, 600),
+        items: cleanList(input.items, 12, (item, itemIndex) => ({
           id: blockId(item.id, itemIndex, "item"),
           quote: text(item.quote, 600),
           name: text(item.name, 80),
           role: text(item.role, 80),
+          image: cleanImage(item.image),
         })),
+        button: cleanButton(input.button),
       };
     case "faq":
       return {
@@ -723,6 +877,49 @@ export function cleanSiteBlock(value: unknown, index = 0): SiteBlock | null {
         youtubeId: siteYoutubeId(input.youtubeId ?? input.youtubeUrl),
         caption: text(input.caption, 300),
       };
+    case "embed": {
+      const height = Number(input.height);
+      return {
+        id,
+        type: "embed",
+        heading: text(input.heading, 160),
+        text: text(input.text, 600),
+        url: cleanEmbedUrl(input.url),
+        height: Number.isFinite(height) ? Math.min(MAX_BOOKING_HEIGHT, Math.max(200, Math.round(height))) : 600,
+      };
+    }
+    case "venues":
+      return {
+        id,
+        type: "venues",
+        heading: text(input.heading, 160),
+        intro: text(input.intro, 600),
+        columns: Number(input.columns) === 1 ? 1 : 2,
+        items: cleanList(input.items, 6, (item, itemIndex) => {
+          const height = Number(item.height);
+          return {
+            id: blockId(item.id, itemIndex, "item"),
+            name: text(item.name, 120),
+            address: text(item.address, 300),
+            hours: text(item.hours, 600),
+            text: text(item.text, 600),
+            showMap: item.showMap !== false,
+            booking: oneOf(item.booking, ["none", ...SITE_BOOKING_SCREENS], "none"),
+            embedUrl: cleanEmbedUrl(item.embedUrl),
+            height: Number.isFinite(height) ? Math.min(MAX_BOOKING_HEIGHT, Math.max(MIN_BOOKING_HEIGHT, Math.round(height))) : 760,
+          };
+        }),
+      };
+    case "form":
+      return {
+        id,
+        type: "form",
+        heading: text(input.heading, 160),
+        text: text(input.text, 600),
+        askPhone: input.askPhone !== false,
+        buttonLabel: text(input.buttonLabel, 60),
+        thanks: text(input.thanks, 300),
+      };
     case "booking": {
       const height = Number(input.height);
       return {
@@ -752,7 +949,7 @@ export function cleanSiteBlock(value: unknown, index = 0): SiteBlock | null {
       return {
         id,
         type: "divider",
-        style: oneOf(input.style, ["line", "space"], "line"),
+        line: oneOf(input.line ?? input.style, ["line", "space"], "line"),
         size: oneOf(input.size, ["small", "regular", "large"], "regular"),
       };
     case "articles": {
@@ -804,6 +1001,8 @@ export function cleanHeader(value: unknown): SiteHeader {
     links: cleanLinks(input.links, 6),
     button: cleanButton(input.button),
     sticky: input.sticky !== false,
+    social: cleanSocial(input.social),
+    transparent: input.transparent === true,
   };
 }
 
@@ -812,11 +1011,7 @@ export function cleanFooter(value: unknown): SiteFooter {
   return {
     text: text(input.text, 300),
     links: cleanLinks(input.links, 6),
-    social: cleanList(input.social, 6, (entry) => {
-      const url = cleanSiteHref(entry.url);
-      const kind = oneOf(entry.kind, SITE_SOCIAL_KINDS, "instagram");
-      return url && /^https?:/.test(url) ? { kind, url } : null;
-    }),
+    social: cleanSocial(input.social),
     showCredit: input.showCredit !== false,
   };
 }
@@ -865,9 +1060,12 @@ export function sitePageImageUrls(content: SitePageContent): string[] {
   const urls: string[] = [];
   if (content.cover) urls.push(content.cover.url);
   for (const block of content.blocks) {
+    if (block.style.background) urls.push(block.style.background.url);
     if (block.type === "hero" && block.image) urls.push(block.image.url);
     if (block.type === "image" && block.image) urls.push(block.image.url);
     if (block.type === "gallery") urls.push(...block.images.map((image) => image.url));
+    if (block.type === "cards" || block.type === "logos") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
+    if (block.type === "testimonials") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
   }
   return urls;
 }
@@ -884,6 +1082,10 @@ export function siteId(prefix: string): string {
 
 /** A fresh block of a type, with sensible starting content. */
 export function newSiteBlock(type: SiteBlockType): SiteBlock {
+  return { ...newBlockFields(type), style: defaultBlockStyle() } as SiteBlock;
+}
+
+function newBlockFields(type: SiteBlockType): SiteBlockInput {
   const id = siteId("block");
   switch (type) {
     case "hero":
@@ -893,7 +1095,22 @@ export function newSiteBlock(type: SiteBlockType): SiteBlock {
     case "image":
       return { id, type, image: null, caption: "", size: "wide" };
     case "gallery":
-      return { id, type, heading: "", images: [], columns: 3 };
+      return { id, type, heading: "", images: [], columns: 3, button: null };
+    case "cards":
+      return {
+        id,
+        type,
+        heading: "What we offer",
+        intro: "",
+        columns: 4,
+        items: [
+          { id: siteId("item"), image: null, title: "Private lessons", text: "One-to-one coaching with a truly customised approach.", button: { label: "Book now", href: "", style: "primary" } },
+          { id: siteId("item"), image: null, title: "Group classes", text: "Learn with friends; suitable for all levels.", button: { label: "Find out more", href: "", style: "primary" } },
+          { id: siteId("item"), image: null, title: "Gift vouchers", text: "Lessons make a great gift.", button: { label: "Buy a voucher", href: "", style: "primary" } },
+        ],
+      };
+    case "logos":
+      return { id, type, heading: "Certifications", intro: "", size: "regular", items: [{ id: siteId("item"), image: null, caption: "Certified PGA Professional", href: "" }] };
     case "features":
       return {
         id,
@@ -919,19 +1136,32 @@ export function newSiteBlock(type: SiteBlockType): SiteBlock {
         ],
       };
     case "testimonials":
-      return { id, type, heading: "What players say", items: [{ id: siteId("item"), quote: "", name: "", role: "" }] };
+      return { id, type, heading: "What players say", intro: "", items: [{ id: siteId("item"), quote: "", name: "", role: "", image: null }], button: null };
     case "faq":
       return { id, type, heading: "Questions", intro: "", items: [{ id: siteId("item"), question: "What should I bring?", answer: "" }] };
     case "cta":
       return { id, type, heading: "Ready to play better golf?", text: "", button: { label: "Book a lesson", href: "", style: "primary" }, tone: "primary" };
     case "video":
       return { id, type, heading: "", youtubeId: "", caption: "" };
+    case "embed":
+      return { id, type, heading: "", text: "", url: "", height: 600 };
+    case "venues":
+      return {
+        id,
+        type,
+        heading: "Where we coach",
+        intro: "",
+        columns: 2,
+        items: [{ id: siteId("item"), name: "Main venue", address: "", hours: "Mon 9:00am - 5:00pm", text: "", showMap: true, booking: "main", embedUrl: "", height: 760 }],
+      };
+    case "form":
+      return { id, type, heading: "Send a message", text: "", askPhone: true, buttonLabel: "Send", thanks: "Thanks, your message is on its way. We will be in touch soon." };
     case "booking":
       return { id, type, heading: "Book a lesson", text: "", screen: "main", mode: "embed", buttonLabel: "Book now", height: 760 };
     case "contact":
       return { id, type, heading: "Find us", text: "", email: "", phone: "", address: "", hours: "", showMap: false };
     case "divider":
-      return { id, type, style: "line", size: "regular" };
+      return { id, type, line: "line", size: "regular" };
     case "articles":
       return { id, type, heading: "Latest articles", intro: "", limit: 6 };
     case "shop":
@@ -961,7 +1191,7 @@ export type SitePagePreset = {
 
 const book = (label: string, href: string, style: "primary" | "secondary" = "primary"): SiteButton => ({ label, href, style });
 
-const page = (slug: string, title: string, blocks: SiteBlock[], extra: Partial<SitePageContent> & { kind?: SitePageKind; inNav?: boolean } = {}): Omit<SitePage, "id" | "sortOrder"> => {
+const page = (slug: string, title: string, blocks: SiteBlockInput[], extra: Partial<Omit<SitePageContent, "blocks">> & { kind?: SitePageKind; inNav?: boolean } = {}): Omit<SitePage, "id" | "sortOrder"> => {
   const { kind = "page", inNav = true, ...content } = extra;
   return { slug, title, kind, inNav, content: cleanSitePageContent({ ...content, blocks }) };
 };
@@ -1025,6 +1255,26 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
           showMap: true,
         },
         { id: "directions", type: "text", heading: "Getting here", body: "Parking, which entrance to use, and where to meet.", align: "left", columns: 1 },
+        { id: "message", type: "form", heading: "Send a message", text: "", askPhone: true, buttonLabel: "Send", thanks: "Thanks, your message is on its way. We will be in touch soon." },
+      ]),
+  },
+  {
+    id: "venues",
+    label: "Book a lesson (venues)",
+    summary: "Each place you coach, with a map, hours and its booking form side by side.",
+    build: (input) =>
+      page("book-a-lesson", "Book a Lesson", [
+        {
+          id: "venues",
+          type: "venues",
+          heading: "Locations",
+          intro: "",
+          columns: 2,
+          items: [
+            { id: "venue-1", name: input.venueName || "Main venue", address: "", hours: "Mon 9:00am - 5:00pm\nSat 8:00am - 1:00pm", text: "", showMap: true, booking: "main", embedUrl: "", height: 760 },
+            { id: "venue-2", name: "Second venue", address: "", hours: "", text: "", showMap: true, booking: "private-lessons", embedUrl: "", height: 760 },
+          ],
+        },
       ]),
   },
   {
@@ -1100,7 +1350,7 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
     id: "gallery",
     label: "Gallery",
     summary: "A page of pictures.",
-    build: () => page("gallery", "Gallery", [{ id: "pictures", type: "gallery", heading: "Gallery", images: [], columns: 3 }]),
+    build: () => page("gallery", "Gallery", [{ id: "pictures", type: "gallery", heading: "Gallery", images: [], columns: 3, button: null }]),
   },
 ];
 

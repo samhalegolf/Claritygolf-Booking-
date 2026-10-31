@@ -5,7 +5,7 @@
 // The same object drives the editor's preview and the public page.
 
 import type { CSSProperties } from "react";
-import { HOME_PAGE_SLUG, googleFontsUrl, siteFont, type SiteBookingScreen, type SiteTheme } from "../../../netlify/functions/_shared/site/document.mts";
+import { HOME_PAGE_SLUG, googleFontsUrl, siteFont, type SiteBlockStyle, type SiteBookingScreen, type SiteTheme } from "../../../netlify/functions/_shared/site/document.mts";
 import { BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE, PUBLIC_BOOKING_HOST } from "../shared/bookingHandoff";
 import { publicBookingPath } from "../public-booking/bookingScreen";
 
@@ -41,6 +41,57 @@ export function siteThemeStyle(theme: SiteTheme): CSSProperties {
     "--site-section-gap": SECTION_GAP[theme.spacing],
     colorScheme: dark ? "dark" : "light",
   } as CSSProperties;
+}
+
+/**
+ * One block's own colours, over the site's. A themed block re-declares the
+ * same --site-* properties on itself, so everything inside it reads them
+ * without knowing. A picture or video behind the block means light text
+ * over the darkening overlay unless the block asked for a light theme.
+ */
+export function blockStyleVars(theme: SiteTheme, style: SiteBlockStyle): CSSProperties {
+  const colors = theme.colors;
+  const vars: Record<string, string> = {};
+  const lightOnDark = () => {
+    vars["--site-text"] = "#ffffff";
+    vars["--site-muted"] = "rgba(255, 255, 255, 0.74)";
+    vars["--site-surface"] = "rgba(255, 255, 255, 0.1)";
+    vars["--site-line"] = "rgba(255, 255, 255, 0.2)";
+    vars.colorScheme = "dark";
+  };
+  switch (style.theme) {
+    case "light":
+      vars["--site-bg"] = colors.surface;
+      vars["--site-surface"] = colors.background;
+      break;
+    case "white":
+      vars["--site-bg"] = "#ffffff";
+      vars["--site-surface"] = colors.surface.toLowerCase() === "#ffffff" ? colors.background : colors.surface;
+      vars["--site-text"] = luminance(colors.text) < 0.5 ? colors.text : "#171717";
+      break;
+    case "dark":
+      vars["--site-bg"] = luminance(colors.text) < 0.3 ? colors.text : "#161616";
+      lightOnDark();
+      break;
+    case "accent":
+      vars["--site-bg"] = colors.primary;
+      vars["--site-text"] = colors.onPrimary;
+      vars["--site-muted"] = `color-mix(in srgb, ${colors.onPrimary} 78%, transparent)`;
+      vars["--site-surface"] = "rgba(0, 0, 0, 0.12)";
+      vars["--site-line"] = `color-mix(in srgb, ${colors.onPrimary} 30%, transparent)`;
+      // Buttons swap, or a filled button would vanish into the band.
+      vars["--site-primary"] = colors.onPrimary;
+      vars["--site-on-primary"] = colors.primary;
+      break;
+    default:
+      break;
+  }
+  if ((style.background || style.video) && (style.theme === "default" || style.theme === "dark")) {
+    vars["--site-bg"] = vars["--site-bg"] || "#161616";
+    lightOnDark();
+  }
+  if (style.width !== "inherit") vars["--site-max-width"] = WIDTH[style.width];
+  return vars as CSSProperties;
 }
 
 /** The classes the root wears for the theme's choices that are not plain values. */
