@@ -290,6 +290,11 @@ export type StripeCheckoutInput = {
    * -- an online order -- so "nobody can pay this any more" has a known time.
    */
   expiresInMinutes?: number;
+  /**
+   * Offer only these methods (Stripe's names, e.g. "afterpay_clearpay").
+   * Left out, Stripe shows whatever the account has switched on.
+   */
+  paymentMethodTypes?: string[];
 };
 
 export async function createStripeCheckoutSession(
@@ -312,6 +317,7 @@ export async function createStripeCheckoutSession(
     if (value) params.set(`metadata[${key}]`, value);
   }
   if (input.customerEmail) params.set("customer_email", input.customerEmail);
+  (input.paymentMethodTypes || []).forEach((type, index) => params.set(`payment_method_types[${index}]`, type));
   if (input.expiresInMinutes) {
     const minutes = Math.max(30, Math.min(24 * 60, Math.round(input.expiresInMinutes)));
     params.set("expires_at", String(Math.floor(Date.now() / 1000) + minutes * 60));

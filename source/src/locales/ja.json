@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "お客様がこのiPhoneにカードをタッチします。ご希望の場合はQRコードも使えます。",
   "Shows a QR code the customer scans to pay.": "お客様が読み取って支払うQRコードを表示します。",
   "Recorded as owed. Mark it paid from the POS list once settled.": "未収として記録します。精算後、POS一覧から支払い済みにしてください。",
-  "Stopped checking for payment. Cancel the sale and start it again.": "支払いの確認を停止しました。販売をキャンセルして、もう一度やり直してください。",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "このアカウントにはまだパスの支払い方法がありません。会計を開き直して再試行してください。",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "このアカウントにはまだクーポンの支払い方法がありません。会計を開き直して再試行してください。",
   "Choose a payment method.": "支払い方法を選択してください。",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "パッケージを購入 · {amount}",
   "Package bought": "パッケージを購入しました",
   "Your coach will put it towards this lesson.": "コーチがこのレッスンに適用します。",
-  "Confirm & pay {amount}": "確定して{amount}を支払う"
+  "Confirm & pay {amount}": "確定して{amount}を支払う",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "お客様がこれをスキャンし、ご自身のスマートフォンで Afterpay にログインします。支払いが完了するとこの画面は自動で更新されます。",
+  "Check again": "もう一度確認",
+  "Card QR instead": "代わりにカードの QR",
+  "Afterpay QR instead": "代わりに Afterpay の QR",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "支払いページが未払いのまま閉じられました。販売をキャンセルして、もう一度やり直してください。",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "自動確認を停止しました。お客様の支払いが済んだら「もう一度確認」をタップしてください。",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "まだ支払われていません。お客様が完了したばかりの場合は、少し待ってからもう一度確認してください。",
+  "Could not reach the payment service. Check the connection and try again.": "決済サービスに接続できませんでした。接続を確認して、もう一度お試しください。",
+  "Payment received": "お支払いを受け付けました",
+  "Payment cancelled": "お支払いはキャンセルされました",
+  "Thanks, your payment has gone through. You can close this page.": "ありがとうございます。お支払いが完了しました。このページは閉じて構いません。",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "請求は発生していません。このページを閉じるか、コードをもう一度スキャンして別の方法でお支払いください。",
+  "Receipt {receipt}": "領収書 {receipt}"
 }

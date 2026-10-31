@@ -27,7 +27,7 @@ import type {
 import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
-import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
+import { checkAgainMessage, pollStoppedMessage, postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment, tapIsBusy } from "./TerminalPayment";
 import { onAndroid } from "../../native/clarityTerminal";
 import { tapToPayName, tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
@@ -123,6 +123,7 @@ export function PosCheckoutModal({
   const [error, setError] = useState("");
   const [transaction, setTransaction] = useState<PosTransaction | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState("");
+  const [qrAfterpay, setQrAfterpay] = useState(false);
 
   const descriptionTouched = useRef(false);
 
@@ -318,15 +319,24 @@ export function PosCheckoutModal({
   // - onCompleted is a plain function from App.tsx and gets a new identity on
   // every App render, which would otherwise rebuild the interval every few
   // seconds and reset the timeout clock.
-  usePosPaymentPoll(
+  const checkPaymentNow = usePosPaymentPoll(
     stage === "qr" ? transaction?.id || "" : "",
     (paid) => {
+      setError("");
       setTransaction(paid);
       setStage("done");
       onCompleted(paid);
     },
-    () => setError(t("Stopped checking for payment. Cancel the sale and start it again.")),
+    (reason) => setError(pollStoppedMessage(reason)),
   );
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  async function checkAgain() {
+    setCheckingPayment(true);
+    setError("");
+    const result = await checkPaymentNow();
+    setCheckingPayment(false);
+    if (result !== "paid") setError(checkAgainMessage(result));
+  }
 
   function releaseCoupon() {
     setCoupon(null);
@@ -435,13 +445,30 @@ export function PosCheckoutModal({
 
   // The QR for a pending Clarity Pay sale. Also the way out of Tap to Pay: the
   // server stands the tap down first, so the customer can only pay one way.
-  async function showQr(sale: PosTransaction) {
-    const checkout = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`, {})) as {
-      url?: string;
-    };
+  // `afterpay` opens the customer's phone straight on Afterpay instead of on
+  // Stripe's list of ways to pay. The server closes any earlier QR first.
+  async function showQr(sale: PosTransaction, afterpay = false) {
+    const checkout = (await postPosJson(
+      `/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`,
+      afterpay ? { method: "afterpay" } : {},
+    )) as { url?: string };
     if (!checkout.url) throw new Error(t("Stripe did not return a checkout link."));
     setCheckoutUrl(checkout.url);
+    setQrAfterpay(afterpay);
     setStage("qr");
+  }
+
+  async function switchQr(afterpay: boolean) {
+    if (!transaction) return;
+    setBusy(true);
+    setError("");
+    try {
+      await showQr(transaction, afterpay);
+    } catch (qrError) {
+      setError(qrError instanceof Error ? qrError.message : t("Could not show the QR."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function switchToQr() {
@@ -483,6 +510,9 @@ export function PosCheckoutModal({
         // Stay open so the coach sees how it ends.
         setError(data?.message || t("Could not cancel the sale."));
         setBusy(false);
+        // The usual reason is that the customer's phone payment has just gone
+        // through and the server settled the sale instead: show it as paid.
+        void checkPaymentNow();
         return;
       }
       if (data?.transaction) onCompleted(data.transaction);
@@ -1042,10 +1072,18 @@ export function PosCheckoutModal({
               {formatMoney(remainingAfterCoupon(transaction.amount, transaction.couponAmount ?? 0), transaction.currency)} -{" "}
               {transaction.receiptNumber}
             </p>
-            <p className="field-help">{t("Customer scans this with their phone camera and pays with Apple Pay, Google Pay or a card. This screen updates on its own the moment it clears.")}</p>
+            <p className="field-help">
+              {qrAfterpay
+                ? t("Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.")
+                : t("Customer scans this with their phone camera and pays with Apple Pay, Google Pay or a card. This screen updates on its own the moment it clears.")}
+            </p>
             {qrMarkup && <div className="pos-qr" aria-label={t("Payment QR code")} dangerouslySetInnerHTML={{ __html: qrMarkup }} />}
             <div className="panel-actions">
               <button className="outline-button" disabled={busy} onClick={cancelPendingSale} type="button">{t("Cancel sale")}</button>
+              <button className="outline-button" disabled={busy || checkingPayment} onClick={() => void checkAgain()} type="button">
+                <RotateCcw size={15} />{" "}{t("Check again")}</button>
+              <button className="outline-button" disabled={busy} onClick={() => void switchQr(!qrAfterpay)} type="button">
+                {qrAfterpay ? t("Card QR instead") : t("Afterpay QR instead")}</button>
               <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                 <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
               {tapToPay.ready && (

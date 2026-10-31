@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "Asiakas napauttaa korttiaan tähän iPhoneen. QR-koodi on käytettävissä, jos hän haluaa mieluummin sen.",
   "Shows a QR code the customer scans to pay.": "Näyttää QR-koodin, jonka asiakas skannaa maksaakseen.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Kirjattu velaksi. Merkitse maksetuksi kassalistasta, kun se on maksettu.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Maksun tarkistus lopetettiin. Peru myynti ja aloita se uudelleen.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Tällä tilillä ei vielä ole sarjakortti-maksutapaa. Avaa kassa uudelleen ja yritä uudelleen.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Tällä tilillä ei vielä ole kuponki-maksutapaa. Avaa kassa uudelleen ja yritä uudelleen.",
   "Choose a payment method.": "Valitse maksutapa.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Osta paketti · {amount}",
   "Package bought": "Paketti ostettu",
   "Your coach will put it towards this lesson.": "Valmentajasi kohdistaa sen tähän tuntiin.",
-  "Confirm & pay {amount}": "Vahvista ja maksa {amount}"
+  "Confirm & pay {amount}": "Vahvista ja maksa {amount}",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "Asiakas skannaa tämän ja kirjautuu Afterpayhin omalla puhelimellaan. Tämä näkymä päivittyy itsestään heti, kun maksu menee läpi.",
+  "Check again": "Tarkista uudelleen",
+  "Card QR instead": "Kortti-QR sen sijaan",
+  "Afterpay QR instead": "Afterpay-QR sen sijaan",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "Maksusivu sulkeutui ilman maksua. Peru myynti ja aloita se uudelleen.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Automaattinen tarkistus lopetettiin. Kun asiakas on maksanut, napauta Tarkista uudelleen.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Ei vielä maksettu. Jos asiakas juuri lopetti, odota hetki ja tarkista uudelleen.",
+  "Could not reach the payment service. Check the connection and try again.": "Maksupalveluun ei saatu yhteyttä. Tarkista yhteys ja yritä uudelleen.",
+  "Payment received": "Maksu vastaanotettu",
+  "Payment cancelled": "Maksu peruttu",
+  "Thanks, your payment has gone through. You can close this page.": "Kiitos, maksusi on mennyt läpi. Voit sulkea tämän sivun.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Mitään ei veloitettu. Voit sulkea tämän sivun tai skannata koodin uudelleen maksaaksesi toisella tavalla.",
+  "Receipt {receipt}": "Kuitti {receipt}"
 }
