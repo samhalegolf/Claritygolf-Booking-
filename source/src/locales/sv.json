@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "Kunden blippar sitt kort mot den här iPhone. QR-koden finns där om de hellre vill använda den.",
   "Shows a QR code the customer scans to pay.": "Visar en QR-kod som kunden skannar för att betala.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Registreras som skuld. Markera som betald i kassalistan när den är reglerad.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Slutade kontrollera betalningen. Avbryt försäljningen och starta den igen.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Det här kontot har ingen betalningsmetod för klippkort än. Öppna kassan igen och försök på nytt.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Det här kontot har ingen betalningsmetod för rabattkoder än. Öppna kassan igen och försök på nytt.",
   "Choose a payment method.": "Välj en betalningsmetod.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Köp paket · {amount}",
   "Package bought": "Paket köpt",
   "Your coach will put it towards this lesson.": "Din tränare använder det för den här lektionen.",
-  "Confirm & pay {amount}": "Bekräfta och betala {amount}"
+  "Confirm & pay {amount}": "Bekräfta och betala {amount}",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "Kunden skannar detta och loggar in på Afterpay i sin egen telefon. Skärmen uppdateras av sig själv så fort betalningen gått igenom.",
+  "Check again": "Kontrollera igen",
+  "Card QR instead": "Kort-QR i stället",
+  "Afterpay QR instead": "Afterpay-QR i stället",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "Betalningssidan stängdes utan betalning. Avbryt försäljningen och starta den igen.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Slutade kontrollera automatiskt. Tryck på Kontrollera igen när kunden har betalat.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Inte betalt än. Om kunden precis blev klar, vänta en stund och kontrollera igen.",
+  "Could not reach the payment service. Check the connection and try again.": "Kunde inte nå betaltjänsten. Kontrollera anslutningen och försök igen.",
+  "Payment received": "Betalning mottagen",
+  "Payment cancelled": "Betalning avbruten",
+  "Thanks, your payment has gone through. You can close this page.": "Tack, din betalning har gått igenom. Du kan stänga den här sidan.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Inget drogs. Du kan stänga den här sidan eller skanna koden igen för att betala på ett annat sätt.",
+  "Receipt {receipt}": "Kvitto {receipt}"
 }

@@ -19,7 +19,9 @@ import {
   releaseTerminalAttempt,
   settleTerminalPaymentFromWebhook,
   startTerminalPayment,
+  sweepPendingPosCheckouts,
   terminalPaymentState,
+  updatePosTransactionStatus,
 } from "../billing-api.mts";
 import { requireStripeFeature, resolveStripeCredential } from "./stripe.mts";
 import { stripeLocationAddress, terminalAvailability, terminalIntentState } from "./terminal.mts";
@@ -217,7 +219,14 @@ function fakeHosts(options: { intentStatus?: string; sessionPaid?: boolean } = {
         return respond(intent);
       }
       if (path === "checkout/sessions/cs_qr") {
-        return respond({ id: "cs_qr", payment_status: options.sessionPaid ? "paid" : "unpaid", status: "open" });
+        return respond({
+          id: "cs_qr",
+          payment_status: options.sessionPaid ? "paid" : "unpaid",
+          status: options.sessionPaid ? "complete" : "open",
+          amount_total: 7000,
+          currency: "nzd",
+          payment_intent: options.sessionPaid ? "pi_qr" : null,
+        });
       }
       if (path === "checkout/sessions/cs_qr/expire") {
         counts.sessionExpires += 1;
@@ -398,6 +407,58 @@ test("switching from the QR closes the QR so the customer cannot pay twice", asy
   try {
     await startTerminalPayment("acct-a", "coach-1", { transactionId: "sale-1" });
     assert.equal(hosts.counts.sessionExpires, 1);
+  } finally {
+    hosts.restore();
+  }
+});
+
+/* --- The QR (Stripe Checkout) when nobody is watching ----------------------- */
+
+test("voiding a sale the customer already paid on their phone settles it instead", async () => {
+  const hosts = fakeHosts({ sessionPaid: true });
+  try {
+    await assert.rejects(updatePosTransactionStatus("acct-a", "sale-1", { status: "void" }), { code: "POS_ALREADY_PAID" });
+    assert.equal(hosts.sale().status, "paid");
+    assert.equal(hosts.counts.paidTransitions, 1);
+    assert.equal(hosts.counts.sessionExpires, 0);
+  } finally {
+    hosts.restore();
+  }
+});
+
+test("voiding an unpaid QR sale closes the payment page so it cannot be paid later", async () => {
+  const hosts = fakeHosts({ sessionPaid: false });
+  try {
+    // No voucher on this one: putting a voucher back is tested elsewhere.
+    Object.assign(hosts.sale(), { coupon_id: null, coupon_amount: 0 });
+    await updatePosTransactionStatus("acct-a", "sale-1", { status: "void" });
+    assert.equal(hosts.sale().status, "void");
+    assert.equal(hosts.counts.sessionExpires, 1);
+  } finally {
+    hosts.restore();
+  }
+});
+
+test("the sweep settles a QR sale paid after the till stopped watching, once", async () => {
+  const hosts = fakeHosts({ sessionPaid: true });
+  try {
+    const first = await sweepPendingPosCheckouts({ budgetMs: 10_000 });
+    assert.deepEqual(first.settled, ["POS-1048"]);
+    assert.equal(hosts.sale().status, "paid");
+    const second = await sweepPendingPosCheckouts({ budgetMs: 10_000 });
+    assert.deepEqual(second.settled, []);
+    assert.equal(hosts.counts.paidTransitions, 1);
+  } finally {
+    hosts.restore();
+  }
+});
+
+test("the sweep leaves an unpaid QR sale pending", async () => {
+  const hosts = fakeHosts({ sessionPaid: false });
+  try {
+    const result = await sweepPendingPosCheckouts({ budgetMs: 10_000 });
+    assert.deepEqual(result.settled, []);
+    assert.equal(hosts.sale().status, "pending");
   } finally {
     hosts.restore();
   }

@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "Kunden holder sit kort mod denne iPhone. QR-koden er der, hvis de hellere vil det.",
   "Shows a QR code the customer scans to pay.": "Viser en QR-kode, som kunden scanner for at betale.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Registreret som skyldigt. Marker det som betalt fra kasselisten, når det er afregnet.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Holdt op med at tjekke for betaling. Annuller salget, og start det igen.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Denne konto har endnu ingen betalingsmetode til klippekort. Åbn kassen igen, og prøv igen.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Denne konto har endnu ingen betalingsmetode til rabatkoder. Åbn kassen igen, og prøv igen.",
   "Choose a payment method.": "Vælg en betalingsmetode.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Køb pakke · {amount}",
   "Package bought": "Pakke købt",
   "Your coach will put it towards this lesson.": "Din træner bruger den på denne lektion.",
-  "Confirm & pay {amount}": "Bekræft og betal {amount}"
+  "Confirm & pay {amount}": "Bekræft og betal {amount}",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "Kunden scanner denne og logger ind på Afterpay på sin egen telefon. Skærmen opdaterer sig selv, så snart betalingen er gået igennem.",
+  "Check again": "Tjek igen",
+  "Card QR instead": "Kort-QR i stedet",
+  "Afterpay QR instead": "Afterpay-QR i stedet",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "Betalingssiden lukkede uden betaling. Annuller salget, og start det igen.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Stoppede med at tjekke automatisk. Tryk på Tjek igen, når kunden har betalt.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Ikke betalt endnu. Hvis kunden lige er blevet færdig, så vent et øjeblik og tjek igen.",
+  "Could not reach the payment service. Check the connection and try again.": "Kunne ikke nå betalingstjenesten. Tjek forbindelsen, og prøv igen.",
+  "Payment received": "Betaling modtaget",
+  "Payment cancelled": "Betaling annulleret",
+  "Thanks, your payment has gone through. You can close this page.": "Tak, din betaling er gået igennem. Du kan lukke denne side.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Der blev ikke trukket noget. Du kan lukke denne side eller scanne koden igen for at betale på en anden måde.",
+  "Receipt {receipt}": "Kvittering {receipt}"
 }

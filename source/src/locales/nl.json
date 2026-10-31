@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "De klant houdt zijn kaart tegen deze iPhone. De QR-code is er als de klant dat liever heeft.",
   "Shows a QR code the customer scans to pay.": "Toont een QR-code die de klant scant om te betalen.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Vastgelegd als openstaand. Markeer het als betaald in de kassalijst zodra het is voldaan.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Gestopt met controleren op betaling. Annuleer de verkoop en begin opnieuw.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Dit account heeft nog geen betaalmethode Strippenkaart. Open het afrekenen opnieuw en probeer het nog eens.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Dit account heeft nog geen betaalmethode Kortingscode. Open het afrekenen opnieuw en probeer het nog eens.",
   "Choose a payment method.": "Kies een betaalmethode.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Pakket kopen · {amount}",
   "Package bought": "Pakket gekocht",
   "Your coach will put it towards this lesson.": "Je coach zet het in voor deze les.",
-  "Confirm & pay {amount}": "Bevestigen en {amount} betalen"
+  "Confirm & pay {amount}": "Bevestigen en {amount} betalen",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "De klant scant dit en logt op de eigen telefoon in bij Afterpay. Dit scherm werkt zichzelf bij zodra de betaling rond is.",
+  "Check again": "Opnieuw controleren",
+  "Card QR instead": "Toch kaart-QR",
+  "Afterpay QR instead": "Toch Afterpay-QR",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "De betaalpagina is gesloten zonder betaling. Annuleer de verkoop en begin opnieuw.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Automatisch controleren gestopt. Tik op Opnieuw controleren zodra de klant heeft betaald.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Nog niet betaald. Als de klant net klaar is, wacht even en controleer opnieuw.",
+  "Could not reach the payment service. Check the connection and try again.": "Kan de betaaldienst niet bereiken. Controleer de verbinding en probeer het opnieuw.",
+  "Payment received": "Betaling ontvangen",
+  "Payment cancelled": "Betaling geannuleerd",
+  "Thanks, your payment has gone through. You can close this page.": "Bedankt, je betaling is gelukt. Je kunt deze pagina sluiten.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Er is niets afgeschreven. Je kunt deze pagina sluiten of de code opnieuw scannen om op een andere manier te betalen.",
+  "Receipt {receipt}": "Bon {receipt}"
 }

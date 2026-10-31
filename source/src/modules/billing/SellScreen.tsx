@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Minus,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -58,7 +59,7 @@ import {
 } from "./stockMath";
 import { catalogTiles, offTabMatchCount } from "./catalogSearch";
 import type { SellLine } from "./stockMath";
-import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
+import { checkAgainMessage, pollStoppedMessage, postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment } from "./TerminalPayment";
 import { tapToPayName, tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { t, tn } from "../../lib/i18n";
@@ -210,6 +211,7 @@ export function SellScreen({
   const [error, setError] = useState("");
   const [sale, setSale] = useState<PosTransaction | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState("");
+  const [qrAfterpay, setQrAfterpay] = useState(false);
   // Codes minted by this sale (a voucher product was rung up). Read out on the
   // done screen so they can be written on the card before it leaves.
   const [issuedCoupons, setIssuedCoupons] = useState<BillingCoupon[]>([]);
@@ -474,7 +476,7 @@ export function SellScreen({
     setPayStage("method");
   }
 
-  function chooseMethod(method: PosPaymentMethod) {
+  function chooseMethod(method: PosPaymentMethod, afterpay = false) {
     setMethodId(method.id);
     setError("");
     // Cash is the only method where the till needs to work out change, so it is
@@ -484,10 +486,10 @@ export function SellScreen({
       setPayStage("cash");
       return;
     }
-    void takePayment(method);
+    void takePayment(method, afterpay);
   }
 
-  async function takePayment(method: PosPaymentMethod) {
+  async function takePayment(method: PosPaymentMethod, afterpay = false) {
     setBusy(true);
     setError("");
     try {
@@ -545,11 +547,12 @@ export function SellScreen({
         setPayStage("done");
         return;
       }
-      if (tapToPay.ready) {
+      // Afterpay has no tap: the customer signs in to it on their own phone.
+      if (tapToPay.ready && !afterpay) {
         setPayStage("tap");
         return;
       }
-      await showQr(created);
+      await showQr(created, afterpay);
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : t("The sale could not be recorded."));
     } finally {
@@ -559,14 +562,31 @@ export function SellScreen({
 
   // The QR for a pending Clarity Pay sale, and the way out of Tap to Pay: the
   // server stands the tap down first, so the customer can only pay one way.
-  async function showQr(pending: PosTransaction) {
+  // `afterpay` opens the customer's phone straight on Afterpay, where they sign
+  // in privately, instead of on Stripe's list of ways to pay. A new QR always
+  // closes the old one first (server side), so only one can be paid.
+  async function showQr(pending: PosTransaction, afterpay = false) {
     const checkout = (await postPosJson(
       `/api/billing/pos/transactions/${encodeURIComponent(pending.id)}/checkout`,
-      {},
+      afterpay ? { method: "afterpay" } : {},
     )) as { url?: string };
     if (!checkout.url) throw new Error(t("Stripe did not return a checkout link."));
     setCheckoutUrl(checkout.url);
+    setQrAfterpay(afterpay);
     setPayStage("qr");
+  }
+
+  async function switchQr(afterpay: boolean) {
+    if (!sale) return;
+    setBusy(true);
+    setError("");
+    try {
+      await showQr(sale, afterpay);
+    } catch (qrError) {
+      setError(qrError instanceof Error ? qrError.message : t("Could not show the QR."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function switchToQr() {
@@ -591,16 +611,25 @@ export function SellScreen({
     onSaleCompleted(paid.transaction);
   }
 
-  usePosPaymentPoll(
+  const checkPaymentNow = usePosPaymentPoll(
     payStage === "qr" ? sale?.id || "" : "",
     (paid, coupons) => {
+      setError("");
       setSale(paid);
       if (coupons.length) setIssuedCoupons(coupons);
       setPayStage("done");
       onSaleCompleted(paid);
     },
-    () => setError(t("Stopped checking for payment. Cancel the sale and start it again.")),
+    (reason) => setError(pollStoppedMessage(reason)),
   );
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  async function checkAgain() {
+    setCheckingPayment(true);
+    setError("");
+    const result = await checkPaymentNow();
+    setCheckingPayment(false);
+    if (result !== "paid") setError(checkAgainMessage(result));
+  }
 
   // A Clarity Pay sale that never cleared has to be voided on the way out,
   // otherwise a pending row and a live Stripe session are left behind with
@@ -624,6 +653,9 @@ export function SellScreen({
         // Stay on the payment so the coach sees how it ends.
         setError(data?.message || t("Could not cancel the sale."));
         setBusy(false);
+        // The usual reason is that the customer's phone payment has just gone
+        // through and the server settled the sale instead: show it as paid.
+        void checkPaymentNow();
         return;
       }
       if (data?.transaction) onSaleCompleted(data.transaction);
@@ -636,6 +668,7 @@ export function SellScreen({
     setBusy(false);
     setSale(null);
     setCheckoutUrl("");
+    setQrAfterpay(false);
     setPayStage("closed");
   }
 
@@ -1126,6 +1159,23 @@ export function SellScreen({
                       {!method.settlesImmediately && <span className="pos-method-tag">{t("owed")}</span>}
                     </button>
                   ))}
+                  {/* Afterpay goes through Clarity Pay too, but straight to a QR
+                      that opens Afterpay on the customer's phone. */}
+                  {payMethods
+                    .filter((method) => method.kind === "clarity_pay")
+                    .slice(0, 1)
+                    .map((method) => (
+                      <button
+                        key={`${method.id}-afterpay`}
+                        className="pos-method-button"
+                        disabled={busy}
+                        onClick={() => chooseMethod(method, true)}
+                        type="button"
+                      >
+                        <ClarityPayments size={15} />
+                        {t("Afterpay")}
+                      </button>
+                    ))}
                 </div>
                 {!payMethods.length && <p className="field-help">{t("No payment methods - add one under Billing > Settings.")}</p>}
               </>
@@ -1203,12 +1253,20 @@ export function SellScreen({
                 <h2 className="sell-pay-total">
                   {formatMoney(remainingAfterCoupon(sale.amount, sale.couponAmount ?? 0), sale.currency)}
                 </h2>
-                <p className="field-help">{t("Customer scans this and pays with Apple Pay, Google Pay or a card. This screen updates on its own the moment it clears.")}</p>
+                <p className="field-help">
+                  {qrAfterpay
+                    ? t("Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.")
+                    : t("Customer scans this and pays with Apple Pay, Google Pay or a card. This screen updates on its own the moment it clears.")}
+                </p>
                 {qrMarkup && (
                   <div className="pos-qr" aria-label={t("Payment QR code")} dangerouslySetInnerHTML={{ __html: qrMarkup }} />
                 )}
                 <div className="panel-actions">
                   <button className="outline-button" disabled={busy} onClick={() => void cancelPendingSale()} type="button">{t("Cancel sale")}</button>
+                  <button className="outline-button" disabled={busy || checkingPayment} onClick={() => void checkAgain()} type="button">
+                    <RotateCcw size={15} />{" "}{t("Check again")}</button>
+                  <button className="outline-button" disabled={busy} onClick={() => void switchQr(!qrAfterpay)} type="button">
+                    {qrAfterpay ? t("Card QR instead") : t("Afterpay QR instead")}</button>
                   <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                     <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
                   {tapToPay.ready && (

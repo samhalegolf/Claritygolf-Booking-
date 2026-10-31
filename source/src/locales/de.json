@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "Der Kunde hält seine Karte an dieses iPhone. Der QR-Code ist da, falls er das lieber mag.",
   "Shows a QR code the customer scans to pay.": "Zeigt einen QR-Code, den der Kunde zum Bezahlen scannt.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Als offen erfasst. Markiere es in der Kassenliste als bezahlt, sobald beglichen.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Zahlungsprüfung beendet. Brich den Verkauf ab und starte ihn neu.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Dieses Konto hat noch keine Zahlungsart „Pass“. Öffne den Checkout erneut und versuch es noch mal.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Dieses Konto hat noch keine Zahlungsart „Gutschein“. Öffne den Checkout erneut und versuch es noch mal.",
   "Choose a payment method.": "Wähle eine Zahlungsart.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Paket kaufen · {amount}",
   "Package bought": "Paket gekauft",
   "Your coach will put it towards this lesson.": "Dein Coach rechnet es auf diese Stunde an.",
-  "Confirm & pay {amount}": "Bestätigen & {amount} bezahlen"
+  "Confirm & pay {amount}": "Bestätigen & {amount} bezahlen",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "Der Kunde scannt das und meldet sich auf seinem eigenen Handy bei Afterpay an. Dieser Bildschirm aktualisiert sich von selbst, sobald die Zahlung durch ist.",
+  "Check again": "Erneut prüfen",
+  "Card QR instead": "Stattdessen Karten-QR",
+  "Afterpay QR instead": "Stattdessen Afterpay-QR",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "Die Zahlungsseite wurde ohne Zahlung geschlossen. Brich den Verkauf ab und starte ihn neu.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Automatische Prüfung beendet. Tippe auf Erneut prüfen, sobald der Kunde bezahlt hat.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Noch nicht bezahlt. Wenn der Kunde gerade fertig ist, warte kurz und prüfe erneut.",
+  "Could not reach the payment service. Check the connection and try again.": "Der Zahlungsdienst ist nicht erreichbar. Prüfe die Verbindung und versuche es erneut.",
+  "Payment received": "Zahlung erhalten",
+  "Payment cancelled": "Zahlung abgebrochen",
+  "Thanks, your payment has gone through. You can close this page.": "Danke, deine Zahlung ist eingegangen. Du kannst diese Seite schließen.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Es wurde nichts abgebucht. Du kannst diese Seite schließen oder den Code erneut scannen, um anders zu bezahlen.",
+  "Receipt {receipt}": "Beleg {receipt}"
 }

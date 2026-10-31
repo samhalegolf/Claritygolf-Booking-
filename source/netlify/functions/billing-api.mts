@@ -4395,7 +4395,11 @@ export async function updatePosTransactionStatus(accountId: string, id: string, 
   // until Stripe decides.
   if (status !== "pending") {
     const released = await releaseTerminalAttempt(accountId, id);
-    if (released.state === "succeeded") {
+    // The QR too: a sale paid on the customer's phone is settled, not voided,
+    // and an unpaid one has its page closed so it cannot be paid afterwards.
+    const before = await posTransactionRow(accountId, id);
+    const qr = before ? await releasePosCheckout(accountId, before) : { state: "none" as const };
+    if (released.state === "succeeded" || qr.state === "succeeded") {
       throw Object.assign(new Error("A card payment for this sale has just gone through, so it is now paid."), {
         status: 409,
         code: "POS_ALREADY_PAID",
@@ -4683,19 +4687,39 @@ async function settlePosCardPayment(accountId: string, id: string, card: CardPay
   return { ...settled, transaction };
 }
 
+// How long a counter QR stays payable. Long enough for Afterpay's sign-in and
+// checks on the customer's phone (several minutes is normal), short enough that
+// a forgotten QR is not a live payment link for a day. Stripe's floor is 30.
+const POS_CHECKOUT_MINUTES = 60;
+
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
 // The client renders the returned URL as a QR code so the customer can pay
 // contactless from their own phone (Apple Pay / Google Pay), or opens it
 // directly to key a card in on the till.
 async function createPosCheckout(accountId: string, id: string, req: Request) {
+  // "afterpay" opens the customer's phone straight on Afterpay rather than on
+  // a list of ways to pay. Anything else is the usual everything-on page.
+  const afterpayOnly = (await parseBody(req).catch(() => ({})))?.method === "afterpay";
   const transaction = await getPosTransaction(accountId, id);
   if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
   if (transaction.status === "paid") {
     throw Object.assign(new Error(`${transaction.receiptNumber} is already paid.`), { status: 409, code: "POS_ALREADY_PAID" });
   }
+  if (transaction.status !== "pending") {
+    throw Object.assign(new Error(`${transaction.receiptNumber} is ${transaction.status} and cannot be paid.`), {
+      status: 409,
+      code: "POS_NOT_PENDING",
+    });
+  }
 
   const credential = await stripeFor(accountId);
   requireStripeFeature(credential, "till");
+  // A QR shown earlier for this sale is closed before a new one opens, or the
+  // customer could pay on both. One they already paid on is the payment.
+  const earlier = await posTransactionRow(accountId, id);
+  if (earlier && (await releasePosCheckout(accountId, earlier)).state === "succeeded") {
+    throw Object.assign(new Error(`${transaction.receiptNumber} is already paid.`), { status: 409, code: "POS_ALREADY_PAID" });
+  }
   // Switching from Tap to Pay to the QR: the tap has to be finished with first,
   // or the customer could pay both ways.
   const released = await releaseTerminalAttempt(accountId, id);
@@ -4732,6 +4756,17 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
     metadata: { pos_transaction_id: String(transaction.id), account_id: accountId, receipt_number: receiptNumber },
     successUrl: `${origin}/pos-paid?receipt=${encodeURIComponent(receiptNumber)}`,
     cancelUrl: `${origin}/pos-cancelled?receipt=${encodeURIComponent(receiptNumber)}`,
+    // A known end, so a QR left on a forgotten screen stops taking money.
+    expiresInMinutes: POS_CHECKOUT_MINUTES,
+    paymentMethodTypes: afterpayOnly ? ["afterpay_clearpay"] : undefined,
+  }).catch((error) => {
+    // Afterpay switched off for the account, or the amount outside Afterpay's
+    // limits: say so in words the counter can act on.
+    if (!afterpayOnly) throw error;
+    throw Object.assign(
+      new Error(`Afterpay can't take this payment (${error instanceof Error ? error.message : "Stripe refused it"}). Use the normal QR instead.`),
+      { status: 409, code: "AFTERPAY_UNAVAILABLE" },
+    );
   });
 
   await supabase("billing_pos_transactions", {
@@ -4741,7 +4776,7 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
     prefer: "return=minimal",
   });
 
-  return { url: session.url, sessionId: session.sessionId, receiptNumber };
+  return { url: session.url, sessionId: session.sessionId, receiptNumber, afterpay: afterpayOnly };
 }
 
 // Polled by the checkout modal while the QR is on screen. Asking Stripe
@@ -4777,6 +4812,77 @@ async function syncPosCheckout(accountId: string, id: string) {
     issuedPasses: settled.issuedPasses,
     issuedCoupons: await couponsForSale(accountId, id),
   };
+}
+
+/**
+ * Close the QR (Stripe Checkout) of a sale that is still pending, before
+ * something else takes the sale over: a tap, a new QR, a void, or a payment
+ * marked by hand. If the customer already paid on it, the sale is settled from
+ * that payment and "succeeded" comes back, so the caller stops.
+ */
+async function releasePosCheckout(accountId: string, row: Record<string, unknown>) {
+  const id = String(row.id ?? "");
+  const sessionId = cleanString(row.stripe_session_id, "", 200);
+  if (!sessionId || row.status !== "pending") return { state: "none" as const };
+  const sync = await syncPosCheckout(accountId, id);
+  if (sync.paid) return { state: "succeeded" as const, issuedPasses: sync.issuedPasses || [] };
+  if (sync.expired) return { state: "closed" as const };
+  try {
+    await stripeRequest(accountId, `checkout/sessions/${encodeURIComponent(sessionId)}/expire`, { method: "POST" });
+  } catch (error) {
+    // Expiring fails when the session completed or expired in the meantime.
+    const again = await syncPosCheckout(accountId, id);
+    if (again.paid) return { state: "succeeded" as const, issuedPasses: again.issuedPasses || [] };
+    if (!again.expired) throw error;
+  }
+  return { state: "closed" as const };
+}
+
+/**
+ * Settle the QR sales nobody was watching when they were paid.
+ *
+ * The till's poll settles a sale while it is on screen and the webhook settles
+ * it when it is not, but neither is guaranteed: a screen goes to sleep, a
+ * webhook is misconfigured. This runs on a schedule and asks Stripe directly
+ * about every pending sale with an open QR from the last two days. Settling is
+ * idempotent, so it overlapping the poll or the webhook is harmless.
+ *
+ * Online orders go through confirmOnlineOrder, which also sends the buyer's
+ * email and voids an order whose page has closed unpaid. Till sales are left
+ * pending when their QR expires: whether to void one is the coach's call.
+ */
+export async function sweepPendingPosCheckouts(options: { budgetMs: number }) {
+  const startedAt = Date.now();
+  const since = new Date(startedAt - 48 * 60 * 60 * 1000).toISOString();
+  const rows = (await supabase("billing_pos_transactions", {
+    query:
+      `select=id,account_id,receipt_number,source&status=eq.pending&stripe_session_id=not.is.null` +
+      `&created_at=gte.${encodeFilter(since)}&order=created_at.asc&limit=200`,
+  })) as Array<Record<string, unknown>>;
+  const result = { pending: rows.length, checked: 0, settled: [] as string[], needsAttention: [] as string[] };
+  for (const row of rows) {
+    if (Date.now() - startedAt > options.budgetMs) break;
+    const accountId = String(row.account_id ?? "");
+    const id = String(row.id ?? "");
+    const receipt = String(row.receipt_number ?? id);
+    try {
+      if (row.source === "online") {
+        const summary = await confirmOnlineOrder(accountId, id);
+        if (summary.status === "paid") result.settled.push(receipt);
+      } else {
+        const sync = await syncPosCheckout(accountId, id);
+        if (sync.paid) result.settled.push(receipt);
+      }
+      result.checked += 1;
+    } catch (error) {
+      // A payment that does not match its sale (wrong amount, say) is refused
+      // by settlePosTransaction for a person to sort out. Logged, and the rest
+      // of the sweep carries on.
+      result.needsAttention.push(receipt);
+      console.error("pos_checkout_sweep:needs_attention", accountId, receipt, error instanceof Error ? error.message : error);
+    }
+  }
+  return result;
 }
 
 // --- Tap to Pay (Stripe Terminal) --------------------------------------------
@@ -5016,22 +5122,8 @@ export async function startTerminalPayment(
 
   // The QR may have been shown first. If the customer already paid there, that
   // is the payment; if not, it is closed so they cannot pay both ways.
-  const sessionId = cleanString(row.stripe_session_id, "", 200);
-  if (sessionId) {
-    const sync = await syncPosCheckout(accountId, transactionId);
-    if (sync.paid) return terminalPaidResponse(accountId, transactionId, sync.issuedPasses || []);
-    if (!sync.expired) {
-      await stripeRequestWith(credential, `checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {
-        method: "POST",
-      }).catch(async (error) => {
-        // Expiring fails when the session completed in the meantime.
-        const again = await syncPosCheckout(accountId, transactionId);
-        if (!again.paid) throw error;
-      });
-      const after = await posTransactionRow(accountId, transactionId);
-      if (after?.status === "paid") return terminalPaidResponse(accountId, transactionId);
-    }
-  }
+  const qr = await releasePosCheckout(accountId, row);
+  if (qr.state === "succeeded") return terminalPaidResponse(accountId, transactionId, qr.issuedPasses);
 
   const due = posCardDueCents(row);
   if (due <= 0) {

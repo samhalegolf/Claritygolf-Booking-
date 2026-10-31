@@ -46,6 +46,7 @@ const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage")
 const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingReviewSharePage"));
 const ClarityTerminalPage = lazy(() => import("./modules/clarity-terminal/ClarityTerminalPage"));
 const ConfirmEmailScreen = lazy(() => import("./modules/auth/ConfirmEmailScreen"));
+const PaymentReturnPage = lazy(() => import("./modules/public-site/PaymentReturnPage"));
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
@@ -101,6 +102,10 @@ function inStaffApp() {
 // else -- Google's reviewers included -- still gets the public home page. If
 // the hint is stale and the session has gone, they get the login screen.
 const homeSkipsToWorkspace = publicPath === "/" && !authLinkAtRoot && (lastVisitorWasCoach() || inStaffApp());
+// Where a customer's phone lands after paying a counter QR. Public: the
+// customer is a stranger, and a login screen there reads as "it failed".
+const paymentReturn: "paid" | "cancelled" | null =
+  publicPath === "/pos-paid" ? "paid" : publicPath === "/pos-cancelled" ? "cancelled" : null;
 const publicPage: PublicPage | null =
   publicPath === "/privacy"
     ? "privacy"
@@ -117,7 +122,7 @@ const publicPage: PublicPage | null =
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
 const willCheckSession =
-  !publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
+  !publicPage && !paymentReturn && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
 if (willCheckSession && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
@@ -160,7 +165,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicPage || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
+    if (publicPage || paymentReturn || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -189,6 +194,14 @@ function Root() {
   // revoked cookie), which drops straight back to the login screen instead of
   // leaving a workspace on screen that can no longer save anything.
   const handleSessionLost = useCallback(() => setSession(guestSession), []);
+
+  if (paymentReturn) {
+    return (
+      <Suspense fallback={<Loading size="screen" label="" />}>
+        <PaymentReturnPage outcome={paymentReturn} />
+      </Suspense>
+    );
+  }
 
   if (publicPage) {
     return (

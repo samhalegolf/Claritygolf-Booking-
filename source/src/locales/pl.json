@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "Klient przykłada kartę do tego iPhone'a. Jeśli woli, może użyć kodu QR.",
   "Shows a QR code the customer scans to pay.": "Pokazuje kod QR, który klient skanuje, aby zapłacić.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Zapisano jako należność. Oznacz jako opłacone na liście POS po rozliczeniu.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Przestano sprawdzać płatność. Anuluj sprzedaż i zacznij od nowa.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "To konto nie ma jeszcze metody płatności Karnet. Otwórz ponownie kasę i spróbuj jeszcze raz.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "To konto nie ma jeszcze metody płatności Kupon. Otwórz ponownie kasę i spróbuj jeszcze raz.",
   "Choose a payment method.": "Wybierz metodę płatności.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Kup pakiet · {amount}",
   "Package bought": "Pakiet kupiony",
   "Your coach will put it towards this lesson.": "Trener zaliczy go na poczet tej lekcji.",
-  "Confirm & pay {amount}": "Potwierdź i zapłać {amount}"
+  "Confirm & pay {amount}": "Potwierdź i zapłać {amount}",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "Klient skanuje ten kod i loguje się do Afterpay na własnym telefonie. Ten ekran zaktualizuje się sam, gdy tylko płatność przejdzie.",
+  "Check again": "Sprawdź ponownie",
+  "Card QR instead": "Zamiast tego QR karty",
+  "Afterpay QR instead": "Zamiast tego QR Afterpay",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "Strona płatności zamknęła się bez zapłaty. Anuluj sprzedaż i zacznij od nowa.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Automatyczne sprawdzanie zatrzymane. Gdy klient zapłaci, dotknij Sprawdź ponownie.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Jeszcze nie zapłacono. Jeśli klient właśnie skończył, odczekaj chwilę i sprawdź ponownie.",
+  "Could not reach the payment service. Check the connection and try again.": "Nie udało się połączyć z usługą płatności. Sprawdź połączenie i spróbuj ponownie.",
+  "Payment received": "Płatność otrzymana",
+  "Payment cancelled": "Płatność anulowana",
+  "Thanks, your payment has gone through. You can close this page.": "Dziękujemy, płatność została zrealizowana. Możesz zamknąć tę stronę.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Nic nie zostało pobrane. Możesz zamknąć tę stronę lub zeskanować kod ponownie, aby zapłacić w inny sposób.",
+  "Receipt {receipt}": "Paragon {receipt}"
 }

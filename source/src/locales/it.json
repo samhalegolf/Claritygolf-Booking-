@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "Il cliente avvicina la carta a questo iPhone. C'è anche il QR, se preferisce.",
   "Shows a QR code the customer scans to pay.": "Mostra un codice QR che il cliente scansiona per pagare.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Registrato come da pagare. Segnalo come pagato dall'elenco POS una volta saldato.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Controllo del pagamento interrotto. Annulla la vendita e ricominciala.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Questo account non ha ancora un metodo di pagamento Pass. Riapri il checkout e riprova.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Questo account non ha ancora un metodo di pagamento Coupon. Riapri il checkout e riprova.",
   "Choose a payment method.": "Scegli un metodo di pagamento.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Acquista pacchetto · {amount}",
   "Package bought": "Pacchetto acquistato",
   "Your coach will put it towards this lesson.": "Il tuo coach lo applicherà a questa lezione.",
-  "Confirm & pay {amount}": "Conferma e paga {amount}"
+  "Confirm & pay {amount}": "Conferma e paga {amount}",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "Il cliente scansiona questo codice e accede ad Afterpay sul proprio telefono. Questa schermata si aggiorna da sola non appena il pagamento va a buon fine.",
+  "Check again": "Controlla di nuovo",
+  "Card QR instead": "QR carta invece",
+  "Afterpay QR instead": "QR Afterpay invece",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "La pagina di pagamento si è chiusa senza pagamento. Annulla la vendita e ricominciala.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "Controllo automatico interrotto. Quando il cliente ha pagato, tocca Controlla di nuovo.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Non ancora pagato. Se il cliente ha appena finito, attendi un attimo e controlla di nuovo.",
+  "Could not reach the payment service. Check the connection and try again.": "Impossibile raggiungere il servizio di pagamento. Controlla la connessione e riprova.",
+  "Payment received": "Pagamento ricevuto",
+  "Payment cancelled": "Pagamento annullato",
+  "Thanks, your payment has gone through. You can close this page.": "Grazie, il pagamento è andato a buon fine. Puoi chiudere questa pagina.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Non è stato addebitato nulla. Puoi chiudere questa pagina o scansionare di nuovo il codice per pagare in un altro modo.",
+  "Receipt {receipt}": "Ricevuta {receipt}"
 }

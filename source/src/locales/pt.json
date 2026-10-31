@@ -2296,7 +2296,6 @@
   "Customer taps their card on this iPhone. The QR is there if they'd rather.": "O cliente encosta o cartão a este iPhone. O código QR está disponível se preferir.",
   "Shows a QR code the customer scans to pay.": "Mostra um código QR que o cliente lê para pagar.",
   "Recorded as owed. Mark it paid from the POS list once settled.": "Registado como devido. Marque como pago na lista do ponto de venda quando for liquidado.",
-  "Stopped checking for payment. Cancel the sale and start it again.": "Deixou de verificar o pagamento. Cancele a venda e comece novamente.",
   "This account has no Pass payment method yet. Reopen the checkout and try again.": "Esta conta ainda não tem o método de pagamento Passe. Reabra o pagamento e tente novamente.",
   "This account has no Coupon payment method yet. Reopen the checkout and try again.": "Esta conta ainda não tem o método de pagamento Cupão. Reabra o pagamento e tente novamente.",
   "Choose a payment method.": "Escolha um método de pagamento.",
@@ -4790,5 +4789,19 @@
   "Buy package · {amount}": "Comprar pacote · {amount}",
   "Package bought": "Pacote comprado",
   "Your coach will put it towards this lesson.": "O seu treinador vai aplicá-lo a esta aula.",
-  "Confirm & pay {amount}": "Confirmar e pagar {amount}"
+  "Confirm & pay {amount}": "Confirmar e pagar {amount}",
+  "Customer scans this and signs in to Afterpay on their own phone. This screen updates on its own the moment it clears.": "O cliente digitaliza isto e inicia sessão no Afterpay no próprio telemóvel. Este ecrã atualiza-se sozinho assim que o pagamento for confirmado.",
+  "Check again": "Verificar novamente",
+  "Card QR instead": "Usar QR de cartão",
+  "Afterpay QR instead": "Usar QR do Afterpay",
+  "Afterpay": "Afterpay",
+  "This payment page closed without being paid. Cancel the sale and start it again.": "A página de pagamento fechou sem ser paga. Cancele a venda e comece novamente.",
+  "Stopped checking automatically. Once the customer has paid, tap Check again.": "A verificação automática parou. Quando o cliente tiver pago, toque em Verificar novamente.",
+  "Not paid yet. If the customer has just finished, wait a moment and check again.": "Ainda não foi pago. Se o cliente acabou agora, aguarde um momento e verifique novamente.",
+  "Could not reach the payment service. Check the connection and try again.": "Não foi possível contactar o serviço de pagamento. Verifique a ligação e tente novamente.",
+  "Payment received": "Pagamento recebido",
+  "Payment cancelled": "Pagamento cancelado",
+  "Thanks, your payment has gone through. You can close this page.": "Obrigado, o seu pagamento foi efetuado. Pode fechar esta página.",
+  "Nothing was charged. You can close this page, or scan the code again to pay another way.": "Nada foi cobrado. Pode fechar esta página ou digitalizar o código novamente para pagar de outra forma.",
+  "Receipt {receipt}": "Recibo {receipt}"
 }
