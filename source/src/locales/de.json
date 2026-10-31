@@ -5123,5 +5123,7 @@
   "The site could not be brought over.": "Die Website konnte nicht übernommen werden.",
   "Or bring over a site you already have": "Oder übernehmen Sie eine Website, die Sie schon haben",
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Eine Squarespace-Website kommt mit ihren Seiten, Artikeln, Videos, Texten und Bildern unter denselben Adressen herüber, im oben gewählten Look. Sie ersetzt diesen Entwurf; nichts wird veröffentlicht, bis Sie auf Veröffentlichen drücken.",
-  "Bringing it over…": "Wird übernommen…"
+  "Bringing it over…": "Wird übernommen…",
+  "Bringing pictures over: {done} of {total}": "Bilder werden übernommen: {done} von {total}",
+  "{count} pictures are now in your own storage.": "{count} Bilder liegen jetzt in Ihrem eigenen Speicher."
 }

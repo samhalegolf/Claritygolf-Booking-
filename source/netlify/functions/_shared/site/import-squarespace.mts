@@ -54,15 +54,19 @@ export type ImportInput = {
   preset: string;
   /** The business's slug, so its own booking frames become Booking blocks. */
   bookingSlug: string;
-  upload?: ImportUpload;
   fetch?: ImportFetch;
 };
 
 export type ImportedSite = {
   settings: SiteSettings;
   pages: Array<Omit<SitePage, "id" | "sortOrder">>;
+  /** The old site's pictures the pages still point at, for bringPictures to fetch in batches afterwards. */
+  pictures: string[];
   report: string[];
 };
+
+/** How many pages are read at once. A function call has seconds, not minutes, so pages come in parallel. */
+const PAGE_CONCURRENCY = 6;
 
 export class ImportError extends Error {
   status = 400;
@@ -662,19 +666,34 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
     void assign;
   };
 
+  // Every page is read up front, a few at a time, so the whole import fits in
+  // the seconds a function call has. The pages are then walked in sitemap order.
+  const fetched = new Map<string, { json: PageJson; html: string } | Error>();
+  await Promise.all(
+    Array.from({ length: Math.min(PAGE_CONCURRENCY, paths.length) }, async (_, worker) => {
+      for (let index = worker; index < paths.length; index += PAGE_CONCURRENCY) {
+        const path = paths[index];
+        const pageUrl = `${base}${path === "/" ? "" : path}`;
+        try {
+          const [json, html] = await Promise.all([
+            readText(doFetch, `${pageUrl}?format=json`, "application/json").then((text) => JSON.parse(text) as PageJson),
+            readText(doFetch, pageUrl, "text/html"),
+          ]);
+          fetched.set(path, { json, html });
+        } catch (error) {
+          fetched.set(path, error instanceof Error ? error : new Error("could not read it"));
+        }
+      }
+    }),
+  );
+
   for (const path of paths) {
-    const pageUrl = `${base}${path === "/" ? "" : path}`;
-    let json: PageJson;
-    let html: string;
-    try {
-      [json, html] = await Promise.all([
-        readText(doFetch, `${pageUrl}?format=json`, "application/json").then((text) => JSON.parse(text) as PageJson),
-        readText(doFetch, pageUrl, "text/html"),
-      ]);
-    } catch (error) {
-      report.push(`Skipped ${path}: ${error instanceof Error ? error.message : "could not read it"}.`);
+    const read = fetched.get(path);
+    if (!read || read instanceof Error) {
+      report.push(`Skipped ${path}: ${read instanceof Error ? read.message : "could not read it"}.`);
       continue;
     }
+    const { json, html } = read;
     siteName = siteName || json.website?.siteTitle || textOf(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "").split(/\s[—–|-]\s/).pop() || "";
     if (!header.links.length) header = headerOf(html);
     const collection = json.collection || {};
@@ -779,24 +798,10 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
     else throw new ImportError("No pages could be read from that site.");
   }
 
-  // Pictures: brought into the site's own bucket where the caller can, else left where they are.
-  if (input.upload) {
-    const moved = new Map<string, string>();
-    let count = 0;
-    for (const url of imagesToBring.keys()) {
-      if (count >= MAX_IMAGES) {
-        report.push("Some pictures were left at their old addresses: more than the import brings over in one go.");
-        break;
-      }
-      count += 1;
-      try {
-        moved.set(url, await bringImage(doFetch, input.upload, url));
-      } catch (error) {
-        report.push(`A picture stays at its old address (${url.slice(0, 80)}…): ${error instanceof Error ? error.message : "could not be read"}.`);
-      }
-    }
-    if (moved.size) for (const page of pages) page.content = cleanSitePageContent(JSON.parse(JSON.stringify(page.content, (key, value) => (typeof value === "string" && moved.has(value) ? moved.get(value) : value))));
-  }
+  // Pictures stay at their old addresses for now; the caller brings them over
+  // in batches with bringPictures, each batch its own short call.
+  const pictures = [...imagesToBring.keys()].slice(0, MAX_IMAGES);
+  if (imagesToBring.size > MAX_IMAGES) report.push(`${imagesToBring.size - MAX_IMAGES} pictures beyond the first ${MAX_IMAGES} stay at their old addresses.`);
 
   // A link to a page of the old site that did not come over (a store item, a
   // tag listing) leads to the nearest page above it, or back to the old site.
@@ -843,7 +848,33 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
   });
 
   report.unshift(`${ordered.length} pages came over from ${siteHost}: ${ordered.filter((p) => p.kind === "page").length} pages, ${ordered.filter((p) => p.kind === "article").length} articles, ${ordered.filter((p) => p.kind === "video").length} videos.`);
-  return { settings, pages: ordered, report };
+  return { settings, pages: ordered, pictures, report };
+}
+
+/**
+ * A batch of the old site's pictures brought into the bucket: each address
+ * mapped to its new one. One that cannot be read is reported and left as it
+ * was, so a broken picture never stops the rest.
+ */
+export async function bringPictures(urls: string[], upload: ImportUpload, doFetch: ImportFetch = (url, init) => fetch(url, init)): Promise<{ moved: Record<string, string>; report: string[] }> {
+  const moved: Record<string, string> = {};
+  const report: string[] = [];
+  await Promise.all(
+    urls.slice(0, 8).map(async (url) => {
+      if (!/^https:\/\//.test(url)) return;
+      try {
+        moved[url] = await bringImage(doFetch, upload, url);
+      } catch (error) {
+        report.push(`A picture stays at its old address (${url.slice(0, 80)}…): ${error instanceof Error ? error.message : "could not be read"}.`);
+      }
+    }),
+  );
+  return { moved, report };
+}
+
+/** A page's content with every moved picture at its new address. */
+export function replacePictureUrls<T>(value: T, moved: Record<string, string>): T {
+  return JSON.parse(JSON.stringify(value, (key, entry) => (typeof entry === "string" && moved[entry] ? moved[entry] : entry))) as T;
 }
 
 function register(map: Map<string, Array<(url: string) => void>>, url: string) {

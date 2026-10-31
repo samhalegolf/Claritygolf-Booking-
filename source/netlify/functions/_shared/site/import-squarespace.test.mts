@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { blocksOfBody, blocksOfSection, headerOf, hoursGroups, importSquarespaceSite, metaOf, pagePathsOf, piecesOf, sectionsOf, textOf, youtubeIdIn } from "./import-squarespace.mts";
+import { blocksOfBody, blocksOfSection, bringPictures, headerOf, hoursGroups, importSquarespaceSite, metaOf, pagePathsOf, piecesOf, replacePictureUrls, sectionsOf, textOf, youtubeIdIn } from "./import-squarespace.mts";
 
 const section = (theme: string, inner: string) => `<section data-test="page-section" data-section-theme="${theme}" class="page-section">${inner}</section>`;
 const footer = section("", `<h2>Riverside Golf</h2><p><a href="mailto:hi@riverside.example">hi@riverside.example</a></p>`);
@@ -125,20 +125,14 @@ test("a whole site comes over at its own addresses, with the menu in the old ord
   };
   const sitemap = `<urlset>${["/", "/contact", "/articles", "/articles/one", "/videos/v/flow", "/broken"].map((path) => `<url><loc>https://www.riverside.example${path}</loc></url>`).join("")}</urlset>`;
   const fetched: string[] = [];
-  const uploaded: string[] = [];
   const result = await importSquarespaceSite({
     url: "www.riverside.example",
     preset: "ember",
     bookingSlug: "riverside",
-    upload: async (type) => {
-      uploaded.push(type);
-      return `https://bucket.example/${uploaded.length}.jpg`;
-    },
     fetch: async (url) => {
       fetched.push(url);
       const parsed = new URL(url);
       if (parsed.pathname === "/sitemap.xml") return new Response(sitemap, { status: 200 });
-      if (parsed.hostname === "cdn.example") return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/jpeg" } });
       const file = files[parsed.pathname];
       if (!file) return new Response("gone", { status: 404 });
       if (parsed.searchParams.get("format") === "json") return new Response(JSON.stringify(file.json), { status: 200 });
@@ -157,15 +151,37 @@ test("a whole site comes over at its own addresses, with the menu in the old ord
   assert.deepEqual(result.settings.header.social, [{ kind: "facebook", url: "https://www.facebook.com/riverside" }]);
   const home = result.pages[0].content;
   assert.equal(home.description, "Golf lessons by the river");
-  assert.ok(home.blocks[0].type === "hero" && home.blocks[0].image?.url === "https://bucket.example/1.jpg", "the hero's picture was brought into the bucket");
+  assert.ok(home.blocks[0].type === "hero" && home.blocks[0].image?.url === "https://cdn.example/sam.jpg", "pictures stay where they were until they are brought over");
+  assert.deepEqual(result.pictures, ["https://cdn.example/sam.jpg", "https://cdn.example/one.jpg"], "the pictures to bring over are listed, each once");
   assert.ok(home.blocks[0].type === "hero" && home.blocks[0].buttons[0].href === "https://www.riverside.example/store/p/voucher", "a link to a page that did not come over goes back to the old site");
   const article = result.pages[3].content;
   assert.deepEqual([article.seoTitle, article.description, article.summary, article.date], ["Article One", "Read one", "About one", "2023-03-26"]);
-  assert.ok(article.cover?.url.startsWith("https://bucket.example/"));
+  assert.equal(article.cover?.url, "https://cdn.example/one.jpg");
   assert.equal(result.pages[4].content.video, "neYfj2DzbY8");
   assert.ok(result.report.some((line) => line.includes("Skipped /broken")), "the unreadable page is reported");
   assert.ok(result.report[0].startsWith("5 pages came over"));
-  assert.ok(fetched.every((url) => url.startsWith("https://www.riverside.example") || url.startsWith("https://cdn.example")), "only the site and its pictures are read");
+  assert.ok(fetched.every((url) => url.startsWith("https://www.riverside.example")), "only the site is read; its pictures wait for the next step");
+});
+
+test("pictures are brought over a batch at a time, each mapped to its new address, and swapped into a page", async () => {
+  const uploaded: string[] = [];
+  const brought = await bringPictures(
+    ["https://cdn.example/a.jpg", "https://cdn.example/broken.jpg", "http://plain.example/x.jpg"],
+    async (type) => {
+      uploaded.push(type);
+      return `https://bucket.example/${uploaded.length}.jpg`;
+    },
+    async (url) =>
+      url.startsWith("https://cdn.example/broken") ? new Response("gone", { status: 404 }) : new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/jpeg" } }),
+  );
+  assert.deepEqual(brought.moved, { "https://cdn.example/a.jpg": "https://bucket.example/1.jpg" });
+  assert.equal(uploaded.length, 1, "an http address is never fetched, a broken one is reported");
+  assert.ok(brought.report[0].includes("broken.jpg"));
+  const content = { cover: { url: "https://cdn.example/a.jpg", alt: "" }, blocks: [{ type: "image", image: { url: "https://cdn.example/a.jpg", alt: "" } }, { type: "text", body: "https://cdn.example/a.jpg stays in words" }] };
+  const swapped = replacePictureUrls(content, brought.moved);
+  assert.equal(swapped.cover.url, "https://bucket.example/1.jpg");
+  assert.equal((swapped.blocks[0] as { image: { url: string } }).image.url, "https://bucket.example/1.jpg");
+  assert.equal((swapped.blocks[1] as { body: string }).body, "https://cdn.example/a.jpg stays in words", "only a whole value that is the address is swapped");
 });
 
 test("an address that is not an https site is refused before anything is read", async () => {

@@ -5123,5 +5123,7 @@
   "The site could not be brought over.": "De website kon niet worden overgezet.",
   "Or bring over a site you already have": "Of zet een website over die je al hebt",
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Een Squarespace-website komt over met pagina's, artikelen, video's, teksten en afbeeldingen, op dezelfde adressen, in de look die je hierboven kiest. Hij vervangt dit concept; er wordt niets gepubliceerd tot je op Publiceren drukt.",
-  "Bringing it over…": "Bezig met overzetten…"
+  "Bringing it over…": "Bezig met overzetten…",
+  "Bringing pictures over: {done} of {total}": "Afbeeldingen overzetten: {done} van {total}",
+  "{count} pictures are now in your own storage.": "{count} afbeeldingen staan nu in je eigen opslag."
 }
