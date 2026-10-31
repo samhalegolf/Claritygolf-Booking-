@@ -41,6 +41,16 @@ export function publicShopBusiness(pathname = window.location.pathname) {
   return first && !SCREEN_SEGMENTS.has(first) && second === "shop" && !third ? first : "";
 }
 
+/**
+ * The business whose website page this path is, or "". The page sits beside
+ * the booking page and the shop at /<business>/site, on any of Clarity's own
+ * hosts. A business's own domain serves the same page at its root instead.
+ */
+export function publicSiteBusiness(pathname = window.location.pathname) {
+  const [first = "", second = "", third = ""] = pathSegments(pathname);
+  return first && !SCREEN_SEGMENTS.has(first) && second === "site" && !third ? first : "";
+}
+
 /** The shop's path, keeping whatever query the page was opened with (?embed=booking). */
 export function publicShopHref(business: string, search = typeof window === "undefined" ? "" : window.location.search) {
   return `/${business}/shop${search}`;

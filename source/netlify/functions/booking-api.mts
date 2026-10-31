@@ -66,6 +66,8 @@ export const config: Config = {
     "/api/public-shop/checkout",
     "/api/public-shop/order",
     "/api/public-shop/cancel",
+    "/api/site",
+    "/api/site/*",
     "/api/public-cancel",
     "/api/public-notification-status",
     "/api/public-reschedule",

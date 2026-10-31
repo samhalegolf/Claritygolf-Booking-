@@ -1212,6 +1212,6 @@
 }
 
 .player-video-removed { margin-bottom: 12px; }
-.player-video-removed summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+.player-video-removed summary { cursor: pointer; color: var(--c-muted); font-size: 0.85rem; }
 .player-video-removed > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .player-video-thumb { object-fit: cover; }

@@ -557,6 +557,7 @@ const AccountSettingsPanel = lazy(() =>
 const BookingSettingsPanel = lazy(() =>
   import("./modules/settings/BookingSettingsPanel").then((module) => ({ default: module.BookingSettingsPanel })),
 );
+const SiteBuilderPanel = lazy(() => import("./modules/site-builder/SiteBuilderPanel"));
 const PlayerBookingEmbedPanel = lazy(() =>
   import("./modules/settings/PlayerBookingEmbedPanel").then((module) => ({ default: module.PlayerBookingEmbedPanel })),
 );
@@ -2666,7 +2667,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
   useEffect(() => {
     if (isAdminUser) return;
-    if (["business", "notifications", "email-sms", "account", "developer"].includes(settingsTab)) {
+    if (["business", "website", "notifications", "email-sms", "account", "developer"].includes(settingsTab)) {
       setSettingsTab("services");
     }
   }, [isAdminUser, settingsTab]);
@@ -17768,6 +17769,18 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               {settingsTab === "developer" ? (
                 <Suspense fallback={<Loading what={t("your connections")} />}>
                   <IntegrationsPanel audience="integration" unofferedIds={capabilities.optix ? [] : ["optix"]} />
+                </Suspense>
+              ) : null}
+              {/* Own tab only: it reads the page, its domains and the brand
+                  logo on mount, and mounts a preview frame nobody on Booking
+                  asked for. */}
+              {isAdminUser && settingsTab === "website" ? (
+                <Suspense fallback={<Loading what={t("your website")} />}>
+                  <SiteBuilderPanel
+                    onToast={(message) => setToast({ message })}
+                    brandLogo={brandSettings.logoPreview}
+                    brandShowLogo={brandSettings.showLogo}
+                  />
                 </Suspense>
               ) : null}
               {/* Own tab only: it reads keys and webhook endpoints on mount. */}
