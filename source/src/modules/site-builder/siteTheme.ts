@@ -5,7 +5,7 @@
 // The same object drives the editor's preview and the public page.
 
 import type { CSSProperties } from "react";
-import { googleFontsUrl, siteFont, type SiteBookingScreen, type SiteTheme } from "../../../netlify/functions/_shared/site/document.mts";
+import { HOME_PAGE_SLUG, googleFontsUrl, siteFont, type SiteBookingScreen, type SiteTheme } from "../../../netlify/functions/_shared/site/document.mts";
 import { BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE, PUBLIC_BOOKING_HOST } from "../shared/bookingHandoff";
 import { publicBookingPath } from "../public-booking/bookingScreen";
 
@@ -62,7 +62,19 @@ export function bookingPageUrl(businessSlug: string, screen: SiteBookingScreen =
   return url.toString();
 }
 
-/** Where the published page can be seen on Clarity's own address. */
-export function publicSitePath(businessSlug: string): string {
-  return `/${businessSlug}/site`;
+/** The business's shop page on Clarity's own address, for a shop block that frames it. */
+export function shopPageUrl(businessSlug: string): string {
+  const url = new URL(`https://${PUBLIC_BOOKING_HOST}/${businessSlug}/shop`);
+  url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
+  return url.toString();
+}
+
+/** Where a published page can be seen on Clarity's own address. */
+export function publicSitePath(businessSlug: string, pageSlug = HOME_PAGE_SLUG): string {
+  return pageSlug === HOME_PAGE_SLUG ? `/${businessSlug}/site` : `/${businessSlug}/site/${pageSlug}`;
+}
+
+/** Where a page lives on the business's own domain: the root, or one segment. */
+export function customDomainPagePath(pageSlug: string): string {
+  return pageSlug === HOME_PAGE_SLUG ? "/" : `/${pageSlug}`;
 }

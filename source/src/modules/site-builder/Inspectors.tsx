@@ -1,24 +1,32 @@
-// What the right-hand column shows for whatever is selected: the page and
-// its theme, the header, the footer, or one block.
+// What the right-hand column shows for whatever is selected: the site's
+// look, the header, the footer, the page itself, or one block.
+import { ExternalLink, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+
 import {
+  HOME_PAGE_SLUG,
   SITE_BOOKING_SCREENS,
   SITE_FEATURE_ICONS,
   SITE_FONTS,
   SITE_SOCIAL_KINDS,
   SITE_THEME_PRESETS,
+  cleanPageSlug,
   siteId,
   themeFromPreset,
   type SiteBlock,
-  type SiteDocument,
   type SiteFooter,
   type SiteHeader,
+  type SitePage,
+  type SiteSettings,
   type SiteTheme,
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
 import { BOOKING_SCREENS } from "../public-booking/bookingScreens";
-import { ButtonInput, ColorInput, ImageInput, ListEditor, NumberInput, SelectInput, TextArea, TextInput, ToggleInput } from "./fields";
+import { ButtonInput, ColorInput, DateInput, ImageInput, LinkInput, ListEditor, NumberInput, SelectInput, TextArea, TextInput, ToggleInput, type PageOption } from "./fields";
+import { fetchCoachShop, setShopEnabled, type CoachShop } from "./siteApi";
+import { money } from "./ShopBlock";
 
-type Common = { bookingHref: string; onError: (message: string) => void };
+type Common = { pages: PageOption[]; bookingHref: string; onError: (message: string) => void };
 
 const alignOptions = () => [
   { value: "left" as const, label: t("Left") },
@@ -27,17 +35,14 @@ const alignOptions = () => [
 
 const fontOptions = SITE_FONTS.map((font) => ({ value: font.id, label: font.label }));
 
-export function PageInspector({ document, onChange }: { document: SiteDocument; onChange: (next: SiteDocument) => void }) {
-  const theme = document.theme;
-  const setTheme = (patch: Partial<SiteTheme>) => onChange({ ...document, theme: { ...theme, ...patch } });
+export function SiteInspector({ settings, onChange }: { settings: SiteSettings; onChange: (next: SiteSettings) => void }) {
+  const theme = settings.theme;
+  const setTheme = (patch: Partial<SiteTheme>) => onChange({ ...settings, theme: { ...theme, ...patch } });
   const setColor = (key: keyof SiteTheme["colors"], value: string) => setTheme({ colors: { ...theme.colors, [key]: value } });
   return (
     <>
-      <h3 className="site-inspector-title">{t("Page")}</h3>
-      <TextInput label={t("Browser tab title")} value={document.title} maxLength={120} onChange={(title) => onChange({ ...document, title })} />
-      <TextArea label={t("Description for search engines")} value={document.description} rows={3} maxLength={300} onChange={(description) => onChange({ ...document, description })} />
-
       <h3 className="site-inspector-title">{t("Look")}</h3>
+      <p className="site-field-help">{t("Colours, fonts and shapes apply to every page of the site.")}</p>
       <div className="site-presets" role="group" aria-label={t("Colour presets")}>
         {SITE_THEME_PRESETS.map((preset) => (
           <button
@@ -111,7 +116,70 @@ export function PageInspector({ document, onChange }: { document: SiteDocument; 
   );
 }
 
-export function HeaderInspector({ header, onChange, bookingHref }: { header: SiteHeader; onChange: (next: SiteHeader) => void; bookingHref: string }) {
+/** The page itself: its name in the menu, its address, and what an article shows on an index. */
+export function PageInspector({
+  page,
+  pages,
+  onChange,
+  onDelete,
+  onError,
+}: {
+  page: SitePage;
+  pages: PageOption[];
+  onChange: (next: SitePage) => void;
+  onDelete: () => void;
+  onError: (message: string) => void;
+}) {
+  const isHome = page.slug === HOME_PAGE_SLUG;
+  const content = page.content;
+  const setContent = (patch: Partial<SitePage["content"]>) => onChange({ ...page, content: { ...content, ...patch } });
+  // `pages` is every other page: a clash is any of them at this address.
+  const slugTaken = pages.some((other) => other.slug === page.slug);
+  return (
+    <>
+      <h3 className="site-inspector-title">{t("This page")}</h3>
+      <TextInput label={t("Name in the menu")} value={page.title} maxLength={120} onChange={(title) => onChange({ ...page, title })} />
+      <TextInput
+        label={t("Address")}
+        value={page.slug}
+        maxLength={60}
+        readOnly={isHome}
+        onChange={(slug) => onChange({ ...page, slug: cleanPageSlug(slug, "") || slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-") })}
+        help={isHome ? t("The home page is the site's front door: its address cannot change.") : t("Lower-case letters, digits and hyphens. The page lives at /{slug} on your domain.", { slug: page.slug })}
+      />
+      {slugTaken ? <p className="workspace-save-error">{t("Another page already has this address.")}</p> : null}
+      <TextArea label={t("Description for search engines")} value={content.description} rows={3} maxLength={300} onChange={(description) => setContent({ description })} />
+      {!isHome ? <ToggleInput label={t("Show in the menu")} checked={page.inNav} onChange={(inNav) => onChange({ ...page, inNav })} /> : null}
+      {!isHome ? (
+        <SelectInput
+          label={t("Kind of page")}
+          value={page.kind}
+          onChange={(kind) => onChange({ ...page, kind })}
+          options={[
+            { value: "page", label: t("Page") },
+            { value: "article", label: t("Article") },
+          ]}
+        />
+      ) : null}
+      {page.kind === "article" ? (
+        <>
+          <p className="site-field-help">{t("An article is listed on any page with an Articles block, newest first, with these details.")}</p>
+          <DateInput label={t("Date")} value={content.date} onChange={(date) => setContent({ date })} />
+          <TextArea label={t("Summary")} value={content.summary} rows={3} maxLength={400} onChange={(summary) => setContent({ summary })} />
+          <ImageInput label={t("Cover picture")} value={content.cover} onChange={(cover) => setContent({ cover })} onError={onError} />
+        </>
+      ) : null}
+      {!isHome ? (
+        <button className="outline-button" type="button" onClick={onDelete}>
+          <Trash2 size={16} />
+          {t("Delete this page")}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+export function HeaderInspector({ header, onChange, pages, bookingHref }: { header: SiteHeader; onChange: (next: SiteHeader) => void; pages: PageOption[]; bookingHref: string }) {
   return (
     <>
       <h3 className="site-inspector-title">{t("Header")}</h3>
@@ -119,21 +187,22 @@ export function HeaderInspector({ header, onChange, bookingHref }: { header: Sit
       <ToggleInput label={t("Show your business name")} checked={header.showName} onChange={(showName) => onChange({ ...header, showName })} />
       <ToggleInput label={t("Stays at the top while scrolling")} checked={header.sticky} onChange={(sticky) => onChange({ ...header, sticky })} />
       <p className="site-field-help">{t("The logo is the one under Settings › Business › Business branding.")}</p>
-      <h4 className="site-inspector-subtitle">{t("Menu links")}</h4>
-      <LinkList links={header.links} onChange={(links) => onChange({ ...header, links })} />
+      <p className="site-field-help">{t("The menu lists every page marked \"Show in the menu\", in the order of the page list. Add extra links here.")}</p>
+      <h4 className="site-inspector-subtitle">{t("Extra links")}</h4>
+      <LinkList links={header.links} onChange={(links) => onChange({ ...header, links })} pages={pages} bookingHref={bookingHref} />
       <h4 className="site-inspector-subtitle">{t("Button")}</h4>
-      <ButtonInput label={t("Add a button")} value={header.button} onChange={(button) => onChange({ ...header, button })} bookingHref={bookingHref} />
+      <ButtonInput label={t("Add a button")} value={header.button} onChange={(button) => onChange({ ...header, button })} pages={pages} bookingHref={bookingHref} />
     </>
   );
 }
 
-export function FooterInspector({ footer, onChange }: { footer: SiteFooter; onChange: (next: SiteFooter) => void }) {
+export function FooterInspector({ footer, onChange, pages, bookingHref }: { footer: SiteFooter; onChange: (next: SiteFooter) => void; pages: PageOption[]; bookingHref: string }) {
   return (
     <>
       <h3 className="site-inspector-title">{t("Footer")}</h3>
       <TextInput label={t("Footer text")} value={footer.text} maxLength={300} onChange={(text) => onChange({ ...footer, text })} />
       <h4 className="site-inspector-subtitle">{t("Links")}</h4>
-      <LinkList links={footer.links} onChange={(links) => onChange({ ...footer, links })} />
+      <LinkList links={footer.links} onChange={(links) => onChange({ ...footer, links })} pages={pages} bookingHref={bookingHref} />
       <h4 className="site-inspector-subtitle">{t("Social")}</h4>
       <ListEditor
         items={footer.social.map((entry, index) => ({ ...entry, id: `social-${index}` }))}
@@ -159,7 +228,17 @@ export function FooterInspector({ footer, onChange }: { footer: SiteFooter; onCh
   );
 }
 
-function LinkList({ links, onChange }: { links: Array<{ label: string; href: string }>; onChange: (next: Array<{ label: string; href: string }>) => void }) {
+function LinkList({
+  links,
+  onChange,
+  pages,
+  bookingHref,
+}: {
+  links: Array<{ label: string; href: string }>;
+  onChange: (next: Array<{ label: string; href: string }>) => void;
+  pages: PageOption[];
+  bookingHref: string;
+}) {
   return (
     <ListEditor
       items={links.map((link, index) => ({ ...link, id: `link-${index}` }))}
@@ -171,14 +250,66 @@ function LinkList({ links, onChange }: { links: Array<{ label: string; href: str
       render={(item, update) => (
         <>
           <TextInput label={t("Link text")} value={item.label} maxLength={60} onChange={(label) => update({ label })} />
-          <TextInput label={t("Goes to")} value={item.href} maxLength={2000} placeholder="https://…  #contact" onChange={(href) => update({ href })} help={t("Use #contact, #lessons and so on to jump to a block on this page: each block's address is shown above its fields.")} />
+          <LinkInput label={t("Goes to")} value={item.href} onChange={(href) => update({ href })} pages={pages} bookingHref={bookingHref} />
         </>
       )}
     />
   );
 }
 
-export function BlockInspector({ block, onChange, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
+/**
+ * The shop itself, edited from the block that shows it: the switch that
+ * opens it, and what is on the shelf. Packages are the lesson types marked
+ * sellable; vouchers are the products ticked as vouchers under Billing.
+ */
+function ShopStatus({ onError }: { onError: (message: string) => void }) {
+  const [shop, setShop] = useState<CoachShop | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetchCoachShop()
+      .then((next) => !cancelled && setShop(next))
+      .catch((cause: Error) => !cancelled && onError(cause.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [onError]);
+  if (!shop) return null;
+  return (
+    <div className="site-shop-status">
+      <h4 className="site-inspector-subtitle">{t("Your shop")}</h4>
+      <ToggleInput
+        label={shop.enabled ? t("The shop is open") : t("The shop is closed")}
+        checked={shop.enabled}
+        onChange={(enabled) => {
+          setBusy(true);
+          setShopEnabled(enabled)
+            .then(setShop)
+            .catch((cause: Error) => onError(cause.message))
+            .finally(() => setBusy(false));
+        }}
+      />
+      {busy ? <p className="site-field-help">{t("Saving...")}</p> : null}
+      {shop.blocker === "card_payments" ? <p className="site-field-help">{t("Card payments are not set up yet: connect Clarity Pay under Billing before the shop can take orders.")}</p> : null}
+      {shop.blocker === "nothing_for_sale" ? <p className="site-field-help">{t("Nothing is for sale yet. Mark a lesson package as sellable under Lesson types, or tick a product as a gift voucher under Billing › Products.")}</p> : null}
+      {shop.items.length ? (
+        <ul className="site-shop-items">
+          {shop.items.map((item) => (
+            <li key={item.id}>
+              <span>{item.name}</span>
+              <code>{money(item.price, item.currency)}</code>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="site-field-help">
+        <ExternalLink size={12} /> {t("Prices and what is included are set where the item lives: packages under Lesson types, vouchers under Billing › Products.")}
+      </p>
+    </div>
+  );
+}
+
+export function BlockInspector({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
   const set = <B extends SiteBlock>(patch: Partial<B>) => onChange({ ...block, ...patch } as SiteBlock);
   switch (block.type) {
     case "hero":
@@ -208,9 +339,9 @@ export function BlockInspector({ block, onChange, bookingHref, onError }: { bloc
             ]}
           />
           <ImageInput label={t("Picture")} value={block.image} onChange={(image) => set({ image })} onError={onError} />
-          <ButtonInput label={t("Add a button")} value={block.buttons[0] || null} onChange={(button) => set({ buttons: [button, block.buttons[1]].filter(Boolean) as typeof block.buttons })} bookingHref={bookingHref} />
+          <ButtonInput label={t("Add a button")} value={block.buttons[0] || null} onChange={(button) => set({ buttons: [button, block.buttons[1]].filter(Boolean) as typeof block.buttons })} pages={pages} bookingHref={bookingHref} />
           {block.buttons[0] ? (
-            <ButtonInput label={t("Add a second button")} value={block.buttons[1] || null} onChange={(button) => set({ buttons: [block.buttons[0], button].filter(Boolean) as typeof block.buttons })} bookingHref={bookingHref} />
+            <ButtonInput label={t("Add a second button")} value={block.buttons[1] || null} onChange={(button) => set({ buttons: [block.buttons[0], button].filter(Boolean) as typeof block.buttons })} pages={pages} bookingHref={bookingHref} />
           ) : null}
         </>
       );
@@ -323,7 +454,7 @@ export function BlockInspector({ block, onChange, bookingHref, onError }: { bloc
                 <TextInput label={t("Detail")} value={item.detail} maxLength={120} placeholder={t("60 minutes")} onChange={(detail) => update({ detail })} />
                 <TextArea label={t("What is included, one per line")} value={item.features} rows={4} maxLength={800} onChange={(features) => update({ features })} />
                 <ToggleInput label={t("Highlight this one")} checked={item.highlighted} onChange={(highlighted) => update({ highlighted })} />
-                <ButtonInput label={t("Add a button")} value={item.button} onChange={(button) => update({ button })} bookingHref={bookingHref} />
+                <ButtonInput label={t("Add a button")} value={item.button} onChange={(button) => update({ button })} pages={pages} bookingHref={bookingHref} />
               </>
             )}
           />
@@ -385,7 +516,7 @@ export function BlockInspector({ block, onChange, bookingHref, onError }: { bloc
               { value: "surface", label: t("Panel colour") },
             ]}
           />
-          <ButtonInput label={t("Add a button")} value={block.button} onChange={(button) => set({ button })} bookingHref={bookingHref} />
+          <ButtonInput label={t("Add a button")} value={block.button} onChange={(button) => set({ button })} pages={pages} bookingHref={bookingHref} />
         </>
       );
     case "video":
@@ -421,6 +552,33 @@ export function BlockInspector({ block, onChange, bookingHref, onError }: { bloc
           ) : (
             <NumberInput label={t("Height in pixels")} value={block.height} min={480} max={1600} step={20} onChange={(height) => set({ height })} />
           )}
+        </>
+      );
+    case "shop":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
+          <SelectInput
+            label={t("Show as")}
+            value={block.mode}
+            onChange={(mode) => set({ mode })}
+            options={[
+              { value: "cards", label: t("Cards in the site's own look, bought on this page") },
+              { value: "embed", label: t("Clarity's shop page, framed") },
+            ]}
+          />
+          {block.mode === "embed" ? <NumberInput label={t("Height in pixels")} value={block.height} min={480} max={1600} step={20} onChange={(height) => set({ height })} /> : null}
+          <ShopStatus onError={onError} />
+        </>
+      );
+    case "articles":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
+          <NumberInput label={t("How many to show")} value={block.limit} min={1} max={24} onChange={(limit) => set({ limit })} />
+          <p className="site-field-help">{t("Lists every page whose kind is Article, newest first. Add one with Add page › Article.")}</p>
         </>
       );
     case "contact":
@@ -463,4 +621,3 @@ export function BlockInspector({ block, onChange, bookingHref, onError }: { bloc
       return null;
   }
 }
-

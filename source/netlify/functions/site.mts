@@ -5,9 +5,9 @@ import { requireCoachActor, resolvePublicAccount } from "./_shared/coach-auth.mt
 import { coachAccountFromSettings } from "./_shared/coach-account.mts";
 import { json } from "./_shared/http.mts";
 import { readSandboxAccount } from "./_shared/sandbox.mts";
-import { readSettingsMap } from "./_shared/settings-store.mts";
+import { db, readSettingsMap } from "./_shared/settings-store.mts";
 import { cleanString } from "./_shared/values.mts";
-import { siteDocumentImageUrls } from "./_shared/site/document.mts";
+import { SITE_PAGE_PRESETS, cleanPageSlug, sitePageImageUrls } from "./_shared/site/document.mts";
 import {
   attachDomainToSite,
   checkDomainDns,
@@ -24,28 +24,30 @@ import {
   claimSiteDomain,
   deleteSiteDomain,
   listSiteDomains,
-  publishSitePage,
-  readPublishedSitePage,
+  listSitePages,
+  publishSite,
+  readPublishedSite,
+  readSite,
   readSiteDomain,
-  readSitePage,
-  saveSitePage,
-  unpublishSitePage,
+  saveSite,
+  unpublishSite,
   updateSiteDomainStatus,
   type SiteDomainRecord,
+  type SitePageRecord,
+  type SiteRecord,
 } from "./_shared/site/store.mts";
 import { SITE_TEMPLATES } from "./_shared/site/templates.mts";
-import { db } from "./_shared/settings-store.mts";
 
 /**
- * Settings › Website, and the public page it publishes.
+ * Settings › Website, and the public site it publishes.
  *
  * The coach's routes, all behind their own login (owners and admins only --
  * this is the business's public face):
  *
- *   GET    /api/site                   the draft, the domains, what to start from
- *   PUT    /api/site/page              save the draft            { document }
- *   POST   /api/site/page/publish      make the draft public
- *   POST   /api/site/page/unpublish    take the page down (the draft stays)
+ *   GET    /api/site                   the draft site, its pages, domains, what to start from
+ *   PUT    /api/site/site              save the whole draft       { settings, pages }
+ *   POST   /api/site/publish           make the draft public, every page at once
+ *   POST   /api/site/unpublish         take the site down (the drafts stay)
  *   POST   /api/site/media             store a picture           { type, dataBase64 }
  *   POST   /api/site/domains           claim a hostname          { hostname }
  *   POST   /api/site/domains/check     look the DNS records up, attach when right   { id }
@@ -53,10 +55,10 @@ import { db } from "./_shared/settings-store.mts";
  *
  * And the one stranger's route, cached at the CDN and purged on publish:
  *
- *   GET    /api/site/public?host=  |  ?business=    the published page
+ *   GET    /api/site/public?host=  |  ?business=   [&page=<slug>]   one published page
  *
- * The page itself is drawn by the browser (src/modules/site-builder), which
- * is why this answers with a document rather than HTML.
+ * The pages are drawn by the browser (src/modules/site-builder), which is
+ * why this answers with documents rather than HTML.
  */
 
 const PUBLIC_CACHE_SECONDS = 60;
@@ -66,7 +68,7 @@ function publicCacheTag(accountId: string) {
   return `public-site-${accountId}`;
 }
 
-/** Drop the CDN's copies of a business's page. Best effort, like the booking page's. */
+/** Drop the CDN's copies of a business's pages. Best effort, like the booking page's. */
 async function purgePublicSite(accountId: string) {
   if (!accountId || !process.env.NETLIFY_PURGE_API_TOKEN) return;
   try {
@@ -104,9 +106,28 @@ function domainView(domain: SiteDomainRecord) {
   };
 }
 
+function siteView(site: SiteRecord | null) {
+  return site ? { settings: site.settings, isPublished: Boolean(site.publishedSettings), publishedAt: site.publishedAt, updatedAt: site.updatedAt } : null;
+}
+
+function pageView(page: SitePageRecord) {
+  return {
+    id: page.id,
+    slug: page.slug,
+    title: page.title,
+    kind: page.kind,
+    inNav: page.inNav,
+    sortOrder: page.sortOrder,
+    content: page.content,
+    isPublished: Boolean(page.publishedContent),
+    updatedAt: page.updatedAt,
+  };
+}
+
 async function coachState(accountId: string) {
-  const [page, domains, settings, identity] = await Promise.all([
-    readSitePage(accountId),
+  const [site, pages, domains, settings, identity] = await Promise.all([
+    readSite(accountId),
+    listSitePages(accountId),
     listSiteDomains(accountId),
     readSettingsMap(accountId),
     readAccountIdentity(accountId),
@@ -125,13 +146,13 @@ async function coachState(accountId: string) {
       venueName: cleanString(account.venueName, ""),
       email: cleanString(account.contactEmail, ""),
     },
-    page: page
-      ? { document: page.document, publishedAt: page.publishedAt, updatedAt: page.updatedAt, isPublished: Boolean(page.publishedDocument) }
-      : null,
+    site: siteView(site),
+    pages: pages.map(pageView),
     domains: domains.map(domainView),
     dns: { cnameTarget: cnameTarget(), apexIp: NETLIFY_APEX_IPS[0] },
     customDomainsConfigured: customDomainsConfigured(),
     templates: SITE_TEMPLATES.map((template) => ({ id: template.id, label: template.label, summary: template.summary, preset: template.preset })),
+    presets: SITE_PAGE_PRESETS.map((preset) => ({ id: preset.id, label: preset.label, summary: preset.summary })),
   };
 }
 
@@ -141,6 +162,7 @@ async function handlePublic(req: Request) {
   const host = cleanString(url.searchParams.get("host") || req.headers.get("host") || "", "", 253)
     .toLowerCase()
     .replace(/:\d+$/, "");
+  const slug = cleanPageSlug(url.searchParams.get("page"), "home");
   let accountId = "";
   let identity = { slug: "", businessName: "" };
   if (business) {
@@ -155,14 +177,17 @@ async function handlePublic(req: Request) {
   }
   if (!accountId) return json({ error: "not_found", message: "There is no page at this address." }, 404);
 
-  const page = await readPublishedSitePage(accountId);
-  if (!page) return json({ error: "not_published", message: "This page is not published yet." }, 404);
+  const site = await readPublishedSite(accountId, slug);
+  if (!site) return json({ error: "not_published", message: "This site is not published yet." }, 404);
+  if (!site.page) return json({ error: "no_page", message: "There is no page at this address." }, 404);
 
   const settings = await readSettingsMap(accountId);
   const logo = settings.brandLogoPreview || "";
-  const account = coachAccountFromSettings(settings, accountId) as { businessName?: string; contactEmail?: string };
+  const account = coachAccountFromSettings(settings, accountId) as { businessName?: string };
   const body = {
-    page,
+    settings: site.settings,
+    page: site.page,
+    pages: site.pages,
     business: {
       slug: identity.slug,
       name: cleanString(account.businessName, identity.businessName),
@@ -225,27 +250,30 @@ export default async function handler(req: Request) {
 
     if (!action && req.method === "GET") return json(await coachState(accountId));
 
-    if (action === "page" && req.method === "PUT") {
+    if (action === "site" && req.method === "PUT") {
       const body = await readBody(req);
-      const page = await saveSitePage(accountId, body.document);
-      // The draft just saved and the published copy both keep their pictures.
-      const keep = [...siteDocumentImageUrls(page.document), ...(page.publishedDocument ? siteDocumentImageUrls(page.publishedDocument) : [])];
+      const saved = await saveSite(accountId, { settings: body.settings, pages: body.pages });
+      // Every page's draft and published copy keeps its pictures.
+      const keep = saved.pages.flatMap((page) => [
+        ...sitePageImageUrls(page.content),
+        ...(page.publishedContent ? sitePageImageUrls(page.publishedContent) : []),
+      ]);
       await sweepUnusedSiteImages(accountId, keep);
-      return json({ page: { document: page.document, publishedAt: page.publishedAt, updatedAt: page.updatedAt, isPublished: Boolean(page.publishedDocument) } });
+      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView) });
     }
 
-    if (action === "page/publish" && req.method === "POST") {
-      const page = await publishSitePage(accountId);
-      if (!page) return json({ error: "not_found", message: "Save the page before publishing it." }, 404);
+    if (action === "publish" && req.method === "POST") {
+      if (!(await publishSite(accountId))) return json({ error: "not_found", message: "Save the site before publishing it." }, 404);
       await purgePublicSite(accountId);
-      return json({ page: { document: page.document, publishedAt: page.publishedAt, updatedAt: page.updatedAt, isPublished: true } });
+      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+      return json({ site: siteView(site), pages: pages.map(pageView) });
     }
 
-    if (action === "page/unpublish" && req.method === "POST") {
-      const page = await unpublishSitePage(accountId);
-      if (!page) return json({ error: "not_found", message: "There is no page to take down." }, 404);
+    if (action === "unpublish" && req.method === "POST") {
+      if (!(await unpublishSite(accountId))) return json({ error: "not_found", message: "There is no site to take down." }, 404);
       await purgePublicSite(accountId);
-      return json({ page: { document: page.document, publishedAt: null, updatedAt: page.updatedAt, isPublished: false } });
+      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+      return json({ site: siteView(site), pages: pages.map(pageView) });
     }
 
     if (action === "media" && req.method === "POST") {

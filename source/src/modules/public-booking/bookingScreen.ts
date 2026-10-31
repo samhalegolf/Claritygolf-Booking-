@@ -42,13 +42,25 @@ export function publicShopBusiness(pathname = window.location.pathname) {
 }
 
 /**
- * The business whose website page this path is, or "". The page sits beside
- * the booking page and the shop at /<business>/site, on any of Clarity's own
- * hosts. A business's own domain serves the same page at its root instead.
+ * The business website page this path names, or null. The site sits beside
+ * the booking page and the shop on Clarity's own hosts: /<business>/site is
+ * its home page and /<business>/site/<page> any other page. A business's own
+ * domain serves the same pages from its root (customDomainPageSlug).
  */
-export function publicSiteBusiness(pathname = window.location.pathname) {
-  const [first = "", second = "", third = ""] = pathSegments(pathname);
-  return first && !SCREEN_SEGMENTS.has(first) && second === "site" && !third ? first : "";
+export function publicSiteRoute(pathname = window.location.pathname): { business: string; slug: string } | null {
+  const [first = "", second = "", third = "", fourth = ""] = pathSegments(pathname);
+  if (!first || SCREEN_SEGMENTS.has(first) || second !== "site" || fourth) return null;
+  return { business: first, slug: third || "home" };
+}
+
+/**
+ * On a business's own domain the whole host is the site: / is the home page
+ * and /<page> another page. "" for a deeper path, which is no page at all.
+ */
+export function customDomainPageSlug(pathname = window.location.pathname): string {
+  const [first = "", second = ""] = pathSegments(pathname);
+  if (!first) return "home";
+  return second ? "" : first;
 }
 
 /** The shop's path, keeping whatever query the page was opened with (?embed=booking). */

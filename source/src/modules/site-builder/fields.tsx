@@ -2,10 +2,13 @@
 import { ArrowDown, ArrowUp, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { useState, type ChangeEvent, type ReactNode } from "react";
 
-import type { SiteButton, SiteImage } from "../../../netlify/functions/_shared/site/document.mts";
+import { pageHref, pageSlugFromHref, type SiteButton, type SiteImage } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
 import { prepareImage } from "./imagePrep";
 import { uploadSiteImage } from "./siteApi";
+
+/** What a link may point at: one of the site's pages, by address and name. */
+export type PageOption = { slug: string; title: string };
 
 export function Field({ label, help, children }: { label: string; help?: string; children: ReactNode }) {
   return (
@@ -24,6 +27,7 @@ export function TextInput({
   maxLength = 200,
   placeholder,
   help,
+  readOnly = false,
 }: {
   label: string;
   value: string;
@@ -31,10 +35,11 @@ export function TextInput({
   maxLength?: number;
   placeholder?: string;
   help?: string;
+  readOnly?: boolean;
 }) {
   return (
     <Field label={label} help={help}>
-      <input value={value} maxLength={maxLength} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <input value={value} maxLength={maxLength} placeholder={placeholder} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
     </Field>
   );
 }
@@ -107,6 +112,14 @@ export function NumberInput({
   );
 }
 
+export function DateInput({ label, value, onChange }: { label: string; value: string; onChange: (next: string) => void }) {
+  return (
+    <Field label={label}>
+      <input type="date" value={value} onChange={(event) => onChange(event.target.value)} />
+    </Field>
+  );
+}
+
 export function ToggleInput({ label, checked, onChange }: { label: string; checked: boolean; onChange: (next: boolean) => void }) {
   return (
     <label className="site-toggle">
@@ -123,6 +136,53 @@ export function ColorInput({ label, value, onChange }: { label: string; value: s
       <span>{label}</span>
       <code>{value}</code>
     </label>
+  );
+}
+
+/**
+ * Where a link goes: a page of the site, the Clarity booking page, or an
+ * address typed in (a web address, mailto:, tel:, or #block on this page).
+ */
+export function LinkInput({
+  label,
+  value,
+  onChange,
+  pages,
+  bookingHref,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  pages: PageOption[];
+  bookingHref: string;
+}) {
+  const pageSlug = pageSlugFromHref(value);
+  const kind = pageSlug && pages.some((page) => page.slug === pageSlug) ? value : value === bookingHref ? "booking" : "custom";
+  return (
+    <>
+      <Field label={label}>
+        <select
+          value={kind}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (next === "booking") onChange(bookingHref);
+            else if (next === "custom") onChange(pageSlug || value === bookingHref ? "" : value);
+            else onChange(next);
+          }}
+        >
+          {pages.map((page) => (
+            <option value={pageHref(page.slug)} key={page.slug}>
+              {page.title || page.slug}
+            </option>
+          ))}
+          <option value="booking">{t("Clarity booking page")}</option>
+          <option value="custom">{t("A web address, email, phone or #block")}</option>
+        </select>
+      </Field>
+      {kind === "custom" ? (
+        <TextInput label={t("Address")} value={value} maxLength={2000} placeholder="https://…  #contact  mailto:…" onChange={onChange} />
+      ) : null}
+    </>
   );
 }
 
@@ -195,12 +255,14 @@ export function ButtonInput({
   label,
   value,
   onChange,
+  pages,
   bookingHref,
   allowRemove = true,
 }: {
   label: string;
   value: SiteButton | null;
   onChange: (next: SiteButton | null) => void;
+  pages: PageOption[];
   bookingHref: string;
   allowRemove?: boolean;
 }) {
@@ -216,18 +278,7 @@ export function ButtonInput({
     <fieldset className="site-fieldset">
       <legend>{label}</legend>
       <TextInput label={t("Button text")} value={value.label} maxLength={60} onChange={(next) => onChange({ ...value, label: next })} />
-      <TextInput label={t("Goes to")} value={value.href} maxLength={2000} placeholder="https://…  #contact  mailto:…" onChange={(href) => onChange({ ...value, href })} />
-      <div className="site-inline-actions">
-        <button className="outline-button" type="button" onClick={() => onChange({ ...value, href: bookingHref })}>
-          {t("Use my booking page")}
-        </button>
-        {allowRemove ? (
-          <button className="outline-button" type="button" onClick={() => onChange(null)}>
-            <Trash2 size={16} />
-            {t("Remove")}
-          </button>
-        ) : null}
-      </div>
+      <LinkInput label={t("Goes to")} value={value.href} onChange={(href) => onChange({ ...value, href })} pages={pages} bookingHref={bookingHref} />
       <SelectInput
         label={t("Style")}
         value={value.style}
@@ -237,6 +288,12 @@ export function ButtonInput({
           { value: "secondary", label: t("Quiet") },
         ]}
       />
+      {allowRemove ? (
+        <button className="outline-button" type="button" onClick={() => onChange(null)}>
+          <Trash2 size={16} />
+          {t("Remove")}
+        </button>
+      ) : null}
     </fieldset>
   );
 }

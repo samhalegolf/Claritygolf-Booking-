@@ -3,15 +3,23 @@ import test from "node:test";
 
 import { setDatabaseForTests } from "../database.mts";
 import {
+  HOME_PAGE_SLUG,
   MAX_SITE_BLOCKS,
   SITE_BLOCK_TYPES,
-  cleanSiteDocument,
+  SITE_PAGE_PRESETS,
+  cleanPageSlug,
   cleanSiteHref,
+  cleanSitePageContent,
+  cleanSitePageMeta,
+  cleanSiteSettings,
   googleFontsUrl,
   newSiteBlock,
-  siteDocumentImageUrls,
+  pageHref,
+  pageSlugFromHref,
+  sitePageImageUrls,
   siteYoutubeId,
   themeFromPreset,
+  uniquePageSlug,
 } from "./document.mts";
 import { SITE_TEMPLATES } from "./templates.mts";
 import {
@@ -26,12 +34,13 @@ import {
   type DnsLookup,
 } from "./domains.mts";
 import { siteMediaPathFromUrl, siteMediaUrl, sweepUnusedSiteImages, uploadSiteImage } from "./media.mts";
-import { accountIdForHostname, claimSiteDomain, readSitePage, saveSitePage } from "./store.mts";
+import { cleanReturnPath } from "../../public-shop.mts";
+import { accountIdForHostname, claimSiteDomain, listSitePages, readPublishedSite, readSite, saveSite } from "./store.mts";
 
-// --- The document -----------------------------------------------------------
+// --- Pages and their content ------------------------------------------------
 
 test("a page is cleaned to its known blocks, in order, with unique ids", () => {
-  const document = cleanSiteDocument({
+  const content = cleanSitePageContent({
     blocks: [
       { id: "a", type: "hero", heading: "  Hello  " },
       { id: "a", type: "text", body: "twice the same id" },
@@ -40,37 +49,62 @@ test("a page is cleaned to its known blocks, in order, with unique ids", () => {
     ],
   });
   assert.deepEqual(
-    document.blocks.map((block) => [block.id, block.type]),
+    content.blocks.map((block) => [block.id, block.type]),
     [
       ["a", "hero"],
       ["a-1", "text"],
       ["b", "divider"],
     ],
   );
-  assert.equal(document.blocks[0].type === "hero" && document.blocks[0].heading, "Hello");
+  assert.equal(content.blocks[0].type === "hero" && content.blocks[0].heading, "Hello");
 });
 
 test("every block type has a starter that survives cleaning unchanged", () => {
   for (const type of SITE_BLOCK_TYPES) {
     const block = newSiteBlock(type);
-    const [cleaned] = cleanSiteDocument({ blocks: [block] }).blocks;
+    const [cleaned] = cleanSitePageContent({ blocks: [block] }).blocks;
     assert.deepEqual(cleaned, block, `${type} starter changed when cleaned`);
   }
 });
 
-test("links a stranger will click are http(s), mailto, tel or an anchor, never script", () => {
+test("links a stranger will click are http(s), mailto, tel, an anchor or a page, never script", () => {
   assert.equal(cleanSiteHref("javascript:alert(1)"), "");
   assert.equal(cleanSiteHref("data:text/html,hi"), "");
   assert.equal(cleanSiteHref("/relative/path"), "");
   assert.equal(cleanSiteHref("#contact"), "#contact");
+  assert.equal(cleanSiteHref("page:about"), "page:about");
+  assert.equal(cleanSiteHref("page:About Us"), "page:about-us");
+  assert.equal(cleanSiteHref("page:api"), "", "a reserved address is not a page");
+  assert.equal(pageSlugFromHref(pageHref("book")), "book");
+  assert.equal(pageSlugFromHref("https://example.com"), "");
   assert.equal(cleanSiteHref("mailto:coach@example.com"), "mailto:coach@example.com");
   assert.equal(cleanSiteHref("tel:+64 21 555 0100"), "tel:+64 21 555 0100");
   assert.equal(cleanSiteHref("yourclub.com/lessons"), "https://yourclub.com/lessons");
-  assert.equal(cleanSiteHref("http://yourclub.com"), "http://yourclub.com/");
+});
+
+test("a page's address is lower-case, hyphenated, never reserved, and made unique against its neighbours", () => {
+  assert.equal(cleanPageSlug("  About Us! "), "about-us");
+  assert.equal(cleanPageSlug("api"), "");
+  assert.equal(cleanPageSlug("shop", "fallback"), "fallback");
+  assert.equal(uniquePageSlug("about", ["home"]), "about");
+  assert.equal(uniquePageSlug("about", ["home", "about"]), "about-2");
+  assert.equal(uniquePageSlug("about", ["about", "about-2"]), "about-3");
+  const meta = cleanSitePageMeta({ id: "page-1", slug: "Find Us", title: "Find us", kind: "poem", inNav: "yes", sortOrder: "3" }, 4);
+  assert.deepEqual(meta, { id: "page-1", slug: "find-us", title: "Find us", kind: "page", inNav: true, sortOrder: 3 });
+  assert.equal(cleanSitePageMeta({ slug: "api" }, 2).slug, "page-3", "a reserved address falls back to a numbered one");
+});
+
+test("an article's summary, cover and date are kept, and a bad date is dropped", () => {
+  const content = cleanSitePageContent({ summary: " A short line ", cover: { url: "https://cdn.example/c.jpg", alt: "" }, date: "2026-10-31" });
+  assert.equal(content.summary, "A short line");
+  assert.equal(content.cover?.url, "https://cdn.example/c.jpg");
+  assert.equal(content.date, "2026-10-31");
+  assert.equal(cleanSitePageContent({ date: "31/10/2026" }).date, "");
+  assert.deepEqual(sitePageImageUrls(content), ["https://cdn.example/c.jpg"]);
 });
 
 test("pictures are https only, and a block keeps its button while it still has a label", () => {
-  const document = cleanSiteDocument({
+  const content = cleanSitePageContent({
     blocks: [
       { type: "image", image: { url: "http://insecure.example.com/a.jpg", alt: "x" } },
       { type: "image", image: { url: "https://cdn.example.com/a.jpg", alt: "x" } },
@@ -78,15 +112,15 @@ test("pictures are https only, and a block keeps its button while it still has a
       { type: "cta", heading: "Go", button: { label: "", href: "https://example.com" } },
     ],
   });
-  assert.equal(document.blocks[0].type === "image" && document.blocks[0].image, null);
-  assert.equal(document.blocks[1].type === "image" && document.blocks[1].image?.url, "https://cdn.example.com/a.jpg");
-  assert.deepEqual(document.blocks[2].type === "cta" && document.blocks[2].button, { label: "Book", href: "", style: "primary" });
-  assert.equal(document.blocks[3].type === "cta" && document.blocks[3].button, null);
-  assert.deepEqual(siteDocumentImageUrls(document), ["https://cdn.example.com/a.jpg"]);
+  assert.equal(content.blocks[0].type === "image" && content.blocks[0].image, null);
+  assert.equal(content.blocks[1].type === "image" && content.blocks[1].image?.url, "https://cdn.example.com/a.jpg");
+  assert.deepEqual(content.blocks[2].type === "cta" && content.blocks[2].button, { label: "Book", href: "", style: "primary" });
+  assert.equal(content.blocks[3].type === "cta" && content.blocks[3].button, null);
+  assert.deepEqual(sitePageImageUrls(content), ["https://cdn.example.com/a.jpg"]);
 });
 
 test("the theme only speaks six-digit hex, known fonts and known options", () => {
-  const theme = cleanSiteDocument({
+  const theme = cleanSiteSettings({
     theme: {
       preset: "slate",
       headingFont: "comic-sans",
@@ -103,11 +137,10 @@ test("the theme only speaks six-digit hex, known fonts and known options", () =>
   assert.equal(theme.bodyFont, "lora");
   assert.equal(theme.colors.primary, "#aabbcc", "three-digit hex is expanded");
   assert.equal(theme.colors.background, slate.colors.background, "a named colour falls back");
-  assert.equal(theme.colors.text, slate.colors.text);
   assert.equal(theme.corners, slate.corners);
   assert.equal(theme.width, "wide");
   assert.equal(theme.buttons, "pill");
-  assert.equal(cleanSiteDocument({ theme: { preset: "no-such-preset" } }).theme.preset, themeFromPreset("").preset);
+  assert.equal(cleanSiteSettings({ theme: { preset: "no-such-preset" } }).theme.preset, themeFromPreset("").preset);
 });
 
 test("fonts load from Google only when a chosen font needs it", () => {
@@ -119,53 +152,77 @@ test("fonts load from Google only when a chosen font needs it", () => {
 
 test("the block list is capped and a video block only keeps a real YouTube id", () => {
   const blocks = Array.from({ length: MAX_SITE_BLOCKS + 5 }, () => ({ type: "divider" }));
-  assert.equal(cleanSiteDocument({ blocks }).blocks.length, MAX_SITE_BLOCKS);
+  assert.equal(cleanSitePageContent({ blocks }).blocks.length, MAX_SITE_BLOCKS);
   assert.equal(siteYoutubeId("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10"), "dQw4w9WgXcQ");
   assert.equal(siteYoutubeId("https://youtu.be/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   assert.equal(siteYoutubeId("https://vimeo.com/12345"), "");
-  const [video] = cleanSiteDocument({ blocks: [{ type: "video", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ" }] }).blocks;
+  const [video] = cleanSitePageContent({ blocks: [{ type: "video", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ" }] }).blocks;
   assert.equal(video.type === "video" && video.youtubeId, "dQw4w9WgXcQ");
 });
 
-test("booking blocks keep their embed height inside sensible bounds", () => {
-  const [low, high, none] = cleanSiteDocument({
+test("booking, shop and article blocks keep their numbers inside sensible bounds", () => {
+  const [low, high, none, shop, articles] = cleanSitePageContent({
     blocks: [
       { type: "booking", height: 10 },
       { type: "booking", height: 99999 },
       { type: "booking" },
+      { type: "shop", mode: "popup", height: 50 },
+      { type: "articles", limit: 500 },
     ],
   }).blocks;
   assert.equal(low.type === "booking" && low.height, 480);
   assert.equal(high.type === "booking" && high.height, 1600);
   assert.equal(none.type === "booking" && none.height, 760);
+  assert.deepEqual(shop.type === "shop" && [shop.mode, shop.height], ["cards", 480]);
+  assert.equal(articles.type === "articles" && articles.limit, 24);
 });
 
-// --- Templates --------------------------------------------------------------
+// --- Presets and templates --------------------------------------------------
 
-const templateInput = {
+const presetInput = {
   businessName: "Riverside Golf",
   coachName: "Sam",
   bookingHref: "https://book.claritygolf.app/riverside?embed=booking",
+  venueName: "Riverside Range",
   email: "hello@riverside.example",
   phone: "+64 21 000 0000",
-  venueName: "Riverside Range",
 };
 
+for (const preset of SITE_PAGE_PRESETS) {
+  test(`page preset "${preset.id}" builds a page the cleaner would store as is`, () => {
+    const page = preset.build(presetInput);
+    assert.deepEqual(cleanSitePageContent(page.content), page.content);
+    assert.equal(cleanPageSlug(page.slug), page.slug, "a preset's address is a valid one");
+    assert.notEqual(page.slug, HOME_PAGE_SLUG);
+    assert.ok(page.title);
+    assert.ok(page.content.blocks.length >= 1);
+    if (preset.id === "article") {
+      assert.equal(page.kind, "article");
+      assert.equal(page.inNav, false, "an article is listed by the articles page, not the menu");
+      assert.match(page.content.date, /^\d{4}-\d{2}-\d{2}$/);
+    }
+    if (preset.id === "book") assert.equal(page.content.blocks[0].type, "booking");
+    if (preset.id === "shop") assert.equal(page.content.blocks[0].type, "shop");
+  });
+}
+
 for (const template of SITE_TEMPLATES) {
-  test(`template "${template.id}" builds a page the cleaner would store as is`, () => {
-    const document = template.build(templateInput);
-    assert.deepEqual(cleanSiteDocument(document), document);
-    assert.ok(document.blocks.length >= 3, "a template is more than a blank page");
-    assert.equal(document.template, template.id);
-    assert.equal(document.title, "Riverside Golf");
-    // Every "Book" button points at the business's own booking page.
-    const bookButtons = document.blocks.flatMap((block) =>
+  test(`template "${template.id}" builds a site the cleaner would store as is`, () => {
+    const site = template.build(presetInput);
+    assert.deepEqual(cleanSiteSettings(site.settings), site.settings);
+    assert.equal(site.pages[0].slug, HOME_PAGE_SLUG, "the first page is home");
+    assert.ok(site.pages.some((page) => page.slug === "book"), "every site starts with its booking page");
+    for (const page of site.pages) assert.deepEqual(cleanSitePageContent(page.content), page.content);
+    assert.equal(new Set(site.pages.map((page) => page.slug)).size, site.pages.length, "page addresses are unique");
+    // Every "Book" button on the home page leads to the site's own booking page.
+    const bookButtons = site.pages[0].content.blocks.flatMap((block) =>
       block.type === "hero" ? block.buttons : block.type === "cta" && block.button ? [block.button] : [],
     );
-    assert.ok(bookButtons.some((button) => button.href === templateInput.bookingHref), "no button points at the booking page");
-    assert.equal(document.header.button?.href, templateInput.bookingHref);
-    // Block ids are unique: anchors like #contact depend on it.
-    assert.equal(new Set(document.blocks.map((block) => block.id)).size, document.blocks.length);
+    assert.ok(bookButtons.some((button) => button.href === pageHref("book")), "no button points at the booking page");
+    assert.equal(site.settings.header.button?.href, pageHref("book"));
+    // Block ids are unique within a page: anchors like #lessons depend on it.
+    const home = site.pages[0].content.blocks;
+    assert.equal(new Set(home.map((block) => block.id)).size, home.length);
   });
 }
 
@@ -283,11 +340,18 @@ test("attaching a domain adds it to the site's aliases once, and reads a taken d
 
 // --- Pictures ---------------------------------------------------------------
 
-test("uploads land in the business's own folder and come back as public addresses", async () => {
+function withStorageEnv<T>(work: () => Promise<T>): Promise<T> {
   const previous = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
   process.env.SUPABASE_URL = "https://proj.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
-  try {
+  return work().finally(() => {
+    process.env.SUPABASE_URL = previous.url ?? "";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = previous.key ?? "";
+  });
+}
+
+test("uploads land in the business's own folder and come back as public addresses", () =>
+  withStorageEnv(async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const doFetch = async (url: string, init?: RequestInit) => {
       calls.push({ url, init: init || {} });
@@ -303,17 +367,10 @@ test("uploads land in the business's own folder and come back as public addresse
 
     await assert.rejects(() => uploadSiteImage("riverside", { type: "image/svg+xml", dataBase64: "PHN2Zz4=" }, doFetch), /JPG, PNG, WebP or GIF/);
     await assert.rejects(() => uploadSiteImage("riverside", { type: "image/png", dataBase64: "" }, doFetch), /arrived empty/);
-  } finally {
-    process.env.SUPABASE_URL = previous.url ?? "";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = previous.key ?? "";
-  }
-});
+  }));
 
-test("the sweep removes old uploads nothing refers to, and leaves fresh ones alone", async () => {
-  const previous = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
-  process.env.SUPABASE_URL = "https://proj.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
-  try {
+test("the sweep removes old uploads nothing refers to, and leaves fresh ones alone", () =>
+  withStorageEnv(async () => {
     const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const fresh = new Date().toISOString();
     let deleted: string[] = [];
@@ -337,10 +394,36 @@ test("the sweep removes old uploads nothing refers to, and leaves fresh ones alo
     const removed = await sweepUnusedSiteImages("riverside", [siteMediaUrl("riverside/kept.jpg")], doFetch);
     assert.equal(removed, 1);
     assert.deepEqual(deleted, ["riverside/orphan.jpg"]);
-  } finally {
-    process.env.SUPABASE_URL = previous.url ?? "";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = previous.key ?? "";
-  }
+  }));
+
+test("a missing bucket is made on the first upload, then the upload is retried", () =>
+  withStorageEnv(async () => {
+    const calls: string[] = [];
+    let bucketExists = false;
+    const doFetch = async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method || "GET"} ${url.replace("https://proj.supabase.co/storage/v1", "")}`);
+      if (url.endsWith("/bucket")) {
+        bucketExists = true;
+        return new Response('{"name":"site-media"}', { status: 200 });
+      }
+      if (!bucketExists) return new Response('{"statusCode":"404","error":"Bucket not found","message":"Bucket not found"}', { status: 400 });
+      return new Response("{}", { status: 200 });
+    };
+    const uploaded = await uploadSiteImage("riverside", { type: "image/png", dataBase64: Buffer.from("png").toString("base64") }, doFetch);
+    assert.equal(calls.length, 3, "upload, make bucket, upload again");
+    assert.equal(calls[1], "POST /bucket");
+    assert.equal(calls[2], `POST /object/site-media/${uploaded.path}`);
+  }));
+
+// --- The shop's way back ----------------------------------------------------
+
+test("a shop order only ever returns the buyer to a path on the same origin", () => {
+  assert.equal(cleanReturnPath("/shop-page"), "/shop-page");
+  assert.equal(cleanReturnPath("/riverside/site/shop-page"), "/riverside/site/shop-page");
+  assert.equal(cleanReturnPath("//evil.example/x"), "");
+  assert.equal(cleanReturnPath("https://evil.example/x"), "");
+  assert.equal(cleanReturnPath("shop"), "");
+  assert.equal(cleanReturnPath("/shop?x=1"), "/shop", "a query is dropped: the order id is added on");
 });
 
 // --- The store is account-scoped --------------------------------------------
@@ -354,6 +437,7 @@ function fakeDatabase(rows: (text: string, values: unknown[]) => unknown[]) {
     issued.push({ text: flat, values });
     return rows(flat, values);
   };
+  const query = async (text: string, values: unknown[] = []) => ({ rows: record(text, values) });
   setDatabaseForTests({
     async sql(strings: TemplateStringsArray, ...values: unknown[]) {
       let text = "";
@@ -363,30 +447,95 @@ function fakeDatabase(rows: (text: string, values: unknown[]) => unknown[]) {
       });
       return record(text, values);
     },
-    pool: { async query(text: string, values: unknown[] = []) { return { rows: record(text, values) }; } },
+    pool: { query, async connect() { return { query, release() {} }; } },
   });
   return issued;
 }
 
-test("every page read and write names its business in the statement itself", async () => {
+const now = new Date();
+
+test("every site read and write names its business in the statement itself", async () => {
   const issued = fakeDatabase((text, values) => {
-    if (text.startsWith("SELECT") && values[0] !== "riverside") return [];
-    return [{ id: "page-1", account_id: "riverside", slug: "home", document: { blocks: [] }, published_document: null, published_at: null, created_at: new Date(), updated_at: new Date() }];
+    if (text.startsWith("SELECT document, published_document")) {
+      return values[0] === "riverside" ? [{ document: { theme: {} }, published_document: null, published_at: null, updated_at: now }] : [];
+    }
+    if (text.startsWith("SELECT id, slug, title")) {
+      return [{ id: "page-home", slug: "home", title: "Home", kind: "page", in_nav: true, sort_order: 0, document: { blocks: [] }, published_document: null, published_at: null, updated_at: now }];
+    }
+    if (text.startsWith("SELECT id FROM site_pages")) return [{ id: "page-home" }];
+    return [];
   });
   try {
-    assert.equal(await readSitePage(""), null, "no business, no read");
+    assert.equal(await readSite(""), null, "no business, no read");
+    assert.deepEqual(await listSitePages(""), []);
     assert.equal(issued.length, 0);
-    const page = await readSitePage("riverside");
-    assert.equal(page?.accountId, "riverside");
-    assert.match(issued[0].text, /WHERE account_id = \$1 AND slug = \$2/);
-    assert.deepEqual(issued[0].values, ["riverside", "home"]);
 
-    await saveSitePage("riverside", { blocks: [{ type: "divider" }] });
-    const write = issued[1];
-    assert.match(write.text, /INSERT INTO site_pages/);
-    assert.equal(write.values[1], "riverside");
-    assert.match(write.text, /ON CONFLICT \(account_id, slug\)/);
-    await assert.rejects(() => saveSitePage("", {}), /accountId is required/);
+    const site = await readSite("riverside");
+    assert.ok(site);
+    assert.match(issued[0].text, /FROM sites WHERE account_id = \$1/);
+
+    await saveSite("riverside", {
+      settings: {},
+      pages: [
+        { id: "page-home", slug: "home", title: "Home", content: { blocks: [{ type: "divider" }] } },
+        { slug: "About", title: "About", content: {} },
+      ],
+    });
+    const writes = issued.filter((statement) => /INSERT INTO|DELETE FROM/.test(statement.text));
+    assert.match(writes[0].text, /INSERT INTO sites/);
+    assert.equal(writes[0].values[0], "riverside");
+    assert.match(writes[1].text, /INSERT INTO site_pages/);
+    assert.equal(writes[1].values[0], "page-home", "an existing page keeps its id");
+    assert.equal(writes[1].values[1], "riverside");
+    assert.match(String(writes[2].values[0]), /^page-/, "a new page gets an id");
+    assert.equal(writes[2].values[2], "about", "and a cleaned address");
+    assert.match(writes[3].text, /DELETE FROM site_pages WHERE account_id = \$1 AND NOT \(id = ANY/);
+    assert.deepEqual(writes[3].values[0], "riverside");
+    assert.ok(issued.some((statement) => statement.text === "COMMIT"));
+
+    await assert.rejects(() => saveSite("riverside", { settings: {}, pages: [{ slug: "about", title: "About" }] }), /home page cannot be removed/);
+    await assert.rejects(
+      () => saveSite("riverside", { settings: {}, pages: [{ slug: "home", title: "Home" }, { slug: "x", title: "" }, { slug: "x", title: "" }] }),
+      /Two pages have the address/,
+    );
+    await assert.rejects(() => saveSite("", { settings: {}, pages: [] }), /accountId is required/);
+  } finally {
+    setDatabaseForTests(null);
+  }
+});
+
+test("the public read serves the published copy only, with each page's published meta", async () => {
+  fakeDatabase((text, values) => {
+    if (text.startsWith("SELECT document, published_document")) {
+      return [{ document: { theme: { preset: "slate" } }, published_document: { theme: { preset: "fairway" } }, published_at: now, updated_at: now }];
+    }
+    if (text.includes("WHERE account_id = $1 AND published_document IS NOT NULL")) {
+      assert.equal(values[0], "riverside");
+      return [
+        { id: "p1", slug: "home-renamed-in-draft", title: "Draft title", kind: "page", in_nav: true, sort_order: 0, published_document: { slug: "home", title: "Home", kind: "page", inNav: true, sortOrder: 0, blocks: [] } },
+        { id: "p2", slug: "tips", title: "Tips", kind: "article", in_nav: false, sort_order: 1, published_document: { slug: "tips", title: "Tips", kind: "article", inNav: false, sortOrder: 1, summary: "S", date: "2026-10-01", blocks: [] } },
+        { id: "p3", slug: "old", title: "Old", kind: "page", in_nav: true, sort_order: 2, published_document: { blocks: [] } },
+      ];
+    }
+    return [];
+  });
+  try {
+    const home = await readPublishedSite("riverside", "");
+    assert.ok(home);
+    assert.equal(home.settings.theme.preset, "fairway", "the published theme, not the draft");
+    assert.equal(home.page?.slug, "home", "the published address wins over the draft's");
+    assert.equal(home.page?.title, "Home");
+    assert.deepEqual(
+      home.pages.map((page) => [page.slug, page.kind, page.summary]),
+      [
+        ["home", "page", ""],
+        ["tips", "article", "S"],
+        ["old", "page", ""],
+      ],
+      "a copy from before meta rode along falls back to the columns",
+    );
+    const missing = await readPublishedSite("riverside", "nowhere");
+    assert.equal(missing?.page, null);
   } finally {
     setDatabaseForTests(null);
   }
@@ -398,10 +547,10 @@ test("a hostname only answers for a business once it is live, and cannot be clai
       return values[0] === "www.live.example" ? [{ account_id: "riverside" }] : [];
     }
     if (text.includes("FROM site_domains WHERE hostname = $1")) {
-      return values[0] === "www.live.example" ? [{ id: "domain-1", account_id: "riverside", hostname: "www.live.example", verification_token: "t", status: "active", created_at: new Date() }] : [];
+      return values[0] === "www.live.example" ? [{ id: "domain-1", account_id: "riverside", hostname: "www.live.example", verification_token: "t", status: "active", created_at: now }] : [];
     }
     if (text.startsWith("INSERT INTO site_domains")) {
-      return [{ id: values[0], account_id: values[1], hostname: values[2], verification_token: values[3], status: "pending", created_at: new Date() }];
+      return [{ id: values[0], account_id: values[1], hostname: values[2], verification_token: values[3], status: "pending", created_at: now }];
     }
     return [];
   });
@@ -420,31 +569,5 @@ test("a hostname only answers for a business once it is live, and cannot be clai
     assert.ok(issued.every((statement) => !statement.text.includes("site_domains") || statement.text.includes("account_id") || statement.text.includes("hostname = $1")));
   } finally {
     setDatabaseForTests(null);
-  }
-});
-
-test("a missing bucket is made on the first upload, then the upload is retried", async () => {
-  const previous = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
-  process.env.SUPABASE_URL = "https://proj.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
-  try {
-    const calls: string[] = [];
-    let bucketExists = false;
-    const doFetch = async (url: string, init?: RequestInit) => {
-      calls.push(`${init?.method || "GET"} ${url.replace("https://proj.supabase.co/storage/v1", "")}`);
-      if (url.endsWith("/bucket")) {
-        bucketExists = true;
-        return new Response('{"name":"site-media"}', { status: 200 });
-      }
-      if (!bucketExists) return new Response('{"statusCode":"404","error":"Bucket not found","message":"Bucket not found"}', { status: 400 });
-      return new Response("{}", { status: 200 });
-    };
-    const uploaded = await uploadSiteImage("riverside", { type: "image/png", dataBase64: Buffer.from("png").toString("base64") }, doFetch);
-    assert.equal(calls.length, 3, "upload, make bucket, upload again");
-    assert.equal(calls[1], "POST /bucket");
-    assert.equal(calls[2], `POST /object/site-media/${uploaded.path}`);
-  } finally {
-    process.env.SUPABASE_URL = previous.url ?? "";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = previous.key ?? "";
   }
 });

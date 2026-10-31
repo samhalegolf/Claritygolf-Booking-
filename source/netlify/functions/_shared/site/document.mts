@@ -1,15 +1,17 @@
 /**
- * The shape of a business's website page.
+ * The shape of a business's website.
  *
  * Shared by the server (which cleans every write with these functions), the
  * editor in Settings › Website (which builds pages out of these blocks) and
  * the public page (which renders them), so no end can disagree about what a
  * block is. Same bargain as _shared/review-document.mts.
  *
- * A page is a theme, a header, a footer and an ordered list of blocks. Every
- * string that reaches a stranger's browser passes through here first: unknown
- * block types are dropped, every link is http(s)/mailto/tel or an anchor, and
- * every list is capped. Nothing here touches the network or the database.
+ * A site is its settings (theme, header, footer) and a set of pages. A page
+ * is a slug, a title, whether it sits in the menu, and an ordered list of
+ * blocks. Every string that reaches a stranger's browser passes through here
+ * first: unknown block types are dropped, every link is http(s)/mailto/tel,
+ * an anchor or another page of the site, and every list is capped. Nothing
+ * here touches the network or the database.
  */
 
 const text = (value: unknown, max = 600) => String(value ?? "").trim().slice(0, max);
@@ -240,16 +242,32 @@ export function cleanTheme(value: unknown): SiteTheme {
 
 // --- Links, images, buttons -------------------------------------------------
 
+/** A link to another page of the site: page:<slug>. Resolved to a path where it is drawn. */
+export const PAGE_HREF_PREFIX = "page:";
+
+export function pageHref(slug: string): string {
+  return `${PAGE_HREF_PREFIX}${slug}`;
+}
+
+/** The page a page: link names, or "" for any other kind of link. */
+export function pageSlugFromHref(href: string): string {
+  return href.startsWith(PAGE_HREF_PREFIX) ? href.slice(PAGE_HREF_PREFIX.length) : "";
+}
+
 /**
  * A link a stranger will click. http(s), mailto: and tel: pass; a bare domain
- * is given https; an in-page anchor (#contact) passes as is. Anything else --
- * javascript:, data:, a relative path that means nothing on another domain --
- * is dropped.
+ * is given https; an in-page anchor (#contact) and a page of the site
+ * (page:about) pass as they are. Anything else -- javascript:, data:, a
+ * relative path that means nothing on another domain -- is dropped.
  */
 export function cleanSiteHref(input: unknown): string {
   const value = text(input, 2000);
   if (!value) return "";
   if (/^#[A-Za-z0-9_-]{1,80}$/.test(value)) return value;
+  if (value.startsWith(PAGE_HREF_PREFIX)) {
+    const slug = cleanPageSlug(value.slice(PAGE_HREF_PREFIX.length));
+    return slug ? pageHref(slug) : "";
+  }
   if (/^mailto:[^\s@]+@[^\s@]+$/i.test(value)) return value;
   if (/^tel:\+?[0-9() .-]{3,30}$/i.test(value)) return value;
   const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
@@ -407,6 +425,14 @@ export type SiteContactBlock = {
   showMap: boolean;
 };
 export type SiteDividerBlock = { id: string; type: "divider"; style: "line" | "space"; size: "small" | "regular" | "large" };
+/** The site's article pages, newest first, as cards. */
+export type SiteArticlesBlock = { id: string; type: "articles"; heading: string; intro: string; limit: number };
+/**
+ * The business's online shop (packages and gift vouchers), on the page.
+ * "cards" draws what is for sale in the site's own look and takes the order
+ * here; "embed" frames Clarity's shop page instead.
+ */
+export type SiteShopBlock = { id: string; type: "shop"; heading: string; intro: string; mode: "cards" | "embed"; height: number };
 
 export type SiteBlock =
   | SiteHeroBlock
@@ -421,7 +447,9 @@ export type SiteBlock =
   | SiteVideoBlock
   | SiteBookingBlock
   | SiteContactBlock
-  | SiteDividerBlock;
+  | SiteDividerBlock
+  | SiteArticlesBlock
+  | SiteShopBlock;
 export type SiteBlockType = SiteBlock["type"];
 
 export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
@@ -438,6 +466,8 @@ export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
   "booking",
   "contact",
   "divider",
+  "articles",
+  "shop",
 ];
 
 export type SiteHeader = {
@@ -457,19 +487,92 @@ export type SiteFooter = {
   showCredit: boolean;
 };
 
-export type SiteDocument = {
+/** The parts of a site every page shares. */
+export type SiteSettings = {
   version: number;
-  /** The browser tab's title. Empty means the business name. */
-  title: string;
-  /** The meta description search engines quote. */
-  description: string;
-  /** The template this page was started from. Informational. */
-  template: string;
   theme: SiteTheme;
   header: SiteHeader;
   footer: SiteFooter;
+};
+
+/** The root page. Cannot be renamed or removed: it is what the domain lands on. */
+export const HOME_PAGE_SLUG = "home";
+
+/**
+ * Slugs a page may not take: paths Clarity's own hosts and the functions
+ * answer at, and the booking screens, so a page can never shadow them.
+ */
+export const RESERVED_PAGE_SLUGS = [
+  "api",
+  "assets",
+  "site",
+  "shop",
+  "admin",
+  "login",
+  "terminal",
+  "privacy",
+  "terms",
+  "support",
+  "pos-paid",
+  "pos-cancelled",
+  "group-lessons",
+  "private-lessons",
+];
+
+/** A page's address: lower-case letters, digits and hyphens, never reserved. */
+export function cleanPageSlug(value: unknown, fallback = ""): string {
+  const slug = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  if (!slug || RESERVED_PAGE_SLUGS.includes(slug)) return fallback;
+  return slug;
+}
+
+/** `wanted`, or wanted-2, wanted-3 … until it is not among `taken`. */
+export function uniquePageSlug(wanted: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  const base = cleanPageSlug(wanted, "page");
+  if (!used.has(base)) return base;
+  for (let n = 2; n < 1000; n += 1) {
+    const candidate = `${base.slice(0, 56)}-${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${base.slice(0, 48)}-${Date.now().toString(36)}`;
+}
+
+export type SitePageKind = "page" | "article";
+
+/** What the menu and the page list know about a page, without its blocks. */
+export type SitePageMeta = {
+  id: string;
+  slug: string;
+  title: string;
+  kind: SitePageKind;
+  /** Shown in the header menu. A page left out is still reachable by its address. */
+  inNav: boolean;
+  sortOrder: number;
+};
+
+/** A page's own content. Summary, cover and date are what an article shows on an index. */
+export type SitePageContent = {
+  version: number;
+  /** The meta description search engines quote. */
+  description: string;
+  summary: string;
+  cover: SiteImage | null;
+  /** YYYY-MM-DD, or "". */
+  date: string;
   blocks: SiteBlock[];
 };
+
+export type SitePage = SitePageMeta & { content: SitePageContent };
+
+/** What an article index needs of each page: its meta plus the fields the card shows. */
+export type SitePageCard = SitePageMeta & Pick<SitePageContent, "summary" | "cover" | "date">;
 
 const blockId = (value: unknown, index: number, prefix = "block") =>
   text(value, 80).replace(/[^A-Za-z0-9_-]/g, "") || `${prefix}-${index}`;
@@ -652,6 +755,27 @@ export function cleanSiteBlock(value: unknown, index = 0): SiteBlock | null {
         style: oneOf(input.style, ["line", "space"], "line"),
         size: oneOf(input.size, ["small", "regular", "large"], "regular"),
       };
+    case "articles": {
+      const limit = Number(input.limit);
+      return {
+        id,
+        type: "articles",
+        heading: text(input.heading, 160),
+        intro: text(input.intro, 600),
+        limit: Number.isFinite(limit) ? Math.min(24, Math.max(1, Math.round(limit))) : 6,
+      };
+    }
+    case "shop": {
+      const height = Number(input.height);
+      return {
+        id,
+        type: "shop",
+        heading: text(input.heading, 160),
+        intro: text(input.intro, 600),
+        mode: oneOf(input.mode, ["cards", "embed"], "cards"),
+        height: Number.isFinite(height) ? Math.min(MAX_BOOKING_HEIGHT, Math.max(MIN_BOOKING_HEIGHT, Math.round(height))) : 900,
+      };
+    }
     default:
       return null;
   }
@@ -697,25 +821,50 @@ export function cleanFooter(value: unknown): SiteFooter {
   };
 }
 
-/** A whole page, cleaned. The shape every write is stored in and every read returns. */
-export function cleanSiteDocument(value: unknown): SiteDocument {
+/** The site's settings, cleaned. */
+export function cleanSiteSettings(value: unknown): SiteSettings {
   const input = (value || {}) as Record<string, unknown>;
   return {
     version: SITE_DOCUMENT_VERSION,
-    title: text(input.title, 120),
-    description: text(input.description, 300),
-    template: text(input.template, 40),
     theme: cleanTheme(input.theme),
     header: cleanHeader(input.header),
     footer: cleanFooter(input.footer),
+  };
+}
+
+/** A page's content, cleaned. The shape every write is stored in and every read returns. */
+export function cleanSitePageContent(value: unknown): SitePageContent {
+  const input = (value || {}) as Record<string, unknown>;
+  const date = text(input.date, 10);
+  return {
+    version: SITE_DOCUMENT_VERSION,
+    description: text(input.description, 300),
+    summary: text(input.summary, 400),
+    cover: cleanImage(input.cover),
+    date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "",
     blocks: cleanSiteBlocks(input.blocks),
   };
 }
 
+/** A page's meta, cleaned. The id is the server's; a page without one is new. */
+export function cleanSitePageMeta(value: unknown, index = 0): SitePageMeta {
+  const input = (value || {}) as Record<string, unknown>;
+  const sortOrder = Number(input.sortOrder);
+  return {
+    id: text(input.id, 80).replace(/[^A-Za-z0-9_-]/g, ""),
+    slug: cleanPageSlug(input.slug, `page-${index + 1}`),
+    title: text(input.title, 120),
+    kind: oneOf(input.kind, ["page", "article"], "page"),
+    inNav: input.inNav !== false,
+    sortOrder: Number.isFinite(sortOrder) ? Math.round(sortOrder) : index,
+  };
+}
+
 /** The image addresses a page shows. Used to find uploads nothing refers to any more. */
-export function siteDocumentImageUrls(document: SiteDocument): string[] {
+export function sitePageImageUrls(content: SitePageContent): string[] {
   const urls: string[] = [];
-  for (const block of document.blocks) {
+  if (content.cover) urls.push(content.cover.url);
+  for (const block of content.blocks) {
     if (block.type === "hero" && block.image) urls.push(block.image.url);
     if (block.type === "image" && block.image) urls.push(block.image.url);
     if (block.type === "gallery") urls.push(...block.images.map((image) => image.url));
@@ -783,5 +932,178 @@ export function newSiteBlock(type: SiteBlockType): SiteBlock {
       return { id, type, heading: "Find us", text: "", email: "", phone: "", address: "", hours: "", showMap: false };
     case "divider":
       return { id, type, style: "line", size: "regular" };
+    case "articles":
+      return { id, type, heading: "Latest articles", intro: "", limit: 6 };
+    case "shop":
+      return { id, type, heading: "Shop", intro: "Lesson packages and gift vouchers.", mode: "cards", height: 900 };
   }
+}
+
+// --- Page presets ----------------------------------------------------------
+
+export type SitePagePresetInput = {
+  businessName: string;
+  coachName: string;
+  /** The business's public booking page, used for every "Book" button. */
+  bookingHref: string;
+  venueName: string;
+  email: string;
+  phone: string;
+};
+
+export type SitePagePreset = {
+  id: string;
+  label: string;
+  /** One line on the chooser card. */
+  summary: string;
+  build: (input: SitePagePresetInput) => Omit<SitePage, "id" | "sortOrder">;
+};
+
+const book = (label: string, href: string, style: "primary" | "secondary" = "primary"): SiteButton => ({ label, href, style });
+
+const page = (slug: string, title: string, blocks: SiteBlock[], extra: Partial<SitePageContent> & { kind?: SitePageKind; inNav?: boolean } = {}): Omit<SitePage, "id" | "sortOrder"> => {
+  const { kind = "page", inNav = true, ...content } = extra;
+  return { slug, title, kind, inNav, content: cleanSitePageContent({ ...content, blocks }) };
+};
+
+/**
+ * The pages a coach can add. Each is a whole page with its blocks filled in
+ * for the business, then forgotten: the coach changes anything afterwards.
+ * The home page is not here; it comes from a template (templates.mts).
+ */
+export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
+  {
+    id: "blank",
+    label: "Blank page",
+    summary: "A heading and some text. Add blocks from there.",
+    build: () => page("new-page", "New page", [{ id: "intro", type: "text", heading: "New page", body: "Write something here.", align: "left", columns: 1 }]),
+  },
+  {
+    id: "about",
+    label: "About",
+    summary: "Who you are, how you coach, and a picture.",
+    build: (input) =>
+      page("about", "About", [
+        {
+          id: "hero",
+          type: "hero",
+          eyebrow: "About",
+          heading: input.coachName || input.businessName,
+          text: "A line or two on who you coach and what players can expect.",
+          image: null,
+          layout: "split",
+          height: "regular",
+          buttons: [book("Book a lesson", input.bookingHref)],
+        },
+        {
+          id: "story",
+          type: "text",
+          heading: "How I coach",
+          body: "Write a few paragraphs about your background, how you work and who you work with.\n\nBlank lines start new paragraphs.",
+          align: "left",
+          columns: 1,
+        },
+        { id: "picture", type: "image", image: null, caption: "", size: "wide" },
+        { id: "cta", type: "cta", heading: "Ready when you are", text: "", button: book("Book a lesson", input.bookingHref), tone: "primary" },
+      ]),
+  },
+  {
+    id: "location",
+    label: "Find us",
+    summary: "Address, hours, a map and how to get in touch.",
+    build: (input) =>
+      page("find-us", "Find us", [
+        {
+          id: "contact",
+          type: "contact",
+          heading: input.venueName ? `We are at ${input.venueName}` : "Find us",
+          text: "Add the address below and switch the map on.",
+          email: input.email,
+          phone: input.phone,
+          address: "",
+          hours: "",
+          showMap: true,
+        },
+        { id: "directions", type: "text", heading: "Getting here", body: "Parking, which entrance to use, and where to meet.", align: "left", columns: 1 },
+      ]),
+  },
+  {
+    id: "lessons",
+    label: "Lessons & prices",
+    summary: "What you offer, what it costs, and the usual questions.",
+    build: (input) =>
+      page("lessons", "Lessons", [
+        {
+          id: "prices",
+          type: "pricing",
+          heading: "Lessons and packages",
+          intro: "Prices are shown on the booking page.",
+          items: [
+            { id: "single", name: "Private lesson", price: "", detail: "One-to-one", features: "Video analysis\nA practice plan to take away", button: book("Book", input.bookingHref), highlighted: false },
+            { id: "package", name: "Lesson package", price: "", detail: "Best value", features: "A series of lessons\nPriority booking", button: book("Book", input.bookingHref), highlighted: true },
+          ],
+        },
+        {
+          id: "faq",
+          type: "faq",
+          heading: "Questions",
+          intro: "",
+          items: [
+            { id: "clubs", question: "Do I need my own clubs?", answer: "Bring them if you have them. If not, say so when you book." },
+            { id: "cancel", question: "Can I cancel or move a lesson?", answer: "Yes. The confirmation email has a link to move or cancel your booking." },
+          ],
+        },
+        { id: "cta", type: "cta", heading: "Book a lesson", text: "", button: book("Book now", input.bookingHref), tone: "primary" },
+      ]),
+  },
+  {
+    id: "book",
+    label: "Booking page",
+    summary: "Your Clarity booking page, as a page of the site.",
+    build: () => page("book", "Book", [{ id: "book", type: "booking", heading: "Book a lesson", text: "", screen: "main", mode: "embed", buttonLabel: "Book now", height: 900 }]),
+  },
+  {
+    id: "articles",
+    label: "Articles",
+    summary: "A list of your articles, newest first. Add articles as pages.",
+    build: () =>
+      page("articles", "Articles", [
+        { id: "intro", type: "text", heading: "Articles", body: "Tips, drills and news.", align: "left", columns: 1 },
+        { id: "list", type: "articles", heading: "", intro: "", limit: 12 },
+      ]),
+  },
+  {
+    id: "article",
+    label: "Article",
+    summary: "One article: a title, a date, a picture and the text. Shown on your Articles page.",
+    build: () =>
+      page(
+        "new-article",
+        "New article",
+        [
+          { id: "title", type: "hero", eyebrow: "", heading: "New article", text: "", image: null, layout: "left", height: "regular", buttons: [] },
+          { id: "body", type: "text", heading: "", body: "Write the article here. Blank lines start new paragraphs.", align: "left", columns: 1 },
+        ],
+        { kind: "article", inNav: false, summary: "One line that says what the article is about.", date: new Date().toISOString().slice(0, 10) },
+      ),
+  },
+  {
+    id: "shop",
+    label: "Shop",
+    summary: "Your online shop: lesson packages and gift vouchers, bought on the page.",
+    build: () =>
+      page("shop-page", "Shop", [
+        { id: "shop", type: "shop", heading: "Shop", intro: "Lesson packages and gift vouchers. Paid online, delivered by email.", mode: "cards", height: 900 },
+      ]),
+  },
+  {
+    id: "gallery",
+    label: "Gallery",
+    summary: "A page of pictures.",
+    build: () => page("gallery", "Gallery", [{ id: "pictures", type: "gallery", heading: "Gallery", images: [], columns: 3 }]),
+  },
+];
+
+export function sitePagePreset(id: string): SitePagePreset | null {
+  return SITE_PAGE_PRESETS.find((preset) => preset.id === id) || null;
 }

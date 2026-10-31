@@ -6440,7 +6440,7 @@ async function voidAbandonedOnlineOrders(accountId: string) {
 export async function startOnlineOrder(
   accountId: string,
   body: Record<string, unknown>,
-  page: { origin: string; business: string },
+  page: { origin: string; business: string; returnPath?: string },
 ) {
   const shop = await readOnlineShop(accountId);
   if (!shop.open) throw Object.assign(new Error("This shop is not open."), { status: 409, code: "SHOP_CLOSED" });
@@ -6474,7 +6474,10 @@ export async function startOnlineOrder(
 
   const branding = await resolveInvoiceBranding(accountId);
   const mt = messageText(branding.messageLanguage);
-  const shopPath = `${page.origin}/${encodeURIComponent(page.business)}/shop`;
+  // Where the buyer lands after paying: Clarity's own shop page, or the page
+  // of the business's website the order was placed from (a same-origin path
+  // only, see public-shop.mts), which shows the receipt the same way.
+  const shopPath = page.returnPath ? `${page.origin}${page.returnPath}` : `${page.origin}/${encodeURIComponent(page.business)}/shop`;
   let session;
   try {
     session = await createStripeCheckoutSessionWith(await stripeFor(accountId), {

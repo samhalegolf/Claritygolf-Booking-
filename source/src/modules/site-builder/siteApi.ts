@@ -1,9 +1,10 @@
-// The client half of Settings › Website, and the public page's one read.
-// Every coach call goes to /api/site with the coach's own session.
+// The client half of Settings › Website, the public page's reads, and the
+// shop block's calls. Every coach call goes to /api/site with the coach's own
+// session; the public and shop calls carry no session at all.
 
 import { apiFetch } from "../auth/apiFetch";
 import { t } from "../../lib/i18n";
-import type { SiteDocument } from "../../../netlify/functions/_shared/site/document.mts";
+import type { SitePage, SitePageCard, SitePageContent, SitePageMeta, SiteSettings } from "../../../netlify/functions/_shared/site/document.mts";
 
 export type SiteDomainView = {
   id: string;
@@ -15,24 +16,32 @@ export type SiteDomainView = {
   records: Array<{ type: "TXT" | "CNAME" | "A"; name: string; value: string }>;
 };
 
-export type SitePageView = {
-  document: SiteDocument;
+export type SiteView = {
+  settings: SiteSettings;
+  isPublished: boolean;
   publishedAt: string | null;
   updatedAt: string;
-  isPublished: boolean;
 };
+
+export type SitePageView = SitePageMeta & { content: SitePageContent; isPublished: boolean; updatedAt: string };
 
 export type SiteState = {
   business: { slug: string; name: string; coachName: string; venueName: string; email: string };
-  page: SitePageView | null;
+  site: SiteView | null;
+  pages: SitePageView[];
   domains: SiteDomainView[];
   dns: { cnameTarget: string; apexIp: string };
   customDomainsConfigured: boolean;
   templates: Array<{ id: string; label: string; summary: string; preset: string }>;
+  presets: Array<{ id: string; label: string; summary: string }>;
 };
 
+export type SavedSite = { site: SiteView; pages: SitePageView[] };
+
 export type PublicSite = {
-  page: SiteDocument;
+  settings: SiteSettings;
+  page: SitePage;
+  pages: SitePageCard[];
   business: { slug: string; name: string; logo: string; showLogo: boolean };
 };
 
@@ -57,16 +66,17 @@ export async function fetchSiteState(): Promise<SiteState> {
   return readJson(await apiFetch("/api/site"));
 }
 
-export async function saveSiteDraft(document: SiteDocument): Promise<SitePageView> {
-  return (await readJson<{ page: SitePageView }>(await apiFetch("/api/site/page", jsonInit("PUT", { document })))).page;
+/** The whole draft: the settings and every page, in menu order. */
+export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta & { content: SitePageContent }>): Promise<SavedSite> {
+  return readJson(await apiFetch("/api/site/site", jsonInit("PUT", { settings, pages })));
 }
 
-export async function publishSite(): Promise<SitePageView> {
-  return (await readJson<{ page: SitePageView }>(await apiFetch("/api/site/page/publish", jsonInit("POST")))).page;
+export async function publishSite(): Promise<SavedSite> {
+  return readJson(await apiFetch("/api/site/publish", jsonInit("POST")));
 }
 
-export async function unpublishSite(): Promise<SitePageView> {
-  return (await readJson<{ page: SitePageView }>(await apiFetch("/api/site/page/unpublish", jsonInit("POST")))).page;
+export async function unpublishSite(): Promise<SavedSite> {
+  return readJson(await apiFetch("/api/site/unpublish", jsonInit("POST")));
 }
 
 export async function uploadSiteImage(type: string, dataBase64: string): Promise<string> {
@@ -86,10 +96,75 @@ export async function removeSiteDomain(id: string): Promise<void> {
 }
 
 /** The stranger's read. No session, cached at the CDN. */
-export async function fetchPublicSite(query: { host?: string; business?: string }): Promise<PublicSite> {
+export async function fetchPublicSite(query: { host?: string; business?: string; page: string }): Promise<PublicSite> {
   const params = new URLSearchParams();
   if (query.business) params.set("business", query.business);
   else if (query.host) params.set("host", query.host);
+  params.set("page", query.page);
   const response = await fetch(`/api/site/public?${params.toString()}`, { credentials: "omit" });
   return readJson(response);
+}
+
+// --- The shop ------------------------------------------------------------------
+//
+// The same four calls the shop page makes (public-shop.mts), from a page of
+// the site. The business is always named: the shop takes money.
+
+export type ShopItem = {
+  id: string;
+  kind: "package" | "voucher";
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  credits: number;
+  includes: string[];
+};
+
+export type ShopOrder = {
+  status: string;
+  receiptNumber: string;
+  description: string;
+  amount: number;
+  email: string;
+  recipientName: string;
+  vouchers: Array<{ code: string; value: number }>;
+};
+
+async function shopCall<T>(business: string, path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`/api/public-shop${path}?business=${encodeURIComponent(business)}`, {
+    credentials: "omit",
+    ...(body === undefined ? {} : jsonInit("POST", body)),
+  });
+  return readJson(response);
+}
+
+export async function fetchShop(business: string): Promise<{ open: boolean; items: ShopItem[]; currency: string }> {
+  return shopCall(business, "");
+}
+
+export async function startShopCheckout(
+  business: string,
+  order: { itemId: string; name: string; email: string; recipientName: string; message: string; returnPath: string },
+): Promise<string> {
+  return (await shopCall<{ url: string }>(business, "/checkout", order)).url;
+}
+
+export async function confirmShopOrder(business: string, orderId: string): Promise<ShopOrder> {
+  return shopCall(business, "/order", { orderId });
+}
+
+export async function cancelShopOrder(business: string, orderId: string): Promise<void> {
+  await shopCall(business, "/cancel", { orderId });
+}
+
+/** The coach's switch: Settings › Website edits the shop from the shop block. */
+export type CoachShop = { enabled: boolean; open: boolean; blocker: string; items: ShopItem[] };
+
+export async function fetchCoachShop(): Promise<CoachShop> {
+  return readJson(await apiFetch("/api/billing/online-shop"));
+}
+
+export async function setShopEnabled(enabled: boolean): Promise<CoachShop> {
+  return readJson(await apiFetch("/api/billing/online-shop", jsonInit("PUT", { enabled })));
 }

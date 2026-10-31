@@ -1,33 +1,51 @@
-// Settings › Website: build the business's public page.
+// Settings › Website: build the business's public site.
 //
-// Two ways of looking at it. At rest the tab shows the page as it stands,
-// full width, with Edit top left. Edit takes the whole settings pane: the
-// settings sub-nav steps aside (the app's sidebar stays), and the editor
-// gets three columns: the blocks on the page (add, reorder, remove), the
-// page itself drawn live in a frame (click anything to select it), and the
-// fields of whatever is selected. Done returns to the resting view; an
-// unsaved draft is kept and still shown there. Save keeps a draft nobody
-// else sees; Publish makes it the page at /<business>/site and on the
-// business's own domain.
-import { ArrowDown, ArrowUp, Check, Copy, Eye, Globe, Monitor, PanelBottom, PanelTop, Pencil, Plus, Smartphone, Trash2 } from "lucide-react";
+// Two ways of looking at it. At rest the tab shows the site as it stands:
+// its pages across the top, the chosen one drawn full width, Edit top left.
+// Edit takes the whole settings pane: the settings sub-nav steps aside (the
+// app's sidebar stays), and the editor gets three columns: the pages and
+// the blocks on the chosen page (add, reorder, remove), the page itself
+// drawn live in a frame (click anything to select it, click a menu link to
+// move to that page), and the fields of whatever is selected. Done returns
+// to the resting view; an unsaved draft is kept and still shown there.
+//
+// Save keeps a draft of the whole site that nobody else sees. Publish makes
+// every page public at once, at /<business>/site and on the business's own
+// domain.
+import { ArrowDown, ArrowUp, Check, Copy, Eye, FilePlus, Globe, Monitor, PanelBottom, PanelTop, Pencil, Plus, Smartphone, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { googleFontsUrl, newSiteBlock, type SiteBlock, type SiteBlockType, type SiteDocument } from "../../../netlify/functions/_shared/site/document.mts";
-import { SITE_TEMPLATES, type SiteTemplateInput } from "../../../netlify/functions/_shared/site/templates.mts";
+import {
+  HOME_PAGE_SLUG,
+  SITE_PAGE_PRESETS,
+  googleFontsUrl,
+  newSiteBlock,
+  uniquePageSlug,
+  type SiteBlock,
+  type SiteBlockType,
+  type SitePage,
+  type SitePageCard,
+  type SitePagePresetInput,
+  type SiteSettings,
+} from "../../../netlify/functions/_shared/site/document.mts";
+import { SITE_TEMPLATES } from "../../../netlify/functions/_shared/site/templates.mts";
 import { t } from "../../lib/i18n";
 import { ClarityPlayerPortal } from "../shared/ClarityIcons";
 import { Loading } from "../shared/Loading";
 import { SettingsGroup } from "../settings/SettingsLayout";
 import { BLOCK_CATALOG, blockCatalogEntry } from "./blockCatalog";
 import { DomainPanel } from "./DomainPanel";
-import { BlockInspector, FooterInspector, HeaderInspector, PageInspector } from "./Inspectors";
-import { fetchSiteState, publishSite, saveSiteDraft, unpublishSite, type SitePageView, type SiteState } from "./siteApi";
+import { BlockInspector, FooterInspector, HeaderInspector, PageInspector, SiteInspector } from "./Inspectors";
+import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState } from "./siteApi";
 import { SitePreviewFrame } from "./SitePreviewFrame";
-import { SiteRenderer, type SiteSelection } from "./SiteRenderer";
+import { SiteRenderer, type PreviewLabels, type SiteSelection } from "./SiteRenderer";
 import { bookingPageUrl } from "./siteTheme";
 import "./site-builder.css";
 
 const PHONE_WIDTH = "390px";
+
+/** The whole draft: what Save sends. */
+type Draft = { settings: SiteSettings; pages: SitePage[] };
 
 /** The first words of a block, for the outline. */
 function blockSnippet(block: SiteBlock): string {
@@ -42,6 +60,8 @@ function blockSnippet(block: SiteBlock): string {
     case "cta":
     case "video":
     case "booking":
+    case "shop":
+    case "articles":
     case "contact":
       return block.heading;
     case "image":
@@ -51,7 +71,18 @@ function blockSnippet(block: SiteBlock): string {
   }
 }
 
-const sameDocument = (a: SiteDocument | null, b: SiteDocument | null) => JSON.stringify(a) === JSON.stringify(b);
+const sameDraft = (a: Draft | null, b: Draft | null) => JSON.stringify(a) === JSON.stringify(b);
+
+function draftFromViews(settings: SiteSettings, pages: SitePageView[]): Draft {
+  return {
+    settings,
+    pages: pages.map(({ id, slug, title, kind, inNav, sortOrder, content }) => ({ id, slug, title, kind, inNav, sortOrder, content })),
+  };
+}
+
+function cardsOf(pages: SitePage[]): SitePageCard[] {
+  return pages.map(({ content, ...meta }) => ({ ...meta, summary: content.summary, cover: content.cover, date: content.date }));
+}
 
 export type SiteBuilderPanelProps = {
   onToast: (message: string) => void;
@@ -65,12 +96,14 @@ export type SiteBuilderPanelProps = {
 export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, editing, onEditingChange }: SiteBuilderPanelProps) {
   const [state, setState] = useState<SiteState | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [draft, setDraft] = useState<SiteDocument | null>(null);
-  const [saved, setSaved] = useState<SiteDocument | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [saved, setSaved] = useState<Draft | null>(null);
+  const [currentSlug, setCurrentSlug] = useState(HOME_PAGE_SLUG);
   const [selected, setSelected] = useState<SiteSelection>("page");
   const [device, setDevice] = useState<"desktop" | "phone">("desktop");
   const [busy, setBusy] = useState<"" | "save" | "publish" | "unpublish">("");
   const [choosingTemplate, setChoosingTemplate] = useState(false);
+  const [choosingPage, setChoosingPage] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -79,8 +112,9 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       .then((next) => {
         if (cancelled) return;
         setState(next);
-        setDraft(next.page?.document ?? null);
-        setSaved(next.page?.document ?? null);
+        const initial = next.site ? draftFromViews(next.site.settings, next.pages) : null;
+        setDraft(initial);
+        setSaved(initial);
       })
       .catch((cause: Error) => !cancelled && setLoadError(cause.message));
     return () => {
@@ -88,9 +122,9 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     };
   }, []);
 
-  const dirty = Boolean(draft) && !sameDocument(draft, saved);
+  const dirty = Boolean(draft) && !sameDraft(draft, saved);
 
-  // Leaving with unsaved blocks is the one thing this editor refuses to do quietly.
+  // Leaving with unsaved pages is the one thing this editor refuses to do quietly.
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -105,12 +139,26 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     () => ({ slug: state?.business.slug || "", name: state?.business.name || "", logo: brandLogo, showLogo: brandShowLogo }),
     [state?.business.slug, state?.business.name, brandLogo, brandShowLogo],
   );
-  const fontsUrl = draft ? googleFontsUrl(draft.theme) : "";
+  const fontsUrl = draft ? googleFontsUrl(draft.settings.theme) : "";
+  const currentPage = draft?.pages.find((page) => page.slug === currentSlug) || draft?.pages.find((page) => page.slug === HOME_PAGE_SLUG) || draft?.pages[0] || null;
+  const pageOptions = useMemo(() => (draft ? draft.pages.map((page) => ({ slug: page.slug, title: page.title })) : []), [draft]);
+  const cards = useMemo(() => (draft ? cardsOf(draft.pages) : []), [draft]);
+  const presetInput: SitePagePresetInput = {
+    businessName: state?.business.name || "",
+    coachName: state?.business.coachName || "",
+    bookingHref,
+    venueName: state?.business.venueName || "",
+    email: state?.business.email || "",
+    phone: "",
+  };
 
-  const applyPage = useCallback((page: SitePageView) => {
-    setState((current) => (current ? { ...current, page } : current));
-    setSaved(page.document);
-    setDraft((current) => (current && !sameDocument(current, page.document) ? current : page.document));
+  const applySaved = useCallback((result: SavedSite, sending: Draft | null) => {
+    const next = draftFromViews(result.site.settings, result.pages);
+    setState((current) => (current ? { ...current, site: result.site, pages: result.pages } : current));
+    setSaved(next);
+    // The server's cleaned copy (with ids for new pages) replaces the draft
+    // only if nothing changed meanwhile.
+    setDraft((current) => (current === sending || !current ? next : current));
   }, []);
 
   async function save(): Promise<boolean> {
@@ -118,11 +166,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     setBusy("save");
     const sending = draft;
     try {
-      const page = await saveSiteDraft(sending);
-      setState((current) => (current ? { ...current, page } : current));
-      setSaved(page.document);
-      // The server's cleaned copy replaces the draft only if nothing changed meanwhile.
-      setDraft((current) => (current === sending ? page.document : current));
+      applySaved(await saveSite(sending.settings, sending.pages), sending);
       return true;
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not save the page."));
@@ -136,8 +180,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     if (dirty && !(await save())) return;
     setBusy("publish");
     try {
-      applyPage(await publishSite());
-      onToast(t("Published. Your page is live."));
+      applySaved(await publishSite(), draft);
+      onToast(t("Published. Your site is live."));
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not publish the page."));
     } finally {
@@ -146,10 +190,10 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   }
 
   async function unpublish() {
-    if (!window.confirm(t("Take the page down? Visitors see nothing until you publish again. Your draft is kept."))) return;
+    if (!window.confirm(t("Take the site down? Visitors see nothing until you publish again. Your drafts are kept."))) return;
     setBusy("unpublish");
     try {
-      applyPage(await unpublishSite());
+      applySaved(await unpublishSite(), draft);
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not take the page down."));
     } finally {
@@ -161,27 +205,18 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     if (!state) return;
     const template = SITE_TEMPLATES.find((candidate) => candidate.id === templateId);
     if (!template) return;
-    if (draft && !window.confirm(t("Replace the whole page with this template? Blocks you have added are lost."))) return;
-    const input: SiteTemplateInput = {
-      businessName: state.business.name,
-      coachName: state.business.coachName,
-      bookingHref,
-      email: state.business.email,
-      phone: "",
-      venueName: state.business.venueName,
-    };
-    const document = template.build(input);
-    setDraft(document);
+    if (draft && !window.confirm(t("Replace the whole site with this template? Every page you have made is lost."))) return;
+    const built = template.build(presetInput);
+    const next: Draft = { settings: built.settings, pages: built.pages.map((page, index) => ({ ...page, id: "", sortOrder: index })) };
+    setDraft(next);
+    setCurrentSlug(HOME_PAGE_SLUG);
     setSelected("page");
     setChoosingTemplate(false);
-    // A fresh page is for editing, not admiring.
+    // A fresh site is for editing, not admiring.
     onEditingChange(true);
     setBusy("save");
     try {
-      const page = await saveSiteDraft(document);
-      setState((current) => (current ? { ...current, page } : current));
-      setSaved(page.document);
-      setDraft(page.document);
+      applySaved(await saveSite(next.settings, next.pages), next);
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not save the page."));
     } finally {
@@ -189,51 +224,103 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     }
   }
 
-  const update = (next: SiteDocument) => setDraft(next);
-  const updateBlock = (id: string, next: SiteBlock) => draft && update({ ...draft, blocks: draft.blocks.map((block) => (block.id === id ? next : block)) });
-  const selectedBlock = draft && typeof selected === "object" ? draft.blocks.find((block) => block.id === selected.block) || null : null;
+  const update = (next: Draft) => setDraft(next);
+  const updatePage = (slug: string, next: SitePage) => draft && update({ ...draft, pages: draft.pages.map((page) => (page.slug === slug ? next : page)) });
+  const updateBlock = (id: string, next: SiteBlock) =>
+    currentPage && updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks: currentPage.content.blocks.map((block) => (block.id === id ? next : block)) } });
+  const selectedBlock = currentPage && typeof selected === "object" ? currentPage.content.blocks.find((block) => block.id === selected.block) || null : null;
+
+  function addPage(presetId: string) {
+    if (!draft) return;
+    const preset = SITE_PAGE_PRESETS.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    const built = preset.build(presetInput);
+    const slug = uniquePageSlug(built.slug, draft.pages.map((page) => page.slug));
+    const page: SitePage = { ...built, slug, id: "", sortOrder: draft.pages.length };
+    update({ ...draft, pages: [...draft.pages, page] });
+    setCurrentSlug(slug);
+    setSelected("page");
+    setChoosingPage(false);
+    onEditingChange(true);
+  }
+
+  function renamePage(page: SitePage, next: SitePage) {
+    if (!draft) return;
+    update({ ...draft, pages: draft.pages.map((candidate) => (candidate.slug === page.slug ? next : candidate)) });
+    if (next.slug !== page.slug) setCurrentSlug(next.slug);
+  }
+
+  function deletePage(page: SitePage) {
+    if (!draft || page.slug === HOME_PAGE_SLUG) return;
+    if (!window.confirm(t("Delete the page \"{title}\"? Its blocks are lost.", { title: page.title || page.slug }))) return;
+    update({ ...draft, pages: draft.pages.filter((candidate) => candidate.slug !== page.slug) });
+    setCurrentSlug(HOME_PAGE_SLUG);
+    setSelected("page");
+  }
+
+  function movePage(slug: string, delta: number) {
+    if (!draft) return;
+    const index = draft.pages.findIndex((page) => page.slug === slug);
+    const target = index + delta;
+    // Home stays first: it is the page the domain lands on.
+    if (index < 1 || target < 1 || target >= draft.pages.length) return;
+    const pages = [...draft.pages];
+    const [page] = pages.splice(index, 1);
+    pages.splice(target, 0, page);
+    update({ ...draft, pages: pages.map((candidate, order) => ({ ...candidate, sortOrder: order })) });
+  }
 
   function addBlock(type: SiteBlockType) {
-    if (!draft) return;
+    if (!currentPage) return;
     const block = newSiteBlock(type);
+    const blocks = [...currentPage.content.blocks];
     // After the selected block, or at the end.
-    const index = selectedBlock ? draft.blocks.findIndex((candidate) => candidate.id === selectedBlock.id) + 1 : draft.blocks.length;
-    const blocks = [...draft.blocks];
+    const index = selectedBlock ? blocks.findIndex((candidate) => candidate.id === selectedBlock.id) + 1 : blocks.length;
     blocks.splice(index, 0, block);
-    update({ ...draft, blocks });
+    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
     setSelected({ block: block.id });
     setAddMenuOpen(false);
   }
 
   function moveBlock(id: string, delta: number) {
-    if (!draft) return;
-    const index = draft.blocks.findIndex((block) => block.id === id);
+    if (!currentPage) return;
+    const blocks = [...currentPage.content.blocks];
+    const index = blocks.findIndex((block) => block.id === id);
     const target = index + delta;
-    if (index < 0 || target < 0 || target >= draft.blocks.length) return;
-    const blocks = [...draft.blocks];
+    if (index < 0 || target < 0 || target >= blocks.length) return;
     const [block] = blocks.splice(index, 1);
     blocks.splice(target, 0, block);
-    update({ ...draft, blocks });
+    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
   }
 
   function duplicateBlock(id: string) {
-    if (!draft) return;
-    const index = draft.blocks.findIndex((block) => block.id === id);
+    if (!currentPage) return;
+    const blocks = [...currentPage.content.blocks];
+    const index = blocks.findIndex((block) => block.id === id);
     if (index < 0) return;
-    const copy = { ...structuredClone(draft.blocks[index]), id: newSiteBlock("divider").id };
-    const blocks = [...draft.blocks];
+    const copy = { ...structuredClone(blocks[index]), id: newSiteBlock("divider").id };
     blocks.splice(index + 1, 0, copy);
-    update({ ...draft, blocks });
+    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
     setSelected({ block: copy.id });
   }
 
   function removeBlock(id: string) {
-    if (!draft) return;
-    update({ ...draft, blocks: draft.blocks.filter((block) => block.id !== id) });
+    if (!currentPage) return;
+    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks: currentPage.content.blocks.filter((block) => block.id !== id) } });
     if (typeof selected === "object" && selected.block === id) setSelected("page");
   }
 
-  const previewLabels = useMemo(() => ({ booking: t("Your booking page shows here"), map: t("A map shows here") }), []);
+  const previewLabels = useMemo<PreviewLabels>(
+    () => ({
+      booking: t("Your booking page shows here"),
+      map: t("A map shows here"),
+      shop: t("Your shop shows here"),
+      noArticles: t("No articles yet. Add one with Add page › Article."),
+      noPage: t("There is no page here"),
+    }),
+    [],
+  );
+  const previewPath = useCallback((slug: string) => `#${slug}`, []);
 
   if (loadError) {
     return (
@@ -253,19 +340,12 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     );
   }
 
-  const chooser = (
+  const templateChooser = (
     <div className="site-templates">
-      <p className="settings-note">{t("Pick a starting point. Everything on it can be changed, and blocks can be added or removed afterwards.")}</p>
+      <p className="settings-note">{t("Pick a starting point. Everything on it can be changed, and pages and blocks can be added or removed afterwards.")}</p>
       <div className="site-template-grid">
         {state.templates.map((template) => {
-          const preset = SITE_TEMPLATES.find((candidate) => candidate.id === template.id)?.build({
-            businessName: state.business.name,
-            coachName: state.business.coachName,
-            bookingHref,
-            email: "",
-            phone: "",
-            venueName: "",
-          }).theme;
+          const preset = SITE_TEMPLATES.find((candidate) => candidate.id === template.id)?.build(presetInput).settings.theme;
           return (
             <button
               type="button"
@@ -288,16 +368,33 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       </div>
       {draft ? (
         <button className="outline-button" type="button" onClick={() => setChoosingTemplate(false)}>
-          {t("Keep my page")}
+          {t("Keep my site")}
         </button>
       ) : null}
     </div>
   );
 
+  const pageChooser = (
+    <div className="site-templates">
+      <p className="settings-note">{t("What kind of page? Each comes filled in for your business; change anything afterwards.")}</p>
+      <div className="site-template-grid">
+        {state.presets.map((preset) => (
+          <button type="button" className="site-template is-plain" key={preset.id} onClick={() => addPage(preset.id)}>
+            <strong>{preset.label}</strong>
+            <span>{preset.summary}</span>
+          </button>
+        ))}
+      </div>
+      <button className="outline-button" type="button" onClick={() => setChoosingPage(false)}>
+        {t("Cancel")}
+      </button>
+    </div>
+  );
+
   const status = (
     <div className="site-builder-status">
-      <strong>{state.page?.isPublished ? t("Published") : t("Not published")}</strong>
-      <span>{dirty ? t("Unsaved changes") : state.page?.isPublished && state.page.updatedAt > (state.page.publishedAt || "") ? t("Saved draft is newer than the published page") : t("Saved")}</span>
+      <strong>{state.site?.isPublished ? t("Published") : t("Not published")}</strong>
+      <span>{dirty ? t("Unsaved changes") : state.site?.isPublished && state.site.updatedAt > (state.site.publishedAt || "") ? t("Saved draft is newer than the published page") : t("Saved")}</span>
     </div>
   );
 
@@ -314,9 +411,50 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     </button>
   );
 
+  const pageStrip = draft ? (
+    <div className="site-pages-strip" role="tablist" aria-label={t("Pages")}>
+      {draft.pages.map((page) => (
+        <button
+          type="button"
+          role="tab"
+          key={page.slug}
+          aria-selected={page.slug === currentPage?.slug}
+          className={`site-page-tab${page.slug === currentPage?.slug ? " is-active" : ""}${page.inNav ? "" : " is-hidden"}`}
+          onClick={() => {
+            setCurrentSlug(page.slug);
+            if (typeof selected === "object") setSelected("page");
+          }}
+        >
+          {page.title || page.slug}
+        </button>
+      ))}
+      <button type="button" className="site-page-tab is-add" onClick={() => setChoosingPage(true)}>
+        <FilePlus size={15} />
+        {t("Add page")}
+      </button>
+    </div>
+  ) : null;
+
+  const preview = currentPage ? (
+    <SiteRenderer
+      settings={draft!.settings}
+      page={currentPage}
+      pages={cards}
+      business={business}
+      mode="preview"
+      pagePath={previewPath}
+      onNavigate={(slug) => {
+        if (draft?.pages.some((page) => page.slug === slug)) setCurrentSlug(slug);
+      }}
+      selected={editing ? selected : undefined}
+      onSelect={editing ? setSelected : undefined}
+      previewLabels={previewLabels}
+    />
+  ) : null;
+
   // --- Editing: the whole pane -------------------------------------------------
 
-  if (editing && draft && !choosingTemplate) {
+  if (editing && draft && currentPage && !choosingTemplate) {
     return (
       <article className="data-card settings-section settings-website site-editor-full">
         <div className="site-builder">
@@ -338,7 +476,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
               <button className="outline-button" type="button" onClick={() => setChoosingTemplate(true)} disabled={busy !== ""}>
                 {t("Start again")}
               </button>
-              {state.page?.isPublished ? (
+              {state.site?.isPublished ? (
                 <button className="outline-button" type="button" onClick={() => void unpublish()} disabled={busy !== ""}>
                   {busy === "unpublish" ? t("Taking down…") : t("Take down")}
                 </button>
@@ -348,106 +486,164 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
             </div>
           </div>
 
-          <div className="site-builder-grid">
-            <aside className="site-outline" aria-label={t("Blocks on the page")}>
-              <button type="button" className={`site-outline-row is-fixed${selected === "page" ? " is-selected" : ""}`} onClick={() => setSelected("page")}>
-                <Globe size={15} />
-                <span>{t("Page and look")}</span>
-              </button>
-              <button type="button" className={`site-outline-row is-fixed${selected === "header" ? " is-selected" : ""}`} onClick={() => setSelected("header")}>
-                <PanelTop size={15} />
-                <span>{t("Header")}</span>
-              </button>
-              <ol className="site-outline-list">
-                {draft.blocks.map((block, index) => {
-                  const entry = blockCatalogEntry(block.type);
-                  const isSelected = typeof selected === "object" && selected.block === block.id;
-                  return (
-                    <li key={block.id} className={`site-outline-row${isSelected ? " is-selected" : ""}`}>
-                      <button type="button" className="site-outline-main" onClick={() => setSelected({ block: block.id })}>
-                        <entry.Icon size={15} />
-                        <span>
-                          <strong>{entry.label}</strong>
-                          {blockSnippet(block) ? <em>{blockSnippet(block)}</em> : null}
-                        </span>
-                      </button>
-                      <span className="site-outline-actions">
-                        <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index === 0} onClick={() => moveBlock(block.id, -1)}>
-                          <ArrowUp size={14} />
+          {choosingPage ? (
+            pageChooser
+          ) : (
+            <div className="site-builder-grid">
+              <aside className="site-outline" aria-label={t("Pages and blocks")}>
+                <h4 className="site-outline-title">{t("Pages")}</h4>
+                <ol className="site-outline-list">
+                  {draft.pages.map((page, index) => {
+                    const isCurrent = page.slug === currentPage.slug;
+                    return (
+                      <li key={page.slug} className={`site-outline-row${isCurrent ? " is-current" : ""}`}>
+                        <button
+                          type="button"
+                          className="site-outline-main"
+                          onClick={() => {
+                            setCurrentSlug(page.slug);
+                            setSelected("page");
+                          }}
+                        >
+                          <span>
+                            <strong>{page.title || page.slug}</strong>
+                            {!page.inNav ? <em>{page.kind === "article" ? t("Article") : t("Not in the menu")}</em> : null}
+                          </span>
                         </button>
-                        <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === draft.blocks.length - 1} onClick={() => moveBlock(block.id, 1)}>
-                          <ArrowDown size={14} />
-                        </button>
-                        <button type="button" className="icon-button" aria-label={t("Duplicate")} onClick={() => duplicateBlock(block.id)}>
-                          <Copy size={14} />
-                        </button>
-                        <button type="button" className="icon-button" aria-label={t("Remove")} onClick={() => removeBlock(block.id)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-              <div className="site-add">
-                <button type="button" className="outline-button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)}>
-                  <Plus size={16} />
-                  {t("Add a block")}
+                        {page.slug !== HOME_PAGE_SLUG ? (
+                          <span className="site-outline-actions">
+                            <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index <= 1} onClick={() => movePage(page.slug, -1)}>
+                              <ArrowUp size={14} />
+                            </button>
+                            <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === draft.pages.length - 1} onClick={() => movePage(page.slug, 1)}>
+                              <ArrowDown size={14} />
+                            </button>
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+                <button type="button" className="outline-button" onClick={() => setChoosingPage(true)}>
+                  <FilePlus size={16} />
+                  {t("Add page")}
                 </button>
-                {addMenuOpen ? (
-                  <div className="site-add-menu" role="menu">
-                    {BLOCK_CATALOG.map((entry) => (
-                      <button type="button" role="menuitem" key={entry.type} onClick={() => addBlock(entry.type)}>
-                        <entry.Icon size={16} />
-                        <span>
-                          <strong>{entry.label}</strong>
-                          <em>{entry.hint}</em>
+
+                <h4 className="site-outline-title">{t("Site")}</h4>
+                <button type="button" className={`site-outline-row is-fixed${selected === "site" ? " is-selected" : ""}`} onClick={() => setSelected("site")}>
+                  <Globe size={15} />
+                  <span>{t("Look")}</span>
+                </button>
+                <button type="button" className={`site-outline-row is-fixed${selected === "header" ? " is-selected" : ""}`} onClick={() => setSelected("header")}>
+                  <PanelTop size={15} />
+                  <span>{t("Header")}</span>
+                </button>
+                <button type="button" className={`site-outline-row is-fixed${selected === "footer" ? " is-selected" : ""}`} onClick={() => setSelected("footer")}>
+                  <PanelBottom size={15} />
+                  <span>{t("Footer")}</span>
+                </button>
+
+                <h4 className="site-outline-title">{currentPage.title || currentPage.slug}</h4>
+                <button type="button" className={`site-outline-row is-fixed${selected === "page" ? " is-selected" : ""}`} onClick={() => setSelected("page")}>
+                  <Pencil size={15} />
+                  <span>{t("This page")}</span>
+                </button>
+                <ol className="site-outline-list">
+                  {currentPage.content.blocks.map((block, index) => {
+                    const entry = blockCatalogEntry(block.type);
+                    const isSelected = typeof selected === "object" && selected.block === block.id;
+                    return (
+                      <li key={block.id} className={`site-outline-row${isSelected ? " is-selected" : ""}`}>
+                        <button type="button" className="site-outline-main" onClick={() => setSelected({ block: block.id })}>
+                          <entry.Icon size={15} />
+                          <span>
+                            <strong>{entry.label}</strong>
+                            {blockSnippet(block) ? <em>{blockSnippet(block)}</em> : null}
+                          </span>
+                        </button>
+                        <span className="site-outline-actions">
+                          <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index === 0} onClick={() => moveBlock(block.id, -1)}>
+                            <ArrowUp size={14} />
+                          </button>
+                          <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === currentPage.content.blocks.length - 1} onClick={() => moveBlock(block.id, 1)}>
+                            <ArrowDown size={14} />
+                          </button>
+                          <button type="button" className="icon-button" aria-label={t("Duplicate")} onClick={() => duplicateBlock(block.id)}>
+                            <Copy size={14} />
+                          </button>
+                          <button type="button" className="icon-button" aria-label={t("Remove")} onClick={() => removeBlock(block.id)}>
+                            <Trash2 size={14} />
+                          </button>
                         </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+                <div className="site-add">
+                  <button type="button" className="outline-button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)}>
+                    <Plus size={16} />
+                    {t("Add a block")}
+                  </button>
+                  {addMenuOpen ? (
+                    <div className="site-add-menu" role="menu">
+                      {BLOCK_CATALOG.map((entry) => (
+                        <button type="button" role="menuitem" key={entry.type} onClick={() => addBlock(entry.type)}>
+                          <entry.Icon size={16} />
+                          <span>
+                            <strong>{entry.label}</strong>
+                            <em>{entry.hint}</em>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </aside>
+
+              <div className={`site-preview is-${device}`}>
+                <SitePreviewFrame fontsUrl={fontsUrl} width={device === "phone" ? PHONE_WIDTH : "100%"} title={t("Preview")}>
+                  {preview}
+                </SitePreviewFrame>
               </div>
-              <button type="button" className={`site-outline-row is-fixed${selected === "footer" ? " is-selected" : ""}`} onClick={() => setSelected("footer")}>
-                <PanelBottom size={15} />
-                <span>{t("Footer")}</span>
-              </button>
-            </aside>
 
-            <div className={`site-preview is-${device}`}>
-              <SitePreviewFrame fontsUrl={fontsUrl} width={device === "phone" ? PHONE_WIDTH : "100%"} title={t("Preview")}>
-                <SiteRenderer document={draft} business={business} mode="preview" selected={selected} onSelect={setSelected} previewLabels={previewLabels} />
-              </SitePreviewFrame>
+              <aside className="site-inspector">
+                {selected === "site" ? <SiteInspector settings={draft.settings} onChange={(settings) => update({ ...draft, settings })} /> : null}
+                {selected === "header" ? (
+                  <HeaderInspector header={draft.settings.header} onChange={(header) => update({ ...draft, settings: { ...draft.settings, header } })} pages={pageOptions} bookingHref={bookingHref} />
+                ) : null}
+                {selected === "footer" ? (
+                  <FooterInspector footer={draft.settings.footer} onChange={(footer) => update({ ...draft, settings: { ...draft.settings, footer } })} pages={pageOptions} bookingHref={bookingHref} />
+                ) : null}
+                {selected === "page" ? (
+                  <PageInspector page={currentPage} pages={pageOptions.filter((page) => page.slug !== currentPage.slug)} onChange={(next) => renamePage(currentPage, next)} onDelete={() => deletePage(currentPage)} onError={onToast} />
+                ) : null}
+                {selectedBlock ? (
+                  <>
+                    <h3 className="site-inspector-title">{blockCatalogEntry(selectedBlock.type).label}</h3>
+                    <p className="site-field-help">
+                      {t("Link to this block with")} <code>#{selectedBlock.id}</code>
+                    </p>
+                    <BlockInspector block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} pages={pageOptions} bookingHref={bookingHref} onError={onToast} />
+                  </>
+                ) : null}
+              </aside>
             </div>
-
-            <aside className="site-inspector">
-              {selected === "page" ? <PageInspector document={draft} onChange={update} /> : null}
-              {selected === "header" ? <HeaderInspector header={draft.header} onChange={(header) => update({ ...draft, header })} bookingHref={bookingHref} /> : null}
-              {selected === "footer" ? <FooterInspector footer={draft.footer} onChange={(footer) => update({ ...draft, footer })} /> : null}
-              {selectedBlock ? (
-                <>
-                  <h3 className="site-inspector-title">{blockCatalogEntry(selectedBlock.type).label}</h3>
-                  <p className="site-field-help">
-                    {t("Link to this block with")} <code>#{selectedBlock.id}</code>
-                  </p>
-                  <BlockInspector block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} bookingHref={bookingHref} onError={onToast} />
-                </>
-              ) : null}
-            </aside>
-          </div>
+          )}
         </div>
       </article>
     );
   }
 
-  // --- At rest: the page, and where it lives ----------------------------------
+  // --- At rest: the site, and where it lives ----------------------------------
 
   return (
     <>
       <SettingsGroup id="website" icon={Globe} section="website" title={t("Website")} className="site-builder-card">
-        <p className="settings-note">{t("A public page for your business, with your booking page built in. Build it here, publish it, and point your own domain at it below.")}</p>
+        <p className="settings-note">{t("A public website for your business, with your booking page and shop built in. Build it here, publish it, and point your own domain at it below.")}</p>
         {!draft || choosingTemplate ? (
-          chooser
+          templateChooser
+        ) : choosingPage ? (
+          pageChooser
         ) : (
           <div className="site-builder">
             <div className="site-builder-toolbar">
@@ -461,9 +657,10 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
                 {publishButton}
               </div>
             </div>
+            {pageStrip}
             <div className="site-preview is-desktop is-resting">
               <SitePreviewFrame fontsUrl={fontsUrl} width="100%" title={t("Preview")}>
-                <SiteRenderer document={draft} business={business} mode="preview" previewLabels={previewLabels} />
+                {preview}
               </SitePreviewFrame>
             </div>
           </div>
@@ -471,7 +668,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       </SettingsGroup>
 
       <SettingsGroup id="website-address" icon={ClarityPlayerPortal} section="website" title={t("Where the page lives")}>
-        <DomainPanel state={state} isPublished={Boolean(state.page?.isPublished)} onDomainsChange={(domains) => setState({ ...state, domains })} />
+        <DomainPanel state={state} isPublished={Boolean(state.site?.isPublished)} onDomainsChange={(domains) => setState({ ...state, domains })} />
       </SettingsGroup>
     </>
   );

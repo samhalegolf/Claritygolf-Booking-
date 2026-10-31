@@ -10,7 +10,9 @@ import {
   Megaphone,
   MessageSquareQuote,
   Minus,
+  Newspaper,
   Play,
+  ShoppingBag,
   Tag,
   Type,
 } from "lucide-react";
@@ -32,6 +34,8 @@ export const BLOCK_CATALOG: readonly BlockCatalogEntry[] = [
   { type: "cta", label: t("Call to action"), hint: t("A band with one button."), Icon: Megaphone },
   { type: "video", label: t("Video"), hint: t("A YouTube video."), Icon: Play },
   { type: "booking", label: t("Booking"), hint: t("Your Clarity booking page, on the page."), Icon: CalendarCheck },
+  { type: "shop", label: t("Shop"), hint: t("Your packages and gift vouchers, bought on the page."), Icon: ShoppingBag },
+  { type: "articles", label: t("Articles"), hint: t("Your article pages, newest first."), Icon: Newspaper },
   { type: "contact", label: t("Contact"), hint: t("Email, phone, address and a map."), Icon: MapPin },
   { type: "divider", label: t("Divider"), hint: t("A line or a gap between blocks."), Icon: Minus },
 ];
