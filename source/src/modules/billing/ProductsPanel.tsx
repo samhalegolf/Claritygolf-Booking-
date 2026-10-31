@@ -31,6 +31,8 @@ import { ClarityProducts } from "../shared/ClarityIcons";
 import type { BillingCatalogItem, BillingCatalogKind, StockMovement } from "./types";
 import { isLowStock } from "./stockMath";
 import { t, readerLocale } from "../../lib/i18n";
+import { prepareImage } from "../site-builder/imagePrep";
+import { uploadSiteImage } from "../site-builder/siteApi";
 
 export type ProductFormValues = {
   id: string;
@@ -48,22 +50,56 @@ export type ProductFormValues = {
   lowStockThreshold: number;
   // Selling this issues a gift voucher rather than just taking money.
   isVoucher: boolean;
+  // The website's shop: on the shelf, how it reaches the buyer, its picture,
+  // its download, and its options (a size, a pack) each priced or not.
+  sellOnline: boolean;
+  fulfilment: "collect" | "ship" | "download";
+  imageUrl: string;
+  downloadUrl: string;
+  variants: Array<{ id: string; name: string; price: number | null }>;
   // Only sent when creating - stock on an existing product moves through an
   // adjustment so a save can't undo a sale made while the form was open.
   openingStock: number;
 };
+
+/** "Small", "Large = 45": one option per line, with its own price after an equals sign. */
+export function parseVariantLines(text: string, existing: ProductFormValues["variants"] = []): ProductFormValues["variants"] {
+  const seen = new Set<string>();
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((line, index) => {
+      const [rawName, rawPrice] = line.split("=");
+      const name = rawName.trim().slice(0, 80);
+      const price = rawPrice === undefined ? null : Number(rawPrice.replace(/[^0-9.]/g, ""));
+      // A line that names an existing option keeps its id, so a cart holding it still means the same thing.
+      const known = existing.find((variant) => variant.name === name && !seen.has(variant.id));
+      const id = known?.id || `v${Date.now().toString(36)}${index}`;
+      seen.add(id);
+      return { id, name, price: price !== null && Number.isFinite(price) && price >= 0 ? price : null };
+    })
+    .filter((variant) => variant.name);
+}
+
+export function variantLines(variants: ProductFormValues["variants"] | undefined): string {
+  return (variants || []).map((variant) => (variant.price === null ? variant.name : `${variant.name} = ${variant.price}`)).join("\n");
+}
 
 export type StockAdjustInput = { mode: "delta" | "setTo"; value: number; note: string };
 
 // The form holds its numbers as strings. Parsing on every keystroke turns
 // "29." into 29 and eats the decimal point as you type it, which makes entering
 // a price like 29.95 genuinely hard. They are converted once, on save.
-type ProductFormDraft = Omit<ProductFormValues, "price" | "costPrice" | "taxRate" | "lowStockThreshold" | "openingStock"> & {
+type ProductFormDraft = Omit<ProductFormValues, "price" | "costPrice" | "taxRate" | "lowStockThreshold" | "openingStock" | "variants"> & {
   price: string;
   costPrice: string;
   taxRate: string;
   lowStockThreshold: string;
   openingStock: string;
+  /** The options as typed, one per line. */
+  variantsText: string;
 };
 
 function toNumber(value: string, fallback = 0) {
@@ -125,6 +161,11 @@ function emptyForm(taxRate: number, view: ProductsPanelView): ProductFormDraft {
     lowStockThreshold: "",
     openingStock: "",
     isVoucher: voucher,
+    sellOnline: false,
+    fulfilment: "collect",
+    imageUrl: "",
+    downloadUrl: "",
+    variantsText: "",
   };
 }
 
@@ -143,6 +184,11 @@ function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFo
     lowStockThreshold: String(product.lowStockThreshold || 0),
     openingStock: "",
     isVoucher: product.isVoucher === true,
+    sellOnline: product.sellOnline === true,
+    fulfilment: product.fulfilment || "collect",
+    imageUrl: product.imageUrl || "",
+    downloadUrl: product.downloadUrl || "",
+    variantsText: variantLines(product.variants),
   };
 }
 
@@ -241,6 +287,24 @@ export function ProductsPanel({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  // The picture goes where the website's pictures go: shrunk in the browser,
+  // into the public site-media bucket, so the shop can show it to strangers.
+  async function uploadPicture(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const prepared = await prepareImage(file);
+      updateForm("imageUrl", await uploadSiteImage(prepared.type, prepared.dataBase64));
+    } catch (error) {
+      setUploadError(error instanceof Error && error.message !== "unreadable" && error.message !== "not-an-image" ? error.message : t("Could not read that picture. Try a JPG or PNG."));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function resetForm() {
     setForm(emptyForm(defaultTaxRate, view));
     setShowDetail(false);
@@ -251,14 +315,16 @@ export function ProductsPanel({
     if (!form.name.trim()) return;
     setSaving(true);
     try {
+      const { variantsText, ...rest } = form;
       const values: ProductFormValues = {
-        ...form,
+        ...rest,
         name: form.name.trim(),
         price: toNumber(form.price),
         costPrice: toNumber(form.costPrice),
         taxRate: toNumber(form.taxRate, defaultTaxRate),
         lowStockThreshold: toNumber(form.lowStockThreshold),
         openingStock: toNumber(form.openingStock),
+        variants: parseVariantLines(variantsText, products.find((product) => product.id === form.id)?.variants),
       };
       if (await onSave(values)) {
         resetForm();
@@ -461,6 +527,57 @@ export function ProductsPanel({
               />
               <span>{t("This is a gift voucher")}</span>
             </label>
+            {!form.isVoucher && (
+              <label className="settings-field pos-settles-toggle">
+                <input
+                  checked={form.sellOnline}
+                  onChange={(event) => updateForm("sellOnline", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>{t("Sell on your website")}</span>
+              </label>
+            )}
+            {form.sellOnline && !form.isVoucher && (
+              <>
+                <label className="settings-field">
+                  <span>{t("How it reaches the buyer")}</span>
+                  <select value={form.fulfilment} onChange={(event) => updateForm("fulfilment", event.target.value as ProductFormDraft["fulfilment"])}>
+                    <option value="collect">{t("Collected in person")}</option>
+                    <option value="ship">{t("Posted (the payment page asks for an address)")}</option>
+                    <option value="download">{t("Downloaded (a link in the receipt)")}</option>
+                  </select>
+                </label>
+                {form.fulfilment === "download" && (
+                  <label className="settings-field">
+                    <span>{t("Download link")}</span>
+                    <input value={form.downloadUrl} onChange={(event) => updateForm("downloadUrl", event.target.value)} placeholder="https://…" />
+                  </label>
+                )}
+                <label className="settings-field product-notes-field">
+                  <span>{t("Options, one per line")}</span>
+                  <textarea
+                    value={form.variantsText}
+                    onChange={(event) => updateForm("variantsText", event.target.value)}
+                    rows={3}
+                    placeholder={"Small\nMedium\nLarge = 45"}
+                  />
+                </label>
+                <div className="settings-field product-notes-field">
+                  <span>{t("Picture")}</span>
+                  {form.imageUrl && <img className="product-picture-preview" src={form.imageUrl} alt="" />}
+                  <div className="product-picture-actions">
+                    <label className="outline-button logo-upload">
+                      {uploading ? t("Uploading…") : form.imageUrl ? t("Replace picture") : t("Upload picture")}
+                      <input accept="image/*" type="file" disabled={uploading} onChange={(event) => { void uploadPicture(event.target.files?.[0]); event.target.value = ""; }} />
+                    </label>
+                    {form.imageUrl && (
+                      <button className="outline-button" type="button" onClick={() => updateForm("imageUrl", "")}>{t("Remove")}</button>
+                    )}
+                  </div>
+                  {uploadError && <p className="field-help">{uploadError}</p>}
+                </div>
+              </>
+            )}
             <label className="settings-field product-notes-field">
               <span>{t("Notes")}</span>
               <textarea
@@ -475,6 +592,9 @@ export function ProductsPanel({
 
         {form.isVoucher && (
           <p className="field-help">{t("Selling this issues a coupon with a code for the amount paid, and it turns up under Billing > Vouchers > Voucher Records. Tick it on the products people buy on Squarespace so those purchases can be imported too.")}</p>
+        )}
+        {form.sellOnline && !form.isVoucher && (
+          <p className="field-help">{t("It goes on the shelf of the Shop block on your website once the shop is open (Settings › Website). An option after an equals sign has its own price; the rest sell at the price above. Stock, when counted, is shared across options.")}</p>
         )}
         {showDetail && !form.trackStock && (
           <p className="field-help">{t("Not counted - use this for something like a fitting fee that you sell but never have on a shelf.")}</p>

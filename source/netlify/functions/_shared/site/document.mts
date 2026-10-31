@@ -414,6 +414,16 @@ export function cleanEmbedUrl(input: unknown): string {
   return cleanImageUrl(input);
 }
 
+/** An Instagram username, with or without its @ or address: letters, digits, dots and underscores. */
+export function cleanInstagramHandle(input: unknown): string {
+  const value = text(input, 120).replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").replace(/[/?#].*$/, "");
+  return /^[A-Za-z0-9._]{1,30}$/.test(value) ? value : "";
+}
+
+export function instagramUrl(handle: string): string {
+  return handle ? `https://www.instagram.com/${handle}/` : "";
+}
+
 // --- Blocks -----------------------------------------------------------------
 
 /** The icons a feature may wear. Rendered by name from the lucide set. */
@@ -522,6 +532,11 @@ export type SiteContactBlock = BlockBase & {
 export type SiteDividerBlock = BlockBase & { type: "divider"; line: "line" | "space"; size: "small" | "regular" | "large" };
 /** The site's article pages, newest first, as cards. */
 export type SiteArticlesBlock = BlockBase & { type: "articles"; heading: string; intro: string; limit: number };
+/** The site's video pages, newest first: a cover or the video's own thumbnail, title and summary each. */
+export type SiteVideosBlock = BlockBase & { type: "videos"; heading: string; intro: string; limit: number; layout: "grid" | "list" };
+export type SiteInstagramItem = { id: string; image: SiteImage | null; href: string };
+/** A hand-picked grid of posts and a Follow button. Instagram's own feed needs an app review, so the pictures are the coach's. */
+export type SiteInstagramBlock = BlockBase & { type: "instagram"; heading: string; handle: string; items: SiteInstagramItem[]; columns: 3 | 4 | 6 };
 /**
  * The business's online shop (packages and gift vouchers), on the page.
  * "cards" draws what is for sale in the site's own look and takes the order
@@ -549,7 +564,9 @@ export type SiteBlock =
   | SiteContactBlock
   | SiteDividerBlock
   | SiteArticlesBlock
-  | SiteShopBlock;
+  | SiteShopBlock
+  | SiteVideosBlock
+  | SiteInstagramBlock;
 export type SiteBlockType = SiteBlock["type"];
 
 export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
@@ -572,6 +589,8 @@ export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
   "form",
   "divider",
   "articles",
+  "videos",
+  "instagram",
   "shop",
 ];
 
@@ -587,6 +606,11 @@ export type SiteHeader = {
   social: SiteSocialLink[];
   /** Drawn over the first block rather than above it, with no background of its own. */
   transparent: boolean;
+  /** A strip above the header. Empty means none. */
+  announcement: string;
+  announcementHref: string;
+  /** The page a bag icon opens, with how many things are in the visitor's cart. Empty means no icon. */
+  shopPage: string;
 };
 
 export type SiteFooter = {
@@ -653,7 +677,8 @@ export function uniquePageSlug(wanted: string, taken: Iterable<string>): string 
   return `${base.slice(0, 48)}-${Date.now().toString(36)}`;
 }
 
-export type SitePageKind = "page" | "article";
+export type SitePageKind = "page" | "article" | "video";
+export const SITE_PAGE_KINDS: readonly SitePageKind[] = ["page", "article", "video"];
 
 /** What the menu and the page list know about a page, without its blocks. */
 export type SitePageMeta = {
@@ -675,13 +700,25 @@ export type SitePageContent = {
   cover: SiteImage | null;
   /** YYYY-MM-DD, or "". */
   date: string;
+  /** A video page's YouTube id, played above its blocks and listed by a Videos block. */
+  video: string;
   blocks: SiteBlock[];
 };
 
 export type SitePage = SitePageMeta & { content: SitePageContent };
 
 /** What an article index needs of each page: its meta plus the fields the card shows. */
-export type SitePageCard = SitePageMeta & Pick<SitePageContent, "summary" | "cover" | "date">;
+export type SitePageCard = SitePageMeta & Pick<SitePageContent, "summary" | "cover" | "date" | "video">;
+
+/** What an index shows of a page: its meta and the fields a card draws. */
+export function sitePageCard<T extends SitePageMeta & { content: SitePageContent }>({ content, ...meta }: T): SitePageCard {
+  return { ...meta, summary: content.summary, cover: content.cover, date: content.date, video: content.video };
+}
+
+/** The picture YouTube keeps for a video, for a card with no cover of its own. */
+export function youtubeThumbnail(videoId: string): string {
+  return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : "";
+}
 
 const blockId = (value: unknown, index: number, prefix = "block") =>
   text(value, 80).replace(/[^A-Za-z0-9_-]/g, "") || `${prefix}-${index}`;
@@ -962,6 +999,30 @@ function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlock
         limit: Number.isFinite(limit) ? Math.min(24, Math.max(1, Math.round(limit))) : 6,
       };
     }
+    case "videos": {
+      const limit = Number(input.limit);
+      return {
+        id,
+        type: "videos",
+        heading: text(input.heading, 160),
+        intro: text(input.intro, 600),
+        limit: Number.isFinite(limit) ? Math.min(24, Math.max(1, Math.round(limit))) : 6,
+        layout: oneOf(input.layout, ["grid", "list"], "grid"),
+      };
+    }
+    case "instagram":
+      return {
+        id,
+        type: "instagram",
+        heading: text(input.heading, 160),
+        handle: cleanInstagramHandle(input.handle),
+        columns: ([3, 4, 6] as const).find((count) => count === Number(input.columns)) ?? 4,
+        items: cleanList(input.items, 12, (item, itemIndex) => ({
+          id: blockId(item.id, itemIndex, "item"),
+          image: cleanImage(item.image),
+          href: cleanSiteHref(item.href),
+        })),
+      };
     case "shop": {
       const height = Number(input.height);
       return {
@@ -1003,6 +1064,9 @@ export function cleanHeader(value: unknown): SiteHeader {
     sticky: input.sticky !== false,
     social: cleanSocial(input.social),
     transparent: input.transparent === true,
+    announcement: text(input.announcement, 160),
+    announcementHref: cleanSiteHref(input.announcementHref),
+    shopPage: cleanPageSlug(input.shopPage, ""),
   };
 }
 
@@ -1037,6 +1101,7 @@ export function cleanSitePageContent(value: unknown): SitePageContent {
     summary: text(input.summary, 400),
     cover: cleanImage(input.cover),
     date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "",
+    video: siteYoutubeId(input.video),
     blocks: cleanSiteBlocks(input.blocks),
   };
 }
@@ -1049,7 +1114,7 @@ export function cleanSitePageMeta(value: unknown, index = 0): SitePageMeta {
     id: text(input.id, 80).replace(/[^A-Za-z0-9_-]/g, ""),
     slug: cleanPageSlug(input.slug, `page-${index + 1}`),
     title: text(input.title, 120),
-    kind: oneOf(input.kind, ["page", "article"], "page"),
+    kind: oneOf(input.kind, SITE_PAGE_KINDS, "page"),
     inNav: input.inNav !== false,
     sortOrder: Number.isFinite(sortOrder) ? Math.round(sortOrder) : index,
   };
@@ -1065,7 +1130,7 @@ export function sitePageImageUrls(content: SitePageContent): string[] {
     if (block.type === "image" && block.image) urls.push(block.image.url);
     if (block.type === "gallery") urls.push(...block.images.map((image) => image.url));
     if (block.type === "cards" || block.type === "logos") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
-    if (block.type === "testimonials") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
+    if (block.type === "testimonials" || block.type === "instagram") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
   }
   return urls;
 }
@@ -1164,8 +1229,12 @@ function newBlockFields(type: SiteBlockType): SiteBlockInput {
       return { id, type, line: "line", size: "regular" };
     case "articles":
       return { id, type, heading: "Latest articles", intro: "", limit: 6 };
+    case "videos":
+      return { id, type, heading: "Videos", intro: "", limit: 6, layout: "grid" };
+    case "instagram":
+      return { id, type, heading: "Follow on Instagram", handle: "", items: [], columns: 4 };
     case "shop":
-      return { id, type, heading: "Shop", intro: "Lesson packages and gift vouchers.", mode: "cards", height: 900 };
+      return { id, type, heading: "Shop", intro: "Lesson packages, gift vouchers and gear.", mode: "cards", height: 900 };
   }
 }
 
@@ -1338,12 +1407,34 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
       ),
   },
   {
+    id: "videos",
+    label: "Videos",
+    summary: "A library of your instructional videos, newest first. Add videos as pages.",
+    build: () =>
+      page("videos", "Videos", [
+        { id: "intro", type: "hero", eyebrow: "", heading: "Instructional Videos", text: "Short lessons you can watch any time.", image: null, layout: "left", height: "regular", buttons: [] },
+        { id: "list", type: "videos", heading: "", intro: "", limit: 24, layout: "list" },
+      ]),
+  },
+  {
+    id: "video",
+    label: "Video",
+    summary: "One video: a title, the YouTube link and a description. Shown on your Videos page.",
+    build: () =>
+      page(
+        "new-video",
+        "New video",
+        [{ id: "body", type: "text", heading: "New video", body: "What this video covers, and who it is for.", align: "left", columns: 1 }],
+        { kind: "video", inNav: false, summary: "One line that says what the video shows.", date: new Date().toISOString().slice(0, 10) },
+      ),
+  },
+  {
     id: "shop",
     label: "Shop",
-    summary: "Your online shop: lesson packages and gift vouchers, bought on the page.",
+    summary: "Your online shop: lesson packages, gift vouchers and anything you sell, bought on the page.",
     build: () =>
       page("shop-page", "Shop", [
-        { id: "shop", type: "shop", heading: "Shop", intro: "Lesson packages and gift vouchers. Paid online, delivered by email.", mode: "cards", height: 900 },
+        { id: "shop", type: "shop", heading: "Shop", intro: "Lesson packages, gift vouchers and gear. Paid online.", mode: "cards", height: 900 },
       ]),
   },
   {

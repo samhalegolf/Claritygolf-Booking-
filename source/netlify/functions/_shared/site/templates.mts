@@ -46,7 +46,7 @@ export type SiteTemplate = {
 
 const book = (label: string, href: string, style: "primary" | "secondary" = "primary") => ({ label, href, style });
 
-function settings(preset: string, input: SiteTemplateInput, options: { sticky?: boolean; transparent?: boolean; buttonHref?: string } = {}): SiteSettings {
+function settings(preset: string, input: SiteTemplateInput, options: { sticky?: boolean; transparent?: boolean; buttonHref?: string; shopPage?: string } = {}): SiteSettings {
   return cleanSiteSettings({
     theme: themeFromPreset(preset),
     header: {
@@ -57,6 +57,7 @@ function settings(preset: string, input: SiteTemplateInput, options: { sticky?: 
       sticky: options.sticky ?? true,
       transparent: options.transparent ?? false,
       social: [],
+      shopPage: options.shopPage ?? "",
     },
     footer: { text: `© ${input.businessName}`, links: [], social: [], showCredit: true },
   });
@@ -245,7 +246,7 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
     summary: "Modelled on a working coaching site: profile hero, what you offer as cards, reviews on a dark band, certifications, venues with maps and booking, group coaching, articles, a shop and a contact form.",
     preset: "ember",
     build: (input) => ({
-      settings: settings("ember", input, { sticky: true, transparent: true, buttonHref: pageHref("book") }),
+      settings: settings("ember", input, { sticky: true, transparent: true, buttonHref: pageHref("book"), shopPage: "shop-page" }),
       pages: [
         page(
           HOME_PAGE_SLUG,
@@ -306,14 +307,7 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
               ],
               style: { theme: "white", background: null, video: "", overlay: 30, height: "auto", width: "inherit" },
             },
-            {
-              id: "instagram",
-              type: "gallery",
-              heading: "Follow On Instagram",
-              images: [],
-              columns: 4,
-              button: book("Follow", ""),
-            },
+            { id: "instagram", type: "instagram", heading: "Follow On Instagram", handle: "", items: [], columns: 4 },
           ],
           `Golf coaching with ${input.coachName || input.businessName}. Private lessons, group classes and gift vouchers. Book online.`,
         ),
@@ -343,6 +337,7 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
           "Group golf coaching, suitable for all levels. Book online.",
         ),
         sitePagePreset("articles")!.build(input),
+        sitePagePreset("videos")!.build(input),
         sitePagePreset("shop")!.build(input),
         page(
           "contact",

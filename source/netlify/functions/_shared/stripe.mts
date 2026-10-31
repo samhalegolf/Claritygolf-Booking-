@@ -295,7 +295,19 @@ export type StripeCheckoutInput = {
    * Left out, Stripe shows whatever the account has switched on.
    */
   paymentMethodTypes?: string[];
+  /** Ask the buyer for a delivery address on Stripe's page: something in the order is posted. */
+  collectShippingAddress?: boolean;
 };
+
+/**
+ * Where a posted order may go. Stripe insists on a list; this is the places a
+ * golf coach's shop is likely to post to, which is most of the world's card
+ * holders. A country missing here can be added without anything else moving.
+ */
+export const SHIPPING_COUNTRIES = [
+  "NZ", "AU", "GB", "IE", "US", "CA", "ZA", "SG", "MY", "JP", "KR", "HK", "AE", "IN",
+  "DE", "FR", "ES", "IT", "NL", "BE", "AT", "CH", "SE", "NO", "DK", "FI", "PT", "PL",
+];
 
 export async function createStripeCheckoutSession(
   credential: StripeCredential,
@@ -333,6 +345,9 @@ export async function createStripeCheckoutSession(
   if (input.productDescription) {
     params.set("line_items[0][price_data][product_data][description]", input.productDescription);
   }
+  if (input.collectShippingAddress) {
+    SHIPPING_COUNTRIES.forEach((country, index) => params.set(`shipping_address_collection[allowed_countries][${index}]`, country));
+  }
 
   const session = await stripeRequest(credential, "checkout/sessions", { method: "POST", params });
   if (!session.url) throw Object.assign(new Error("Stripe did not return a checkout URL."), { status: 502 });
@@ -355,7 +370,29 @@ export async function retrieveStripeCheckoutSession(
     currency: String(session?.currency || "").toUpperCase(),
     metadata: (session?.metadata || {}) as Record<string, string>,
     clientReferenceId: String(session?.client_reference_id || ""),
+    shippingAddress: checkoutShippingAddress(session),
   };
+}
+
+/**
+ * The delivery address a Checkout page collected, as one block of text.
+ * Stripe has moved it between fields over API versions, so both are read.
+ */
+export function checkoutShippingAddress(session: Record<string, unknown> | null | undefined): string {
+  const collected = (session?.collected_information as Record<string, unknown> | undefined)?.shipping_details;
+  const details = ((collected || session?.shipping_details || null) as Record<string, unknown> | null) || null;
+  if (!details) return "";
+  const address = (details.address || {}) as Record<string, unknown>;
+  const lines = [
+    details.name,
+    address.line1,
+    address.line2,
+    [address.city, address.state, address.postal_code].filter(Boolean).join(" "),
+    address.country,
+  ]
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean);
+  return lines.join("\n").slice(0, 600);
 }
 
 /**

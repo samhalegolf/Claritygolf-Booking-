@@ -10,19 +10,23 @@ import {
   blockStyleIsPlain,
   cleanBlockStyle,
   cleanHeader,
+  cleanInstagramHandle,
   cleanPageSlug,
   cleanSiteHref,
   cleanSitePageContent,
   cleanSitePageMeta,
   cleanSiteSettings,
   googleFontsUrl,
+  instagramUrl,
   newSiteBlock,
   pageHref,
   pageSlugFromHref,
+  sitePageCard,
   sitePageImageUrls,
   siteYoutubeId,
   themeFromPreset,
   uniquePageSlug,
+  youtubeThumbnail,
 } from "./document.mts";
 import { SITE_TEMPLATES } from "./templates.mts";
 import {
@@ -256,6 +260,45 @@ test("cards, logos, embeds, venues and the contact form keep only what they can 
   assert.deepEqual(form.type === "form" && [form.askPhone, form.buttonLabel, form.thanks], [false, "Send it", "Cheers"]);
 });
 
+test("a video page keeps its YouTube id, and the index blocks keep only what they draw", () => {
+  const meta = cleanSitePageMeta({ slug: "putting-drill", title: "Putting drill", kind: "video", inNav: false });
+  assert.equal(meta.kind, "video");
+  assert.equal(cleanSitePageMeta({ slug: "x", title: "x", kind: "podcast" }).kind, "page");
+  const content = cleanSitePageContent({ video: "https://youtu.be/dQw4w9WgXcQ?t=4", blocks: [] });
+  assert.equal(content.video, "dQw4w9WgXcQ");
+  assert.equal(cleanSitePageContent({ video: "https://example.com/not-youtube" }).video, "");
+  const card = sitePageCard({ ...meta, id: "p1", sortOrder: 3, content: { ...content, summary: "A drill", cover: null } });
+  assert.deepEqual([card.slug, card.video, card.summary, card.cover], ["putting-drill", "dQw4w9WgXcQ", "A drill", null]);
+  assert.equal(youtubeThumbnail("dQw4w9WgXcQ"), "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+  assert.equal(youtubeThumbnail(""), "");
+
+  const page = cleanSitePageContent({
+    blocks: [
+      { id: "v", type: "videos", limit: 99, layout: "carousel" },
+      { id: "i", type: "instagram", handle: "https://www.instagram.com/samhalegolf/", columns: 5, items: [{ image: { url: "https://cdn.example/a.jpg" }, href: "https://www.instagram.com/p/abc/" }, { image: null, href: "javascript:x" }] },
+    ],
+  });
+  const [videos, instagram] = page.blocks;
+  assert.deepEqual(videos.type === "videos" && [videos.limit, videos.layout], [24, "grid"]);
+  assert.equal(instagram.type === "instagram" && instagram.handle, "samhalegolf");
+  assert.equal(instagram.type === "instagram" && instagram.columns, 4);
+  assert.equal(instagram.type === "instagram" && instagram.items.length, 2);
+  assert.equal(instagram.type === "instagram" && instagram.items[1].href, "", "a script link is dropped");
+  assert.equal(cleanInstagramHandle("@Sam.Hale_Golf"), "Sam.Hale_Golf");
+  assert.equal(cleanInstagramHandle("not a handle!"), "");
+  assert.equal(instagramUrl("samhalegolf"), "https://www.instagram.com/samhalegolf/");
+  assert.deepEqual(sitePageImageUrls(page), ["https://cdn.example/a.jpg"], "the instagram pictures count as the page's");
+});
+
+test("a header may carry an announcement strip and name the page its bag icon opens", () => {
+  const header = cleanHeader({ announcement: "  Winter clinics now open  ", announcementHref: "page:group-coaching", shopPage: "Shop Page" });
+  assert.equal(header.announcement, "Winter clinics now open");
+  assert.equal(header.announcementHref, "page:group-coaching");
+  assert.equal(header.shopPage, "shop-page");
+  assert.deepEqual([cleanHeader({}).announcement, cleanHeader({}).shopPage], ["", ""]);
+  assert.equal(cleanHeader({ shopPage: "shop" }).shopPage, "", "a reserved address is not a page");
+});
+
 test("a header may sit over the first block and carry social links of known kinds", () => {
   const header = cleanHeader({ transparent: true, social: [{ kind: "instagram", url: "https://instagram.com/x" }, { kind: "myspace", url: "https://myspace.example" }, { kind: "facebook", url: "javascript:x" }] });
   assert.equal(header.transparent, true);
@@ -281,7 +324,9 @@ test('the "pro" template is the full coaching site: venues as its booking page, 
   const site = pro.build(presetInput);
   assert.equal(site.settings.header.transparent, true);
   const home = site.pages[0].content.blocks;
-  assert.deepEqual(home.map((block) => block.type), ["hero", "cards", "testimonials", "logos", "gallery"]);
+  assert.deepEqual(home.map((block) => block.type), ["hero", "cards", "testimonials", "logos", "instagram"]);
+  assert.equal(site.settings.header.shopPage, "shop-page", "the bag icon opens the shop page");
+  assert.ok(site.pages.some((page) => page.slug === "videos"), "a videos page is one of its pages");
   assert.equal(home[2].style.theme, "dark");
   const book = site.pages.find((page) => page.slug === "book");
   assert.equal(book?.content.blocks[0].type, "venues");
@@ -309,6 +354,10 @@ for (const preset of SITE_PAGE_PRESETS) {
       assert.equal(page.kind, "article");
       assert.equal(page.inNav, false, "an article is listed by the articles page, not the menu");
       assert.match(page.content.date, /^\d{4}-\d{2}-\d{2}$/);
+    }
+    if (preset.id === "video") {
+      assert.equal(page.kind, "video");
+      assert.equal(page.inNav, false, "a video is listed by the videos page, not the menu");
     }
     if (preset.id === "book") assert.equal(page.content.blocks[0].type, "booking");
     if (preset.id === "shop") assert.equal(page.content.blocks[0].type, "shop");

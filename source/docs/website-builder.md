@@ -43,20 +43,35 @@ own look, and every "Book" button can point at the site's own Book page.
 
 A Shop block (or the Shop page preset) sells what the business already
 sells: packages are the lesson types marked sellable, vouchers are the
-products ticked as vouchers under Billing. In "cards" mode the items are
-drawn in the site's own look and the order is taken on the page: the buyer
-fills in name and email (and for a voucher, who it is for), pays on
-Stripe's page, and lands back on the same page, where the order id in the
-address is confirmed with the server and the receipt and any voucher code
-shown. In "embed" mode Clarity's own shop page is framed instead.
+products ticked as vouchers under Billing, and goods are the products
+ticked "Sell on your website" under Billing › Products. A product there
+gets a picture (uploaded to the site's bucket), how it reaches the buyer
+(collected, posted or downloaded), a download link, and options one per
+line ("Large = 45" prices an option on its own; the rest sell at the
+product's price). Stock, when the product counts it, is shared across its
+options and a product with none left shows as sold out rather than
+vanishing.
+
+In "cards" mode the shelf is drawn in the site's own look and the order is
+a cart: the visitor adds things (the cart is kept in the browser, one per
+business, and the header's bag icon shows the count), gives a name and
+email (and for a voucher, who it is for), pays on Stripe's page, and lands
+back on the same page, where the order id in the address is confirmed with
+the server and the receipt shown: voucher codes, download links, and where
+it is being posted. When something in the order is posted, Stripe's page
+collects the delivery address and the shop's flat shipping fee is added
+once; the address is kept on the sale (Billing › Sales shows it) and the
+business is emailed the order to post or have ready. In "embed" mode
+Clarity's own shop page is framed instead.
 
 The block's inspector is where the coach edits the shop: the switch that
-opens it, what is on the shelf with prices, and why it is closed if it is
-(no card payments, nothing for sale). Prices and contents are still set
-where the items live. The server side is unchanged: the block calls the
-same `/api/public-shop` routes as the shop page, with one addition, a
+opens it, the shipping fee, what is on the shelf with prices, and why it is
+closed if it is (no card payments, nothing for sale). Prices and contents
+are still set where the items live. The block calls the same
+`/api/public-shop` routes as the shop page, with one addition, a
 same-origin `returnPath` so the buyer comes back to the site rather than to
-Clarity's shop page.
+Clarity's shop page. An order is one till sale with several lines, priced
+on the server off the shelf, never off the request.
 
 ## Blocks
 
@@ -70,8 +85,15 @@ optional button), faq, cta (call to action), video (YouTube), embed
 coach works, side by side: map, hours, a line, and either a Clarity
 booking screen or another system's framed page), form (a message to the
 business), shop (packages and vouchers, bought on the page), articles
-(the site's article pages as cards), contact (email, phone, address, hours,
-optional map), divider.
+(the site's article pages as cards), videos (the site's video pages, as a
+grid or a list, each with its cover or YouTube's own picture), instagram
+(a hand-picked grid of posts with a Follow button; Instagram's own feed
+needs an app review, so the pictures are the coach's), contact (email,
+phone, address, hours, optional map), divider.
+
+Pages come in three kinds. An article and a video both carry a date, a
+summary and a cover for the index that lists them; a video page also has
+a YouTube link, played above its blocks.
 
 Every block has an id, and `#<id>` works as a link anywhere on the page
 (menu links, buttons), which is how "Lessons" in the header reaches the
@@ -93,7 +115,9 @@ The header can be transparent: it sits over the first block with no
 background of its own, in light text when that block is dark, and scrolls
 away with it (a transparent header is never sticky). The header and
 footer can carry social links (Instagram, Facebook, YouTube, TikTok, X,
-LinkedIn), drawn as icons.
+LinkedIn), drawn as icons. The header can also show a bag icon with the
+visitor's cart count, opening the page the coach picks (the one with the
+Shop block), and an announcement strip above it with a line and a link.
 
 ### The contact form
 
@@ -108,9 +132,10 @@ catches bots: when it is filled the request is answered ok and dropped.
 Five starting sites: Classic, Academy, Studio, Performance and Pro. Pro is
 modelled on a working coaching site (samhalegolf.com): a transparent
 header over a profile hero, what is offered as four cards, reviews on a
-dark band, certifications as logos, an Instagram gallery; then a Book
+dark band, certifications as logos, an Instagram grid; then a Book
 page of venues with maps and booking side by side, Group Coaching,
-Articles, Shop and Contact (with the form). It uses the "Ember" theme
+Articles, Videos, Shop (with the bag icon in the header) and Contact
+(with the form). It uses the "Ember" theme
 preset (orange on white, Manrope and Poppins). A "Book a lesson (venues)"
 page preset adds the venues page to any site.
 
@@ -126,7 +151,8 @@ page preset adds the venues page to any site.
 | Routes | `netlify/functions/site.mts` |
 | Renderer (editor preview and public page share it) | `src/modules/site-builder/SiteRenderer.tsx`, `site.css` |
 | Editor | `src/modules/site-builder/SiteBuilderPanel.tsx`, `Inspectors.tsx`, `fields.tsx` |
-| Shop block | `src/modules/site-builder/ShopBlock.tsx` |
+| Shop block and the visitor's cart | `src/modules/site-builder/ShopBlock.tsx`, `siteCart.ts` |
+| The shelf, carts and orders (shared with the shop page) | `netlify/functions/_shared/online-shop.mts`, routes in `billing-api.mts`, migration `20261031000600_online_store` |
 | Contact form block | `src/modules/site-builder/FormBlock.tsx` |
 | Section style to CSS variables | `src/modules/site-builder/siteTheme.ts` |
 | Domains panel | `src/modules/site-builder/DomainPanel.tsx` |
@@ -198,3 +224,7 @@ next one and swaps it in without a reload; Back and Forward work.
 - A booking block in the preview is a labelled box rather than the live
   widget, so editing never books anything and the preview stays light.
 - Pictures pasted by address are used as given; only uploads are shrunk.
+- A download is a link the coach pastes (or a file hosted elsewhere), sent
+  in the receipt; the shop does not host files itself.
+- Instagram posts are added by hand. A live feed needs Instagram's app
+  review and a connected account.

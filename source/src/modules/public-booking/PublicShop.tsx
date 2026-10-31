@@ -24,12 +24,15 @@ import type { BusinessTerminology } from "../../../netlify/functions/_shared/bus
 
 type ShopItem = {
   id: string;
-  kind: "package" | "voucher";
+  kind: "package" | "voucher" | "product";
   name: string;
   description: string;
   price: number;
   credits: number;
   includes: string[];
+  fulfilment: "collect" | "ship" | "download" | "";
+  variants: Array<{ id: string; name: string; price: number | null }>;
+  stock: number | null;
 };
 
 type OrderSummary = {
@@ -40,6 +43,7 @@ type OrderSummary = {
   email: string;
   recipientName: string;
   vouchers: Array<{ code: string; value: number }>;
+  downloads: Array<{ name: string; url: string }>;
 };
 
 type Details = { name: string; email: string; recipientName: string; message: string };
@@ -61,6 +65,7 @@ async function shopCall<T>(path: string, body?: unknown): Promise<T> {
 
 function itemDetail(item: ShopItem, terms: BusinessTerminology) {
   if (item.kind === "voucher") return t("Gift voucher");
+  if (item.kind === "product") return item.fulfilment === "ship" ? t("Posted to you") : item.fulfilment === "download" ? t("Download") : t("Collect in person");
   if (item.includes.length) return item.includes.join(" + ");
   return tn(item.credits, "{count} {serviceSingular}", "{count} {servicePlural}", {
     serviceSingular: terms.serviceSingular.toLowerCase(),
@@ -79,6 +84,7 @@ export default function PublicShop() {
   const [items, setItems] = useState<ShopItem[]>([]);
   const [shopState, setShopState] = useState<"loading" | "open" | "closed" | "error">("loading");
   const [itemId, setItemId] = useState("");
+  const [variantId, setVariantId] = useState("");
   const [details, setDetails] = useState<Details>({ name: "", email: "", recipientName: "", message: "" });
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState("");
@@ -138,7 +144,9 @@ export default function PublicShop() {
 
   const item = items.find((entry) => entry.id === itemId) || null;
   const gift = item?.kind === "voucher";
-  const canPay = Boolean(item) && details.name.trim() !== "" && VALID_EMAIL.test(details.email.trim()) && !paying;
+  const variant = item?.variants.find((entry) => entry.id === variantId) || item?.variants[0] || null;
+  const price = variant?.price ?? item?.price ?? 0;
+  const canPay = Boolean(item) && item?.stock !== 0 && details.name.trim() !== "" && VALID_EMAIL.test(details.email.trim()) && !paying;
   const theme = brand.bookingTheme === "dark" ? "dark" : "light";
   const terms = resolvedMarketFromWire(account.market, account.terminology).terminology;
   const brandName = account.businessName || account.coachName || "";
@@ -152,7 +160,7 @@ export default function PublicShop() {
     setError("");
     try {
       const { url } = await shopCall<{ url: string }>("/api/public-shop/checkout", {
-        itemId: item.id,
+        lines: [{ itemId: item.id, variantId: variant?.id || "", quantity: 1 }],
         name: details.name.trim(),
         email: details.email.trim(),
         recipientName: gift ? details.recipientName.trim() : "",
@@ -195,7 +203,14 @@ export default function PublicShop() {
                     <small>{t("Worth {amount}", { amount: money(voucher.value, account) })}</small>
                   </div>
                 ))}
-                {!order.vouchers.length ? <p>{t("{item} is on your account.", { item: order.description })}</p> : null}
+                {order.downloads.length ? (
+                  <ul className="shop-downloads">
+                    {order.downloads.map((download) => (
+                      <li key={download.url}><a href={download.url} target="_blank" rel="noreferrer">{download.name}</a></li>
+                    ))}
+                  </ul>
+                ) : null}
+                {!order.vouchers.length && !order.downloads.length ? <p>{t("{item} is on your account.", { item: order.description })}</p> : null}
                 <p>{t("Your receipt is on its way to {email}.", { email: order.email })}</p>
               </>
             ) : null}
@@ -249,11 +264,12 @@ export default function PublicShop() {
                     <button
                       className={candidate.id === itemId ? "selected-service" : ""}
                       key={candidate.id}
-                      onClick={() => setItemId(candidate.id === itemId ? "" : candidate.id)}
+                      disabled={candidate.stock === 0}
+                      onClick={() => { setItemId(candidate.id === itemId ? "" : candidate.id); setVariantId(""); }}
                       type="button"
                     >
                       <strong>{candidate.kind === "voucher" ? <Gift size={15} aria-hidden="true" /> : null}{candidate.name}</strong>
-                      <em>{money(candidate.price, account)} · {itemDetail(candidate, terms)}</em>
+                      <em>{candidate.stock === 0 ? t("Sold out") : `${money(candidate.price, account)} · ${itemDetail(candidate, terms)}`}</em>
                       {candidate.description ? <small>{candidate.description}</small> : null}
                     </button>
                   ))}
@@ -268,6 +284,15 @@ export default function PublicShop() {
               {item ? (
                 <div className="booking-progressive-body">
                   <div className="booking-form">
+                    {item.variants.length ? (
+                      <select aria-label={t("Option")} className="w-name" onChange={(event) => setVariantId(event.target.value)} value={variant?.id || ""}>
+                        {item.variants.map((entry) => (
+                          <option key={entry.id} value={entry.id}>
+                            {entry.price !== null && entry.price !== item.price ? `${entry.name} · ${money(entry.price, account)}` : entry.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
                     <input autoComplete="name" className="w-name" onChange={set("name")} placeholder={t("Your name *")} value={details.name} />
                     <input autoComplete="email" className="w-email" onChange={set("email")} placeholder={t("Email *")} type="email" value={details.email} />
                     {gift ? (
@@ -279,11 +304,15 @@ export default function PublicShop() {
                     <p className="shop-fine-print">
                       {gift
                         ? t("We email the voucher code to you, ready to pass on.")
-                        : t("It goes on your account under this email.")}
+                        : item.kind === "product"
+                          ? item.fulfilment === "ship"
+                            ? t("Your receipt goes to this email. The payment page asks where to post it.")
+                            : t("Your receipt, and anything you download, goes to this email.")
+                          : t("It goes on your account under this email.")}
                     </p>
                     {error ? <p className="email-status failed" role="alert">{error}</p> : null}
                     <button className="primary-button confirm-booking" disabled={!canPay} onClick={() => void pay()} type="button">
-                      {paying ? t("Taking you to secure payment…") : t("Pay {amount}", { amount: money(item.price, account) })}
+                      {paying ? t("Taking you to secure payment…") : t("Pay {amount}", { amount: money(price, account) })}
                     </button>
                   </div>
                 </div>
