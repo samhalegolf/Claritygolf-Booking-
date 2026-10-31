@@ -8990,6 +8990,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             sku: values.sku.trim(),
             trackStock: values.trackStock,
             isVoucher: values.isVoucher,
+            sellOnline: values.sellOnline,
+            fulfilment: values.fulfilment,
+            imageUrl: values.imageUrl.trim(),
+            downloadUrl: values.downloadUrl.trim(),
+            variants: values.variants,
             lowStockThreshold: Math.max(0, Number(values.lowStockThreshold) || 0),
             // Ignored by the backend on an update - stock only moves through an
             // adjustment or a sale.
@@ -17548,6 +17553,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                               <td>
                                 {row.sale.description}
                                 {row.sale.isLessonPass && <span className="pos-lesson-tag">{t("Lesson pass")}</span>}
+                                {row.sale.shippingAddress && (
+                                  <em className="pos-adjusted-note">{t("Post to: {address}", { address: row.sale.shippingAddress.replace(/\n/g, ", ") })}</em>
+                                )}
                                 {row.sale.listedAmount !== null &&
                                   Math.abs(row.sale.listedAmount - row.sale.amount) > 0.005 && (
                                     <em className="pos-adjusted-note">{t("listed {listedAmount}", { listedAmount: formatMoney(row.sale.listedAmount, row.sale.currency) })}</em>

@@ -79,6 +79,14 @@ export type BillingCatalogItem = {
   lowStock?: boolean;
   // Selling this issues a gift voucher rather than just taking money.
   isVoucher?: boolean;
+  // The website's shop: on the shelf, how it reaches the buyer, its picture,
+  // its download and its options (sizes, packs). A variant priced null sells
+  // at the product's own price.
+  sellOnline?: boolean;
+  fulfilment?: "collect" | "ship" | "download";
+  imageUrl?: string;
+  downloadUrl?: string;
+  variants?: Array<{ id: string; name: string; price: number | null }>;
   // A lesson type, shown in the catalog but owned by Settings > Services. It
   // can be sold and invoiced; it cannot be edited or retired from Billing.
   readOnly?: boolean;
@@ -369,6 +377,10 @@ export type PosTransaction = {
   paymentChannel?: string;
   // The card money went back through Stripe when it was refunded from Clarity.
   cardRefunded?: boolean;
+  // An online order with something to post: what was charged for it and where
+  // Stripe's page was told to send it.
+  shippingAmount?: number;
+  shippingAddress?: string;
   paidAt: string;
   createdAt: string;
   updatedAt: string;

@@ -15,6 +15,7 @@ import {
   cleanSitePageContent,
   cleanSitePageMeta,
   cleanSiteSettings,
+  sitePageCard,
   type SitePage,
   type SitePageCard,
   type SitePageContent,
@@ -319,7 +320,7 @@ export async function readPublishedSite(accountId: string, slug: string): Promis
   const page = pages.find((candidate) => candidate.slug === wanted) || null;
   return {
     settings: site.publishedSettings,
-    pages: pages.map(({ content, ...meta }) => ({ ...meta, summary: content.summary, cover: content.cover, date: content.date })),
+    pages: pages.map(sitePageCard),
     page,
   };
 }

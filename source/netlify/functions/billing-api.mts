@@ -15,9 +15,13 @@ import { matchVoucherRule, parseVoucherRules } from "./_shared/voucher-rules.mts
 import {
   LESSON_ITEM_PREFIX,
   ONLINE_SHOP_SETTING,
+  ONLINE_SHOP_SHIPPING_SETTING,
+  cleanFulfilment,
+  cleanVariants,
   onlineBuyerPersonId,
   onlineShopItems,
   onlineShopSwitchedOn,
+  orderLineName,
   packageOffersForLesson,
   readOnlineOrder,
 } from "./_shared/online-shop.mts";
@@ -48,6 +52,7 @@ import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
   applicationFeeCents,
+  checkoutShippingAddress,
   refundStripePayment,
   requireStripeFeature,
   resolveStripeCredential,
@@ -248,7 +253,23 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     low_stock_threshold: Math.round(cleanNumber(raw?.lowStockThreshold, 0, { min: 0, max: 1e6 })),
     // Selling one of these issues a coupon rather than just taking money.
     is_voucher: raw?.isVoucher === true,
+    // The website's shop. A voucher is on it by being a voucher; this is for goods.
+    sell_online: raw?.sellOnline === true,
+    fulfilment: cleanFulfilment(raw?.fulfilment),
+    image_url: cleanHttpsUrl(raw?.imageUrl),
+    download_url: cleanHttpsUrl(raw?.downloadUrl),
+    variants: JSON.stringify(cleanVariants(raw?.variants)),
   };
+}
+
+/** An https address or nothing: a picture or a download the shop hands to strangers. */
+function cleanHttpsUrl(value: unknown): string {
+  const text = cleanString(value, "", 600);
+  try {
+    return text && new URL(text).protocol === "https:" ? text : "";
+  } catch {
+    return "";
+  }
 }
 
 function productRowToApi(row: Record<string, unknown>) {
@@ -274,6 +295,11 @@ function productRowToApi(row: Record<string, unknown>) {
     // 0 means "don't warn me", so only out-of-stock counts.
     lowStock: trackStock && (stockLevel <= 0 || (lowStockThreshold > 0 && stockLevel <= lowStockThreshold)),
     isVoucher: row.is_voucher === true,
+    sellOnline: row.sell_online === true,
+    fulfilment: cleanFulfilment(row.fulfilment),
+    imageUrl: String(row.image_url || ""),
+    downloadUrl: String(row.download_url || ""),
+    variants: cleanVariants(row.variants),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -3666,6 +3692,10 @@ function posRowToApi(row: Record<string, unknown>) {
     // True once the card money has gone back through Stripe (refunded from
     // Clarity). A sale only marked refunded, with no card behind it, is false.
     cardRefunded: Boolean(row.stripe_refund_id),
+    // An online order with something to post: what was charged for it, and
+    // where Stripe's page was told to send it.
+    shippingAmount: Number(row.shipping_amount) || 0,
+    shippingAddress: String(row.shipping_address ?? ""),
     paidAt: String(row.paid_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -3748,6 +3778,9 @@ async function resolvePosItems(accountId: string, raw: unknown) {
         line.unitPrice === undefined || line.unitPrice === null || line.unitPrice === ""
           ? null
           : round2(cleanNumber(line.unitPrice, 0, { min: 0 })),
+      // An online order names which option of a product was bought (a size, a
+      // pack). It rides on the line's name, so the receipt and the sale say it.
+      variant: cleanString(line.variant, "", 80),
     };
   });
 
@@ -3790,7 +3823,7 @@ async function resolvePosItems(accountId: string, raw: unknown) {
     const unitPrice = line.unitPrice === null ? product.price : line.unitPrice;
     return {
       productId: line.productId,
-      name: product.name,
+      name: line.variant ? `${product.name} - ${line.variant}` : product.name,
       sku: product.sku,
       trackStock: product.trackStock,
       isVoucher: product.isVoucher,
@@ -4127,7 +4160,7 @@ async function syncPosCoupon(accountId: string, row: Record<string, unknown>, st
 /** What only the server may say about a sale: the till cannot ring one up as "online". */
 type PosSaleOrigin = {
   /** `forBookingId`: a package bought while booking, whose first credit pays for that booking once paid. */
-  online?: { giftRecipientName?: string; giftMessage?: string; forBookingId?: string };
+  online?: { giftRecipientName?: string; giftMessage?: string; forBookingId?: string; shippingAmount?: number };
 };
 
 export async function createPosTransaction(
@@ -4294,6 +4327,7 @@ export async function createPosTransaction(
     gift_recipient_name: cleanString(origin.online?.giftRecipientName, "", 140) || null,
     gift_message: cleanString(origin.online?.giftMessage, "", 500) || null,
     ...(origin.online?.forBookingId ? { for_booking_id: cleanString(origin.online.forBookingId, "", 160) } : {}),
+    ...(origin.online?.shippingAmount ? { shipping_amount: round2(origin.online.shippingAmount) } : {}),
     paid_at: status === "paid" ? nowIso() : null,
     created_at: nowIso(),
     updated_at: nowIso(),
@@ -6356,21 +6390,27 @@ type OnlineShopState = {
   currency: string;
   items: ReturnType<typeof onlineShopItems>;
   paymentMethodId: string;
+  /** Charged once on an order with something to post. Major units. */
+  shippingFee: number;
 };
 
 async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
-  const [switchValue, connection, services, products, currency, methods, branding] = await Promise.all([
+  const [switchValue, shippingValue, connection, services, products, currency, methods, branding] = await Promise.all([
     readSettingValue(accountId, ONLINE_SHOP_SETTING),
+    readSettingValue(accountId, ONLINE_SHOP_SHIPPING_SETTING),
     accountStripeConnection(accountId),
     readServiceList(accountId),
     supabase("billing_products_services", {
-      query: `select=id,name,description,default_price,active,is_voucher&account_id=eq.${encodeFilter(accountId)}&is_voucher=is.true`,
+      query:
+        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,variants,track_stock,stock_level` +
+        `&account_id=eq.${encodeFilter(accountId)}&or=(is_voucher.is.true,sell_online.is.true)`,
     }),
     resolveDefaultCurrency(accountId),
     listPaymentMethodRows(accountId),
     resolveInvoiceBranding(accountId),
   ]);
   const enabled = onlineShopSwitchedOn(switchValue);
+  const shippingFee = round2(cleanNumber(shippingValue, 0, { min: 0, max: 100000 }));
   // Clarity Pay only, like the player portal: a business on its own Stripe
   // takes invoice payments and nothing else.
   const method = methods.find((entry) => entry.kind === "clarity_pay" && entry.active);
@@ -6385,6 +6425,7 @@ async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
     currency,
     items,
     paymentMethodId: method?.id || "",
+    shippingFee,
   };
 }
 
@@ -6396,22 +6437,29 @@ export async function publicOnlineShop(accountId: string) {
     businessName: shop.businessName,
     currency: shop.currency,
     items: shop.open ? shop.items : [],
+    shipping: shop.shippingFee,
   };
 }
 
 /** The coach's view: the switch, and what a customer would see. */
 async function coachOnlineShop(accountId: string) {
   const shop = await readOnlineShop(accountId);
-  return { enabled: shop.enabled, open: shop.open, blocker: shop.blocker, items: shop.items };
+  return { enabled: shop.enabled, open: shop.open, blocker: shop.blocker, items: shop.items, shippingFee: shop.shippingFee };
 }
 
+/** The switch and the shipping fee. Only what the body names changes. */
 async function writeOnlineShop(accountId: string, body: Record<string, unknown>) {
-  await supabase("settings", {
-    method: "POST",
-    query: SETTINGS_UPSERT_QUERY,
-    prefer: "resolution=merge-duplicates",
-    body: settingsUpsertRows(accountId, { [ONLINE_SHOP_SETTING]: body?.enabled === true ? "true" : "false" }, nowIso()),
-  });
+  const values: Record<string, string> = {};
+  if (typeof body?.enabled === "boolean") values[ONLINE_SHOP_SETTING] = body.enabled ? "true" : "false";
+  if (body?.shippingFee !== undefined) values[ONLINE_SHOP_SHIPPING_SETTING] = String(round2(cleanNumber(body.shippingFee, 0, { min: 0, max: 100000 })));
+  if (Object.keys(values).length) {
+    await supabase("settings", {
+      method: "POST",
+      query: SETTINGS_UPSERT_QUERY,
+      prefer: "resolution=merge-duplicates",
+      body: settingsUpsertRows(accountId, values, nowIso()),
+    });
+  }
   return coachOnlineShop(accountId);
 }
 
@@ -6444,9 +6492,9 @@ export async function startOnlineOrder(
 ) {
   const shop = await readOnlineShop(accountId);
   if (!shop.open) throw Object.assign(new Error("This shop is not open."), { status: 409, code: "SHOP_CLOSED" });
-  const read = readOnlineOrder(body, shop.items);
+  const read = readOnlineOrder(body, shop.items, shop.shippingFee);
   if ("error" in read) throw Object.assign(new Error(read.error), { status: 400, code: "INVALID_ORDER" });
-  const { order, item } = read;
+  const { order } = read;
 
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const recent = (await supabase("billing_pos_transactions", {
@@ -6461,19 +6509,26 @@ export async function startOnlineOrder(
     console.error("billing_api:online_sweep_failed", accountId, error),
   );
 
+  const branding = await resolveInvoiceBranding(accountId);
+  const mt = messageText(branding.messageLanguage);
+  const lineNames = order.lines.map((line) => (line.quantity > 1 ? `${orderLineName(line)} x${line.quantity}` : orderLineName(line)));
   const { transaction } = await createPosTransaction(
     accountId,
     {
-      items: [{ productId: item.id, quantity: 1 }],
+      // Priced here, off the shelf, and handed over as explicit prices: a
+      // variant's price is not the product row's.
+      items: order.lines.map((line) => ({ productId: line.itemId, quantity: line.quantity, unitPrice: line.unitPrice, variant: line.variant?.name || "" })),
+      // The whole of what the buyer pays, shipping included, so Stripe's total
+      // and the sale agree and nothing reads as a counter discount.
+      amount: order.total,
+      listedAmount: order.total,
+      description: [...lineNames, order.shipping > 0 ? mt("Shipping") : ""].filter(Boolean).join(", ").slice(0, 300),
       paymentMethodId: shop.paymentMethodId,
       customerName: order.name,
       customerEmail: order.email,
     },
-    { online: { giftRecipientName: order.recipientName, giftMessage: order.message } },
+    { online: { giftRecipientName: order.recipientName, giftMessage: order.message, shippingAmount: order.shipping } },
   );
-
-  const branding = await resolveInvoiceBranding(accountId);
-  const mt = messageText(branding.messageLanguage);
   // Where the buyer lands after paying: Clarity's own shop page, or the page
   // of the business's website the order was placed from (a same-origin path
   // only, see public-shop.mts), which shows the receipt the same way.
@@ -6484,14 +6539,18 @@ export async function startOnlineOrder(
       // The whole sale: an online order has no voucher or credit paying part of it.
       amount: transaction.amount,
       currency: transaction.currency,
-      productName: `${item.name} - ${branding.businessName}`,
-      productDescription: order.recipientName ? mt("For {name}", { name: order.recipientName }) : "",
+      productName: order.lines.length === 1 ? `${orderLineName(order.lines[0])} - ${branding.businessName}` : `${mt("Order from {businessName}", { businessName: branding.businessName })}`,
+      productDescription: [order.lines.length > 1 ? lineNames.join(", ") : "", order.recipientName ? mt("For {name}", { name: order.recipientName }) : ""]
+        .filter(Boolean)
+        .join(". ")
+        .slice(0, 500),
       customerEmail: order.email,
       clientReferenceId: transaction.id,
       metadata: { pos_transaction_id: transaction.id, account_id: accountId, receipt_number: transaction.receiptNumber },
       successUrl: `${shopPath}?order=${encodeURIComponent(transaction.id)}`,
       cancelUrl: `${shopPath}?cancelled=${encodeURIComponent(transaction.id)}`,
       expiresInMinutes: ONLINE_CHECKOUT_MINUTES,
+      collectShippingAddress: order.needsShipping,
     });
   } catch (error) {
     // No page to pay on means no order. Voided rather than left pending, so the
@@ -6573,9 +6632,19 @@ async function ensureOnlineBuyer(accountId: string, row: Record<string, unknown>
  * Settle an online order Stripe says is paid. Safe to call any number of times;
  * only the call that wins the paid transition sends the email.
  */
-async function settleOnlineOrder(accountId: string, row: Record<string, unknown>, card: CardPayment) {
+async function settleOnlineOrder(accountId: string, row: Record<string, unknown>, card: CardPayment, shippingAddress = "") {
   const id = String(row.id ?? "");
   await ensureOnlineBuyer(accountId, row);
+  // Where to post it, as Stripe's page collected it. Written before the receipt
+  // so the business's copy of the order can carry it.
+  if (shippingAddress && !cleanString(row.shipping_address, "", 600)) {
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: { shipping_address: shippingAddress.slice(0, 600), updated_at: nowIso() },
+      prefer: "return=minimal",
+    });
+  }
   const settled = await settlePosCardPayment(accountId, id, card);
   // A package bought while booking: its first credit pays for that booking.
   // Before the receipt goes, so the receipt can say so. Every settle tries --
@@ -6587,6 +6656,9 @@ async function settleOnlineOrder(accountId: string, row: Record<string, unknown>
   if (!settled.alreadyPaid) {
     await emailOnlineOrder(accountId, id).catch((error) =>
       console.error("billing_api:online_order_email_failed", accountId, id, error),
+    );
+    await emailOrderToBusiness(accountId, id).catch((error) =>
+      console.error("billing_api:online_order_business_email_failed", accountId, id, error),
     );
   }
   return settled;
@@ -6760,7 +6832,7 @@ async function spendPackageOnBooking(accountId: string, orderId: string) {
 async function onlineOrderSummary(accountId: string, row: Record<string, unknown>) {
   const id = String(row.id ?? "");
   const paid = row.status === "paid";
-  const coupons = paid ? await couponsForSale(accountId, id) : [];
+  const [coupons, downloads] = paid ? await Promise.all([couponsForSale(accountId, id), onlineOrderDownloads(accountId, id)]) : [[], []];
   return {
     status: String(row.status ?? ""),
     receiptNumber: String(row.receipt_number ?? ""),
@@ -6770,7 +6842,73 @@ async function onlineOrderSummary(accountId: string, row: Record<string, unknown
     email: String(row.customer_email ?? ""),
     recipientName: String(row.gift_recipient_name ?? ""),
     vouchers: coupons.map((coupon) => ({ code: coupon.code, value: coupon.originalValue, currency: coupon.currency })),
+    downloads,
+    shippingAddress: String(row.shipping_address ?? ""),
   };
+}
+
+/** The files a paid order's lines hand over: each downloadable product once, by name. */
+async function onlineOrderDownloads(accountId: string, id: string) {
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  const productIds = [...new Set(items.map((item) => item.productId).filter((productId) => productId && !productId.startsWith(LESSON_ITEM_PREFIX)))];
+  if (!productIds.length) return [] as Array<{ name: string; url: string }>;
+  const list = productIds.map((productId) => `"${productId.replace(/"/g, "")}"`).join(",");
+  const rows = (await supabase("billing_products_services", {
+    query: `select=id,name,fulfilment,download_url&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+  })) as Array<Record<string, unknown>>;
+  return rows
+    .filter((row) => cleanFulfilment(row.fulfilment) === "download" && String(row.download_url || ""))
+    .map((row) => ({ name: String(row.name || ""), url: String(row.download_url) }));
+}
+
+/** The products of an order grouped by how they reach the buyer, for the two emails. */
+async function onlineOrderFulfilment(accountId: string, id: string) {
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  const productIds = [...new Set(items.map((item) => item.productId).filter((productId) => productId && !productId.startsWith(LESSON_ITEM_PREFIX)))];
+  const byId = new Map<string, string>();
+  if (productIds.length) {
+    const list = productIds.map((productId) => `"${productId.replace(/"/g, "")}"`).join(",");
+    const rows = (await supabase("billing_products_services", {
+      query: `select=id,fulfilment,is_voucher&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+    })) as Array<Record<string, unknown>>;
+    for (const row of rows) byId.set(String(row.id), row.is_voucher === true ? "voucher" : cleanFulfilment(row.fulfilment));
+  }
+  const of = (kind: string) => items.filter((item) => byId.get(item.productId) === kind);
+  return { items, ship: of("ship"), collect: of("collect"), download: of("download") };
+}
+
+/**
+ * The business's copy of an order with something to do: post it or have it
+ * ready to collect. A voucher or package needs nothing of the coach, so an
+ * order of only those sends no email.
+ */
+async function emailOrderToBusiness(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, id);
+  if (!row) return;
+  const fulfilment = await onlineOrderFulfilment(accountId, id);
+  if (!fulfilment.ship.length && !fulfilment.collect.length) return;
+  const branding = await resolveInvoiceBranding(accountId);
+  const to = cleanString(branding.contactEmail, "", 180) || cleanString(await readSettingValue(accountId, "notificationEmail"), "", 180) || cleanString(process.env.CLARITY_NOTIFICATION_EMAIL, "", 180);
+  if (!to) return;
+  const currency = String(row.currency || "NZD");
+  const address = cleanString(row.shipping_address, "", 600);
+  const lines = [
+    `Receipt ${String(row.receipt_number ?? "")} - ${formatMoney(row.amount, currency)}`,
+    `From ${String(row.customer_name ?? "")} <${String(row.customer_email ?? "")}>`,
+    "",
+    ...(fulfilment.ship.length ? ["To post:", ...fulfilment.ship.map((item) => `  ${item.name} x${item.quantity}`), address ? `Send to:\n${address}` : "No address was collected.", ""] : []),
+    ...(fulfilment.collect.length ? ["To collect:", ...fulfilment.collect.map((item) => `  ${item.name} x${item.quantity}`), ""] : []),
+    "The sale is under Billing › Sales.",
+  ];
+  const result = await deliverEmail({
+    accountId,
+    to,
+    subject: `New order ${String(row.receipt_number ?? "")} from ${String(row.customer_name ?? "a customer")}`,
+    text: lines.join("\n"),
+    replyTo: cleanString(row.customer_email, "", 180) || undefined,
+    idempotencyKey: `online-order-business-${id}`,
+  });
+  if (!result.sent) console.error("billing_api:online_order_business_email_not_sent", accountId, id, result.reason);
 }
 
 /** The return page's poll: has this order been paid yet? */
@@ -6781,11 +6919,12 @@ export async function confirmOnlineOrder(accountId: string, orderId: unknown) {
   if (row.status === "pending" && sessionId) {
     const session = await retrieveStripeCheckoutSession(accountId, sessionId);
     if (session.paid) {
-      await settleOnlineOrder(accountId, row, {
-        channel: "stripe_checkout",
-        paymentIntentId: session.paymentIntentId || sessionId,
-        amountCents: session.amountTotal,
-      });
+      await settleOnlineOrder(
+        accountId,
+        row,
+        { channel: "stripe_checkout", paymentIntentId: session.paymentIntentId || sessionId, amountCents: session.amountTotal },
+        session.shippingAddress,
+      );
     } else if (session.expired) {
       await cancelOnlineOrder(accountId, String(row.id ?? ""));
     }
@@ -6838,7 +6977,9 @@ export async function settlePosCheckoutFromWebhook(accountId: string, session: R
   };
   try {
     const settled =
-      row.source === "online" ? await settleOnlineOrder(accountId, row, card) : await settlePosCardPayment(accountId, id, card);
+      row.source === "online"
+        ? await settleOnlineOrder(accountId, row, card, checkoutShippingAddress(session))
+        : await settlePosCardPayment(accountId, id, card);
     return { settled: id, alreadyPaid: settled.alreadyPaid };
   } catch (error) {
     if ((error as { status?: number })?.status !== 409) throw error;
@@ -6860,9 +7001,15 @@ async function emailOnlineOrder(accountId: string, id: string) {
   const recipient = cleanString(row.gift_recipient_name, "", 140);
   const message = cleanString(row.gift_message, "", 500);
   const packages = items.filter((item) => item.productId.startsWith(LESSON_ITEM_PREFIX)).map((item) => item.name);
+  const downloads = await onlineOrderDownloads(accountId, id);
+  const shipping = Number(row.shipping_amount) || 0;
+  const address = cleanString(row.shipping_address, "", 600);
 
   const greeting = row.customer_name ? mt("Hi {name},", { name: String(row.customer_name) }) : mt("Hi there,");
-  const lines = items.map((item) => ({ label: item.name, amount: formatMoney(item.lineTotal, currency) }));
+  const lines = items.map((item) => ({ label: item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name, amount: formatMoney(item.lineTotal, currency) }));
+  if (shipping > 0) lines.push({ label: mt("Shipping"), amount: formatMoney(shipping, currency) });
+  const downloadLines = downloads.map((download) => `${download.name}: ${download.url}`);
+  const postedLine = address ? `${mt("We will post it to:")}\n${address}` : "";
   const total = formatMoney(row.amount, currency);
   const voucherLines = coupons.map((coupon) => ({
     code: mt("Gift voucher code: {code}", { code: coupon.code }),
@@ -6885,6 +7032,9 @@ async function emailOnlineOrder(accountId: string, id: string) {
     message ? `"${message}"` : "",
     voucherLines.length ? mt("Show this code when you pay and its value comes off the bill.") : "",
     ...packageLines,
+    ...(downloadLines.length ? ["", mt("Your downloads:"), ...downloadLines] : []),
+    postedLine ? "" : "",
+    postedLine,
     "",
     mt("Thanks,"),
     branding.businessName,
@@ -6914,6 +7064,12 @@ async function emailOnlineOrder(accountId: string, id: string) {
       ? `<p style="margin:0 0 16px">${escapeHtml(mt("Show this code when you pay and its value comes off the bill."))}</p>`
       : "") +
     packageLines.map((line) => `<p style="margin:0 0 16px">${escapeHtml(line)}</p>`).join("") +
+    (downloads.length
+      ? `<p style="margin:0 0 8px">${escapeHtml(mt("Your downloads:"))}</p><ul style="margin:0 0 16px;padding-left:20px">` +
+        downloads.map((download) => `<li><a href="${escapeHtml(download.url)}">${escapeHtml(download.name)}</a></li>`).join("") +
+        `</ul>`
+      : "") +
+    (address ? `<p style="margin:0 0 16px;white-space:pre-line">${escapeHtml(mt("We will post it to:"))}\n${escapeHtml(address)}</p>` : "") +
     `<p style="margin:0 0 8px;color:#5b6068">${escapeHtml(String(row.receipt_number ?? ""))}</p>` +
     `<table style="width:100%;border-collapse:collapse;border-top:1px solid #d9dce1;border-bottom:1px solid #d9dce1">` +
     lines.map((line) => row2(line.label, line.amount)).join("") +

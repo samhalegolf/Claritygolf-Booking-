@@ -218,7 +218,11 @@ const catalog: Record<string, string> = {
   "{name} paid their share": "{name} maksoi osuutensa",
   "{name} has paid {amount} towards {service} on {date}.": "{name} maksoi {amount} tunnista {service} ({date}).",
   "{name} has paid their share of {service} on {date}.": "{name} maksoi osuutensa tunnista {service} ({date}).",
-  "Anyone who hasn't paid ahead can pay on the day.": "Ne, jotka eivät ole maksaneet etukäteen, voivat maksaa paikan päällä."
+  "Anyone who hasn't paid ahead can pay on the day.": "Ne, jotka eivät ole maksaneet etukäteen, voivat maksaa paikan päällä.",
+  "Shipping": "Toimitus",
+  "Order from {businessName}": "Tilaus: {businessName}",
+  "We will post it to:": "Postitamme sen osoitteeseen:",
+  "Your downloads:": "Latauksesi:"
 };
 
 export default catalog;

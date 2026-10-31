@@ -115,16 +115,28 @@ export async function sendSiteForm(input: { business: string; page: string; name
 // The same four calls the shop page makes (public-shop.mts), from a page of
 // the site. The business is always named: the shop takes money.
 
+export type ShopVariant = { id: string; name: string; price: number | null };
+
 export type ShopItem = {
   id: string;
-  kind: "package" | "voucher";
+  kind: "package" | "voucher" | "product";
   name: string;
   description: string;
   price: number;
   currency: string;
   credits: number;
   includes: string[];
+  image: string;
+  /** How a product reaches its buyer. "" for a package or voucher: they go by email. */
+  fulfilment: "collect" | "ship" | "download" | "";
+  variants: ShopVariant[];
+  /** How many are left when the product counts stock; null when it does not. */
+  stock: number | null;
 };
+
+export type ShopShelf = { open: boolean; items: ShopItem[]; currency: string; shipping: number };
+
+export type ShopOrderLine = { itemId: string; variantId: string; quantity: number };
 
 export type ShopOrder = {
   status: string;
@@ -134,6 +146,8 @@ export type ShopOrder = {
   email: string;
   recipientName: string;
   vouchers: Array<{ code: string; value: number }>;
+  downloads: Array<{ name: string; url: string }>;
+  shippingAddress: string;
 };
 
 async function shopCall<T>(business: string, path: string, body?: unknown): Promise<T> {
@@ -144,13 +158,13 @@ async function shopCall<T>(business: string, path: string, body?: unknown): Prom
   return readJson(response);
 }
 
-export async function fetchShop(business: string): Promise<{ open: boolean; items: ShopItem[]; currency: string }> {
+export async function fetchShop(business: string): Promise<ShopShelf> {
   return shopCall(business, "");
 }
 
 export async function startShopCheckout(
   business: string,
-  order: { itemId: string; name: string; email: string; recipientName: string; message: string; returnPath: string },
+  order: { lines: ShopOrderLine[]; name: string; email: string; recipientName: string; message: string; returnPath: string },
 ): Promise<string> {
   return (await shopCall<{ url: string }>(business, "/checkout", order)).url;
 }
@@ -163,13 +177,13 @@ export async function cancelShopOrder(business: string, orderId: string): Promis
   await shopCall(business, "/cancel", { orderId });
 }
 
-/** The coach's switch: Settings › Website edits the shop from the shop block. */
-export type CoachShop = { enabled: boolean; open: boolean; blocker: string; items: ShopItem[] };
+/** The coach's switch and shipping fee: Settings › Website edits the shop from the shop block. */
+export type CoachShop = { enabled: boolean; open: boolean; blocker: string; items: ShopItem[]; shippingFee: number };
 
 export async function fetchCoachShop(): Promise<CoachShop> {
   return readJson(await apiFetch("/api/billing/online-shop"));
 }
 
-export async function setShopEnabled(enabled: boolean): Promise<CoachShop> {
-  return readJson(await apiFetch("/api/billing/online-shop", jsonInit("PUT", { enabled })));
+export async function updateCoachShop(patch: { enabled?: boolean; shippingFee?: number }): Promise<CoachShop> {
+  return readJson(await apiFetch("/api/billing/online-shop", jsonInit("PUT", patch)));
 }

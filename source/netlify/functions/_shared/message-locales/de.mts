@@ -218,7 +218,11 @@ const catalog: Record<string, string> = {
   "{name} paid their share": "{name} hat den eigenen Anteil bezahlt",
   "{name} has paid {amount} towards {service} on {date}.": "{name} hat {amount} für {service} am {date} bezahlt.",
   "{name} has paid their share of {service} on {date}.": "{name} hat den eigenen Anteil für {service} am {date} bezahlt.",
-  "Anyone who hasn't paid ahead can pay on the day.": "Wer noch nicht im Voraus bezahlt hat, kann vor Ort bezahlen."
+  "Anyone who hasn't paid ahead can pay on the day.": "Wer noch nicht im Voraus bezahlt hat, kann vor Ort bezahlen.",
+  "Shipping": "Versand",
+  "Order from {businessName}": "Bestellung bei {businessName}",
+  "We will post it to:": "Wir schicken es an:",
+  "Your downloads:": "Ihre Downloads:"
 };
 
 export default catalog;

@@ -7,6 +7,7 @@
 // box so the preview stays light and never books anything.
 
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   Award,
   Calendar,
@@ -23,6 +24,7 @@ import {
   MapPin,
   Phone,
   Shield,
+  ShoppingBag,
   Star,
   Sun,
   Target,
@@ -35,7 +37,9 @@ import {
 import {
   HOME_PAGE_SLUG,
   blockStyleIsPlain,
+  instagramUrl,
   pageSlugFromHref,
+  youtubeThumbnail,
   type SiteBlock,
   type SiteBlockStyle,
   type SiteButton,
@@ -49,13 +53,14 @@ import {
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { FormBlock } from "./FormBlock";
 import { ShopBlock } from "./ShopBlock";
+import { CART_EVENT, cartCount, readCart } from "./siteCart";
 import { blockStyleVars, bookingPageUrl, siteThemeClassName, siteThemeStyle } from "./siteTheme";
 
 export type SiteBusiness = { slug: string; name: string; logo: string; showLogo: boolean };
 
 export type SiteSelection = "site" | "header" | "footer" | "page" | { block: string };
 
-export type PreviewLabels = { booking: string; map: string; shop: string; embed: string; noArticles: string; noPage: string };
+export type PreviewLabels = { booking: string; map: string; shop: string; embed: string; noArticles: string; noVideos: string; noPage: string };
 
 export type SiteRendererProps = {
   settings: SiteSettings;
@@ -163,6 +168,51 @@ function SocialIcons({ links, className }: { links: SiteSocialLink[]; className:
           </a>
         );
       })}
+    </div>
+  );
+}
+
+/** The header's bag: how many things are in the visitor's cart, and the way to the shop page. */
+function CartIcon({ business, preview, ...link }: { business: string; preview: boolean } & LinkProps) {
+  const [count, setCount] = useState(() => (preview ? 0 : cartCount(readCart(business))));
+  useEffect(() => {
+    if (preview) return;
+    const refresh = () => setCount(cartCount(readCart(business)));
+    window.addEventListener(CART_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(CART_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [business, preview]);
+  return (
+    <a className="site-header-cart" aria-label="Cart" title="Cart" {...link}>
+      <ShoppingBag size={20} />
+      {count > 0 ? <span className="site-header-cart-count">{count}</span> : null}
+    </a>
+  );
+}
+
+/** A YouTube video, or the preview's stand-in for one. */
+function YouTubeFrame({ videoId, title, preview }: { videoId: string; title: string; preview: boolean }) {
+  if (!videoId || preview) {
+    // The editor shows the video's own picture rather than loading a player
+    // for every block on every keystroke.
+    return (
+      <div className="site-placeholder is-video" style={videoId ? { backgroundImage: `url("${youtubeThumbnail(videoId)}")` } : undefined}>
+        <Video size={28} />
+      </div>
+    );
+  }
+  return (
+    <div className="site-video-frame">
+      <iframe
+        src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1`}
+        title={title || "Video"}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        loading="lazy"
+      />
     </div>
   );
 }
@@ -288,6 +338,11 @@ export function SiteRenderer({
       // In the preview every link is inert: the coach is editing, not browsing.
       onClickCapture={preview ? (event) => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); } : undefined}
     >
+      {header.announcement ? (
+        <div className="site-announcement">
+          {header.announcementHref ? <a {...linkProps(header.announcementHref)}>{header.announcement}</a> : <span>{header.announcement}</span>}
+        </div>
+      ) : null}
       {frame(
         "header",
         `site-header${header.sticky && !header.transparent ? " is-sticky" : ""}${header.transparent ? " is-transparent" : ""}${headerOnDark ? " is-on-dark" : ""}`,
@@ -311,6 +366,7 @@ export function SiteRenderer({
             </nav>
           ) : null}
           <SocialIcons links={header.social} className="site-header-social" />
+          {header.shopPage ? <CartIcon business={business.slug} preview={preview} {...linkProps(`page:${header.shopPage}`)} /> : null}
           <Button button={header.button} className="site-header-button" />
         </div>,
         "top",
@@ -322,8 +378,13 @@ export function SiteRenderer({
             <h1 className="site-heading">{previewLabels?.noPage || "There is no page here"}</h1>
           </section>
         ) : null}
-        {!missingPage && page.kind === "article" && page.content.date ? (
+        {!missingPage && (page.kind === "article" || page.kind === "video") && page.content.date ? (
           <p className="site-container site-article-date">{formatSiteDate(page.content.date)}</p>
+        ) : null}
+        {!missingPage && page.kind === "video" ? (
+          <div className="site-container site-page-video">
+            <YouTubeFrame videoId={page.content.video} title={page.title} preview={preview} />
+          </div>
         ) : null}
         {!missingPage
           ? page.content.blocks.map((block) =>
@@ -630,19 +691,7 @@ function Block({
       return (
         <section className="site-container site-video">
           <Heading level={2} text={block.heading} />
-          {block.youtubeId ? (
-            <div className="site-video-frame">
-              <iframe
-                src={`https://www.youtube-nocookie.com/embed/${block.youtubeId}?rel=0&modestbranding=1&playsinline=1`}
-                title={block.heading || "Video"}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-                loading="lazy"
-              />
-            </div>
-          ) : (
-            <div className="site-placeholder is-video" />
-          )}
+          <YouTubeFrame videoId={block.youtubeId} title={block.heading} preview={preview} />
           {block.caption ? <p className="site-caption">{block.caption}</p> : null}
         </section>
       );
@@ -736,6 +785,79 @@ function Block({
           ) : preview ? (
             <div className="site-placeholder">
               <span>{previewLabels?.noArticles || "No articles yet"}</span>
+            </div>
+          ) : null}
+        </section>
+      );
+    }
+    case "videos": {
+      const videos = pages
+        .filter((candidate) => candidate.kind === "video" && candidate.slug !== page.slug)
+        .sort((a, b) => (b.date || "").localeCompare(a.date || "") || a.sortOrder - b.sortOrder)
+        .slice(0, block.limit);
+      return (
+        <section className="site-container site-videos">
+          {sectionHead(block.heading, block.intro)}
+          {videos.length ? (
+            <div className={`site-video-list is-${block.layout}`}>
+              {videos.map((video) => {
+                const picture = video.cover?.url || youtubeThumbnail(video.video);
+                return (
+                  <a className="site-video-card" key={video.slug} {...linkProps(`page:${video.slug}`)}>
+                    <span className="site-video-card-picture">
+                      {picture ? <img src={picture} alt={video.cover?.alt || ""} loading="lazy" /> : null}
+                      <Video size={22} />
+                    </span>
+                    <span className="site-video-card-body">
+                      <strong>{video.title || video.slug}</strong>
+                      {video.summary ? <span>{video.summary}</span> : null}
+                    </span>
+                  </a>
+                );
+              })}
+            </div>
+          ) : preview ? (
+            <div className="site-placeholder">
+              <span>{previewLabels?.noVideos || "No videos yet"}</span>
+            </div>
+          ) : null}
+        </section>
+      );
+    }
+    case "instagram": {
+      const profile = instagramUrl(block.handle);
+      return (
+        <section className="site-container site-instagram">
+          <div className="site-instagram-head">
+            <Heading level={2} text={block.heading} />
+            {profile ? (
+              <a className="site-instagram-handle" href={profile} target="_blank" rel="noreferrer">
+                <Instagram size={18} /> @{block.handle}
+              </a>
+            ) : null}
+          </div>
+          <div className="site-instagram-grid" style={{ "--site-columns": block.columns } as CSSProperties}>
+            {block.items.length ? (
+              block.items.map((item) => {
+                const picture = item.image ? <img src={item.image.url} alt={item.image.alt} loading="lazy" /> : <span className="site-instagram-empty" />;
+                const href = item.href || profile;
+                return href ? (
+                  <a key={item.id} href={href} target="_blank" rel="noreferrer">
+                    {picture}
+                  </a>
+                ) : (
+                  <span key={item.id}>{picture}</span>
+                );
+              })
+            ) : (
+              <div className="site-placeholder" />
+            )}
+          </div>
+          {profile ? (
+            <div className="site-buttons is-centre">
+              <a className="site-button is-primary" href={profile} target="_blank" rel="noreferrer">
+                Follow @{block.handle}
+              </a>
             </div>
           ) : null}
         </section>

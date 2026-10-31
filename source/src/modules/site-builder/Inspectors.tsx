@@ -25,7 +25,7 @@ import {
 import { t } from "../../lib/i18n";
 import { BOOKING_SCREENS } from "../public-booking/bookingScreens";
 import { ButtonInput, ColorInput, DateInput, ImageInput, LinkInput, ListEditor, NumberInput, SelectInput, TextArea, TextInput, ToggleInput, type PageOption } from "./fields";
-import { fetchCoachShop, setShopEnabled, type CoachShop } from "./siteApi";
+import { fetchCoachShop, updateCoachShop, type CoachShop } from "./siteApi";
 import { money } from "./ShopBlock";
 
 type Common = { pages: PageOption[]; bookingHref: string; onError: (message: string) => void };
@@ -160,12 +160,27 @@ export function PageInspector({
           options={[
             { value: "page", label: t("Page") },
             { value: "article", label: t("Article") },
+            { value: "video", label: t("Video") },
           ]}
         />
       ) : null}
-      {page.kind === "article" ? (
+      {page.kind === "video" ? (
+        <TextInput
+          label={t("YouTube link")}
+          value={content.video}
+          maxLength={400}
+          placeholder="https://youtu.be/…"
+          onChange={(video) => setContent({ video })}
+          help={t("Plays at the top of this page. Paste the video's address; only the video id is kept.")}
+        />
+      ) : null}
+      {page.kind === "article" || page.kind === "video" ? (
         <>
-          <p className="site-field-help">{t("An article is listed on any page with an Articles block, newest first, with these details.")}</p>
+          <p className="site-field-help">
+            {page.kind === "video"
+              ? t("A video is listed on any page with a Videos block, newest first, with these details.")
+              : t("An article is listed on any page with an Articles block, newest first, with these details.")}
+          </p>
           <DateInput label={t("Date")} value={content.date} onChange={(date) => setContent({ date })} />
           <TextArea label={t("Summary")} value={content.summary} rows={3} maxLength={400} onChange={(summary) => setContent({ summary })} />
           <ImageInput label={t("Cover picture")} value={content.cover} onChange={(cover) => setContent({ cover })} onError={onError} />
@@ -197,6 +212,17 @@ export function HeaderInspector({ header, onChange, pages, bookingHref }: { head
       <LinkList links={header.links} onChange={(links) => onChange({ ...header, links })} pages={pages} bookingHref={bookingHref} />
       <h4 className="site-inspector-subtitle">{t("Button")}</h4>
       <ButtonInput label={t("Add a button")} value={header.button} onChange={(button) => onChange({ ...header, button })} pages={pages} bookingHref={bookingHref} />
+      <h4 className="site-inspector-subtitle">{t("Cart")}</h4>
+      <SelectInput
+        label={t("Bag icon opens")}
+        value={header.shopPage}
+        onChange={(shopPage) => onChange({ ...header, shopPage })}
+        options={[{ value: "", label: t("No bag icon") }, ...pages.map((page) => ({ value: page.slug, label: page.title || page.slug }))]}
+      />
+      <p className="site-field-help">{t("Shows how many things a visitor has in their cart. Pick the page with your Shop block.")}</p>
+      <h4 className="site-inspector-subtitle">{t("Announcement")}</h4>
+      <TextInput label={t("A line above the header")} value={header.announcement} maxLength={160} onChange={(announcement) => onChange({ ...header, announcement })} help={t("Leave empty for no strip.")} />
+      {header.announcement ? <LinkInput label={t("Where it leads")} value={header.announcementHref} onChange={(announcementHref) => onChange({ ...header, announcementHref })} pages={pages} bookingHref={bookingHref} /> : null}
     </>
   );
 }
@@ -344,7 +370,22 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
         checked={shop.enabled}
         onChange={(enabled) => {
           setBusy(true);
-          setShopEnabled(enabled)
+          updateCoachShop({ enabled })
+            .then(setShop)
+            .catch((cause: Error) => onError(cause.message))
+            .finally(() => setBusy(false));
+        }}
+      />
+      <NumberInput
+        label={t("Shipping fee, per order with something to post")}
+        value={shop.shippingFee}
+        min={0}
+        max={100000}
+        step={0.5}
+        onChange={(shippingFee) => {
+          setShop({ ...shop, shippingFee });
+          setBusy(true);
+          updateCoachShop({ shippingFee })
             .then(setShop)
             .catch((cause: Error) => onError(cause.message))
             .finally(() => setBusy(false));
@@ -352,7 +393,7 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
       />
       {busy ? <p className="site-field-help">{t("Saving...")}</p> : null}
       {shop.blocker === "card_payments" ? <p className="site-field-help">{t("Card payments are not set up yet: connect Clarity Pay under Billing before the shop can take orders.")}</p> : null}
-      {shop.blocker === "nothing_for_sale" ? <p className="site-field-help">{t("Nothing is for sale yet. Mark a lesson package as sellable under Lesson types, or tick a product as a gift voucher under Billing › Products.")}</p> : null}
+      {shop.blocker === "nothing_for_sale" ? <p className="site-field-help">{t("Nothing is for sale yet. Mark a lesson package as sellable under Lesson types, or tick a product as a gift voucher or \"Sell on your website\" under Billing › Products.")}</p> : null}
       {shop.items.length ? (
         <ul className="site-shop-items">
           {shop.items.map((item) => (
@@ -364,7 +405,7 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
         </ul>
       ) : null}
       <p className="site-field-help">
-        <ExternalLink size={12} /> {t("Prices and what is included are set where the item lives: packages under Lesson types, vouchers under Billing › Products.")}
+        <ExternalLink size={12} /> {t("Prices and what is included are set where the item lives: packages under Lesson types, vouchers and goods under Billing › Products, where a product gets its picture, options and how it reaches the buyer.")}
       </p>
     </div>
   );
@@ -783,6 +824,56 @@ function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: 
           <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
           <NumberInput label={t("How many to show")} value={block.limit} min={1} max={24} onChange={(limit) => set({ limit })} />
           <p className="site-field-help">{t("Lists every page whose kind is Article, newest first. Add one with Add page › Article.")}</p>
+        </>
+      );
+    case "videos":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextArea label={t("Intro")} value={block.intro} rows={2} maxLength={600} onChange={(intro) => set({ intro })} />
+          <SelectInput
+            label={t("Layout")}
+            value={block.layout}
+            onChange={(layout) => set({ layout })}
+            options={[
+              { value: "grid", label: t("Grid of pictures") },
+              { value: "list", label: t("List, picture beside the words") },
+            ]}
+          />
+          <NumberInput label={t("How many to show")} value={block.limit} min={1} max={24} onChange={(limit) => set({ limit })} />
+          <p className="site-field-help">{t("Lists every page whose kind is Video, newest first. Add one with Add page › Video.")}</p>
+        </>
+      );
+    case "instagram":
+      return (
+        <>
+          <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
+          <TextInput label={t("Instagram username")} value={block.handle} maxLength={60} placeholder="yourname" onChange={(handle) => set({ handle })} help={t("The Follow button and any picture without its own link lead to this profile.")} />
+          <SelectInput
+            label={t("Columns")}
+            value={String(block.columns)}
+            onChange={(columns) => set({ columns: Number(columns) as 3 | 4 | 6 })}
+            options={[
+              { value: "3", label: "3" },
+              { value: "4", label: "4" },
+              { value: "6", label: "6" },
+            ]}
+          />
+          <ListEditor
+            items={block.items}
+            onChange={(items) => set({ items })}
+            max={12}
+            addLabel={t("Add a post")}
+            create={() => ({ id: siteId("item"), image: null, href: "" })}
+            itemLabel={(item, index) => item.image?.alt || `${t("Post")} ${index + 1}`}
+            render={(item, update) => (
+              <>
+                <ImageInput label={t("Picture")} value={item.image} onChange={(image) => update({ image })} onError={onError} />
+                <TextInput label={t("Link to the post")} value={item.href} maxLength={400} placeholder="https://www.instagram.com/p/…" onChange={(href) => update({ href })} />
+              </>
+            )}
+          />
+          <p className="site-field-help">{t("Instagram does not let a site show a feed without an app review, so the pictures here are ones you add. Save a post's picture, upload it, and paste the post's link.")}</p>
         </>
       );
     case "contact":

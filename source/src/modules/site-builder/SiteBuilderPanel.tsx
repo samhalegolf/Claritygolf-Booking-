@@ -20,6 +20,7 @@ import {
   SITE_PAGE_PRESETS,
   googleFontsUrl,
   newSiteBlock,
+  sitePageCard,
   uniquePageSlug,
   type SiteBlock,
   type SiteBlockType,
@@ -68,6 +69,8 @@ function blockSnippet(block: SiteBlock): string {
     case "embed":
     case "venues":
     case "form":
+    case "videos":
+    case "instagram":
       return block.heading;
     case "image":
       return block.caption || block.image?.alt || "";
@@ -86,7 +89,7 @@ function draftFromViews(settings: SiteSettings, pages: SitePageView[]): Draft {
 }
 
 function cardsOf(pages: SitePage[]): SitePageCard[] {
-  return pages.map(({ content, ...meta }) => ({ ...meta, summary: content.summary, cover: content.cover, date: content.date }));
+  return pages.map(sitePageCard);
 }
 
 export type SiteBuilderPanelProps = {
@@ -322,6 +325,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       shop: t("Your shop shows here"),
       embed: t("The framed page shows here"),
       noArticles: t("No articles yet. Add one with Add page › Article."),
+      noVideos: t("No videos yet. Add one with Add page › Video."),
       noPage: t("There is no page here"),
     }),
     [],
@@ -513,7 +517,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
                         >
                           <span>
                             <strong>{page.title || page.slug}</strong>
-                            {!page.inNav ? <em>{page.kind === "article" ? t("Article") : t("Not in the menu")}</em> : null}
+                            {!page.inNav ? <em>{page.kind === "article" ? t("Article") : page.kind === "video" ? t("Video") : t("Not in the menu")}</em> : null}
                           </span>
                         </button>
                         {page.slug !== HOME_PAGE_SLUG ? (

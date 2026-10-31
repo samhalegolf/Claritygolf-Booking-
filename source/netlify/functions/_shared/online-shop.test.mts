@@ -12,9 +12,11 @@ import test from "node:test";
 
 import {
   LESSON_ITEM_PREFIX,
+  cleanVariants,
   onlineBuyerPersonId,
   onlineShopItems,
   onlineShopSwitchedOn,
+  orderLineName,
   readOnlineOrder,
 } from "./online-shop.mts";
 import { createStripeCheckoutSession } from "./stripe.mts";
@@ -65,7 +67,7 @@ test("only active, priced products ticked as vouchers are sold as vouchers", () 
     [],
     [
       voucherRow,
-      { ...voucherRow, id: "glove", is_voucher: false },
+      { ...voucherRow, id: "glove", is_voucher: false, sell_online: false },
       { ...voucherRow, id: "retired", active: false },
       { ...voucherRow, id: "zero", default_price: 0 },
     ],
@@ -81,27 +83,98 @@ test("the switch is on only when it says so", () => {
   assert.equal(onlineShopSwitchedOn("yes"), false);
 });
 
-const shelf = onlineShopItems([lesson, fivePack], [voucherRow], "NZD");
+const gloveRow = {
+  id: "prod-glove",
+  name: "Players glove",
+  default_price: 40,
+  active: true,
+  is_voucher: false,
+  sell_online: true,
+  fulfilment: "ship",
+  image_url: "https://cdn.example/glove.jpg",
+  track_stock: true,
+  stock_level: 3,
+  variants: JSON.stringify([
+    { id: "s", name: "Small", price: null },
+    { id: "l", name: "Large", price: 45 },
+  ]),
+};
+const bookRow = { id: "prod-book", name: "The book (PDF)", default_price: 15, active: true, sell_online: true, fulfilment: "download", track_stock: false, variants: "[]" };
 
-test("an order must name something on the shelf, a name and a usable email", () => {
-  const base = { itemId: "prod-voucher", name: "Sam", email: "sam@example.com" };
-  assert.deepEqual(readOnlineOrder({ ...base, itemId: `${LESSON_ITEM_PREFIX}svc-lesson` }, shelf), { error: "That is not for sale." });
+test("a product is on the shelf once ticked for the website, priced from its cheapest option, with its stock", () => {
+  const items = onlineShopItems([], [gloveRow, bookRow, { ...gloveRow, id: "shelf-only", sell_online: false }, { ...gloveRow, id: "retired", active: false }], "NZD");
+  assert.deepEqual(
+    items.map((item) => [item.id, item.kind, item.price, item.fulfilment, item.stock, item.variants.length]),
+    [
+      ["prod-glove", "product", 40, "ship", 3, 2],
+      ["prod-book", "product", 15, "download", null, 0],
+    ],
+  );
+  assert.equal(items[0].image, "https://cdn.example/glove.jpg");
+});
+
+test("variants are a list of named choices; a bad entry is dropped and a price must be a number", () => {
+  assert.deepEqual(cleanVariants('[{"name":"Small"},{"name":"Large","price":"45"},{"name":""},{"id":"x","name":"Odd","price":-1}]'), [
+    { id: "v1", name: "Small", price: null },
+    { id: "v2", name: "Large", price: 45 },
+    { id: "x", name: "Odd", price: null },
+  ]);
+  assert.deepEqual(cleanVariants("not json"), []);
+  assert.deepEqual(cleanVariants([{ id: "a", name: "One" }, { id: "a", name: "Twice" }]), [{ id: "a", name: "One", price: null }]);
+});
+
+const shelf = onlineShopItems([lesson, fivePack], [voucherRow, gloveRow, bookRow], "NZD");
+const buyer = { name: "Sam", email: "sam@example.com" };
+
+test("an order must name things on the shelf, a name and a usable email", () => {
+  const base = { ...buyer, lines: [{ itemId: "prod-voucher", quantity: 1 }] };
+  assert.deepEqual(readOnlineOrder({ ...base, lines: [{ itemId: `${LESSON_ITEM_PREFIX}svc-lesson` }] }, shelf), { error: "Something in the order is no longer for sale." });
+  assert.deepEqual(readOnlineOrder({ ...base, lines: [] }, shelf), { error: "Nothing is in the order." });
   assert.ok("error" in readOnlineOrder({ ...base, name: " " }, shelf));
   assert.ok("error" in readOnlineOrder({ ...base, email: "not-an-email" }, shelf));
   assert.ok(!("error" in readOnlineOrder(base, shelf)));
 });
 
-test("the browser names the item, never its price", () => {
-  const read = readOnlineOrder({ itemId: "prod-voucher", name: "Sam", email: "sam@example.com", price: 1 }, shelf);
+test("the browser names the item and its option, never a price", () => {
+  const read = readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-voucher", quantity: 1, unitPrice: 1 }, { itemId: "prod-glove", variantId: "l", quantity: 2, price: 1 }] }, shelf);
   assert.ok(!("error" in read));
   if ("error" in read) return;
-  assert.equal(read.item.price, 160);
+  assert.deepEqual(read.order.lines.map((line) => [line.itemId, line.variant?.id ?? "", line.quantity, line.unitPrice]), [
+    ["prod-voucher", "", 1, 160],
+    ["prod-glove", "l", 2, 45],
+  ]);
+  assert.equal(read.order.itemsTotal, 250);
+  assert.equal(orderLineName(read.order.lines[1]), "Players glove - Large");
 });
 
-test("a gift's recipient and message ride on a voucher and are dropped from a package", () => {
+test("a product with options needs one chosen, and the shelf caps what can be ordered", () => {
+  assert.deepEqual(readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-glove", quantity: 1 }] }, shelf), { error: "Choose an option for Players glove." });
+  assert.deepEqual(readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-glove", variantId: "s", quantity: 4 }] }, shelf), { error: "Only 3 of Players glove left." });
+  assert.deepEqual(
+    readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-glove", variantId: "s", quantity: 2 }, { itemId: "prod-glove", variantId: "l", quantity: 2 }] }, shelf),
+    { error: "Only 3 of Players glove left." },
+    "two sizes of one product share its shelf",
+  );
+  const soldOut = onlineShopItems([], [{ ...gloveRow, stock_level: 0 }], "NZD");
+  assert.equal(soldOut[0].stock, 0, "a sold-out product stays listed");
+  assert.deepEqual(readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-glove", variantId: "s", quantity: 1 }] }, soldOut), { error: "Players glove is sold out." });
+  assert.ok("error" in readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-book", quantity: 21 }] }, shelf));
+  assert.ok(!("error" in readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-book", quantity: 20 }] }, shelf)), "a book has no shelf to run out of");
+});
+
+test("shipping is charged once, only when something in the order is posted", () => {
+  const posted = readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-glove", variantId: "s", quantity: 2 }, { itemId: "prod-book", quantity: 1 }] }, shelf, 8.5);
+  const emailed = readOnlineOrder({ ...buyer, lines: [{ itemId: "prod-book", quantity: 1 }, { itemId: "prod-voucher", quantity: 1 }] }, shelf, 8.5);
+  assert.ok(!("error" in posted) && !("error" in emailed));
+  if ("error" in posted || "error" in emailed) return;
+  assert.deepEqual([posted.order.needsShipping, posted.order.shipping, posted.order.total], [true, 8.5, 103.5]);
+  assert.deepEqual([emailed.order.needsShipping, emailed.order.shipping, emailed.order.total], [false, 0, 175]);
+});
+
+test("a gift's recipient and message ride on an order with a voucher and are dropped from one without", () => {
   const gift = { name: "Sam", email: "Sam@Example.com", recipientName: "Alex", message: "Happy birthday" };
-  const voucher = readOnlineOrder({ ...gift, itemId: "prod-voucher" }, shelf);
-  const pack = readOnlineOrder({ ...gift, itemId: `${LESSON_ITEM_PREFIX}svc-five` }, shelf);
+  const voucher = readOnlineOrder({ ...gift, lines: [{ itemId: "prod-voucher" }] }, shelf);
+  const pack = readOnlineOrder({ ...gift, lines: [{ itemId: `${LESSON_ITEM_PREFIX}svc-five` }] }, shelf);
   assert.ok(!("error" in voucher) && !("error" in pack));
   if ("error" in voucher || "error" in pack) return;
   assert.equal(voucher.order.email, "sam@example.com");
