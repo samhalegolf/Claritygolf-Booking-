@@ -298,7 +298,13 @@ export function SiteRenderer({
   };
   const { header, footer, theme } = settings;
 
-  const frame = (target: SiteSelection, className: string, children: ReactNode, id?: string, style?: SiteBlockStyle) => {
+  /** The colour a block's page shows: its own, or the site's. The wave along a block's top edge is cut from the block above in this colour. */
+  const pageColourOf = (style: SiteBlockStyle | null | undefined): string => {
+    const vars = style && !blockStyleIsPlain(style) ? (blockStyleVars(theme, style) as Record<string, string>) : {};
+    return vars["--site-bg"] || theme.colors.background;
+  };
+
+  const frame = (target: SiteSelection, className: string, children: ReactNode, id?: string, style?: SiteBlockStyle, above?: SiteBlockStyle | null) => {
     const plain = !style || blockStyleIsPlain(style);
     const backdrop = style && (style.background || style.video);
     const divider = style?.divider === "wave";
@@ -312,6 +318,7 @@ export function SiteRenderer({
       >
         {divider ? (
           <svg className="site-block-divider" viewBox="0 0 1200 36" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0 18 C 200 -4, 400 40, 600 18 S 1000 -4, 1200 18 L 1200 0 L 0 0 Z" fill={pageColourOf(above)} />
             <path d="M0 18 C 200 -4, 400 40, 600 18 S 1000 -4, 1200 18" fill="none" stroke="currentColor" strokeWidth="4" />
           </svg>
         ) : null}
@@ -399,7 +406,7 @@ export function SiteRenderer({
           </div>
         ) : null}
         {!missingPage
-          ? page.content.blocks.map((block) =>
+          ? page.content.blocks.map((block, index) =>
               frame(
                 { block: block.id },
                 `site-block site-block-${block.type}`,
@@ -418,6 +425,8 @@ export function SiteRenderer({
                 />,
                 block.id,
                 block.style,
+                // The first block sits under the header, which is the page's own colour.
+                index > 0 ? page.content.blocks[index - 1].style : null,
               ),
             )
           : null}
