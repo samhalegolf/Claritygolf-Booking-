@@ -24,7 +24,8 @@ import type {
   PosPaymentMethod,
   PosTransaction,
 } from "./types";
-import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
+import { remainingAfterCoupon } from "./couponMath";
+import { canHoldCredit, voucherRedemption, voucherSaleLines } from "../../../netlify/functions/_shared/voucher-redemption.mts";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
 import { checkAgainMessage, pollStoppedMessage, postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
@@ -139,7 +140,15 @@ export function PosCheckoutModal({
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selectedMethod = methods.find((method) => method.id === methodId) || null;
   const couponMethod = methods.find((method) => method.kind === "coupon") || null;
-  const couponAmount = coupon && amountValid ? couponApplyAmount(coupon, amount) : 0;
+  // The lesson is sent as its type and the amount, so the voucher matches it
+  // the way the server will (_shared/voucher-redemption.mts).
+  const redemption =
+    coupon && amountValid
+      ? voucherRedemption(coupon, voucherSaleLines(lines, { serviceId: context.serviceId, saleTotal: amount }), amount, {
+          hasClient: canHoldCredit(context.customerId),
+        })
+      : null;
+  const couponAmount = redemption?.pays ?? 0;
   const couponCovers = couponAmount > 0 && couponAmount >= amount;
   const appliedCoupon = couponApplied ? couponAmount : 0;
   const dueNow = amountValid ? remainingAfterCoupon(amount, appliedCoupon) : 0;
@@ -945,7 +954,7 @@ export function PosCheckoutModal({
                       <CouponPicker
                         book={couponBook}
                         held={coupon}
-                        applyAmount={couponAmount}
+                        redemption={redemption}
                         applied={couponApplied}
                         clientNames={clientNames}
                         formatMoney={formatMoney}

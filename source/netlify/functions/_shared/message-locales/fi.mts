@@ -226,7 +226,9 @@ const catalog: Record<string, string> = {
   "Here's your gift voucher": "Tässä on lahjakorttisi",
   "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "Kiitos, {{firstName}}. Tässä on lahjakorttisi saajalle {{recipient}}. Näytä koodi maksaessasi, niin sen arvo vähennetään laskusta.",
   "Thanks, {{business}}": "Kiitos, {{business}}",
-  "Your gift card is attached, ready to print or pass on.": "Lahjakorttisi on liitteenä valmiina tulostettavaksi tai annettavaksi eteenpäin."
+  "Your gift card is attached, ready to print or pass on.": "Lahjakorttisi on liitteenä valmiina tulostettavaksi tai annettavaksi eteenpäin.",
+  "Paid from account credit": "Maksettu hyvityssaldolla",
+  "Redeemable for {item}": "Lunastettavissa: {item}"
 };
 
 export default catalog;

@@ -16,6 +16,7 @@ import { Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon } from "./types";
 import { searchCoupons } from "./couponMath";
+import { voucherHoldsItem, type VoucherRedemption } from "../../../netlify/functions/_shared/voucher-redemption.mts";
 import { t } from "../../lib/i18n";
 
 export type SpendableCoupons = {
@@ -62,9 +63,9 @@ export function useSpendableCoupons(): SpendableCoupons {
 export type CouponPickerProps = {
   book: SpendableCoupons;
   held: BillingCoupon | null;
-  // How much of the held voucher this sale would use, and whether it has
-  // already been put down as paid credit.
-  applyAmount: number;
+  // What the held voucher would do to this sale (null: nothing), and whether
+  // it has already been put down as paid credit.
+  redemption: VoucherRedemption | null;
   applied: boolean;
   // customerId -> name, so a voucher filed under a client is found by that
   // client's name even when it was issued to someone else.
@@ -78,7 +79,7 @@ export type CouponPickerProps = {
 export function CouponPicker({
   book,
   held,
-  applyAmount,
+  redemption,
   applied,
   clientNames,
   formatMoney,
@@ -95,21 +96,31 @@ export function CouponPicker({
   const matches = useMemo(() => searchCoupons(entries, query), [entries, query]);
 
   if (held) {
-    const left = Math.max(0, held.remainingValue - applyAmount);
+    const pays = redemption?.pays ?? 0;
+    const credit = redemption?.credit ?? 0;
+    const left = Math.max(0, held.remainingValue - (redemption?.takes ?? 0));
+    const money = (amount: number) => formatMoney(amount, held.currency);
+    // A voucher for a lesson or product says so, and whether this sale has it.
+    const forItem = held.coversItemName && voucherHoldsItem({ ...held, coversItemId: held.coversItemId || "" });
+    const what = redemption?.coversItem
+      ? t("Pays for {item} at today's price", { item: held.coversItemName || "" })
+      : forItem
+        ? t("For {item}, which is not on this sale. It can be spent as money.", { item: held.coversItemName || "" })
+        : "";
+    const after = credit > 0 ? t("{amount} goes to the client's account credit", { amount: money(credit) }) : left > 0 ? t("{left} stays on it", { left: money(left) }) : "";
     return (
       <div className={`coupon-held${applied ? " applied" : ""}`}>
         <ClarityPassesCredits size={14} />
         <span>
           <strong>
-            {held.code}
-            {held.issuedToName ? ` · ${held.issuedToName}` : ""}
+            {held.kind === "credit" ? t("Account credit") : held.code}
+            {held.issuedToName || clientNames.get(held.customerId) ? ` · ${held.issuedToName || clientNames.get(held.customerId)}` : ""}
           </strong>
+          {what && <em>{what}</em>}
           <em>
             {applied
-              ? left > 0
-                ? t("{amount} paid by coupon - {left} stays on it", { amount: formatMoney(applyAmount, held.currency), left: formatMoney(left, held.currency) })
-                : t("{amount} paid by coupon", { amount: formatMoney(applyAmount, held.currency) })
-              : t("{remainingValue} available - held for this sale, not yet used", { remainingValue: formatMoney(held.remainingValue, held.currency) })}
+              ? [t("{amount} paid by coupon", { amount: money(pays) }), after].filter(Boolean).join(" - ")
+              : t("{remainingValue} available - held for this sale, not yet used", { remainingValue: money(held.remainingValue) })}
           </em>
         </span>
         <button
@@ -156,8 +167,11 @@ export function CouponPicker({
               type="button"
             >
               <span>
-                <strong>{coupon.code}</strong>
-                <em>{coupon.issuedToName || coupon.customerName || t("No name on it")}</em>
+                <strong>{coupon.kind === "credit" ? t("Account credit") : coupon.code}</strong>
+                <em>
+                  {coupon.issuedToName || coupon.customerName || t("No name on it")}
+                  {coupon.coversItemName ? ` · ${coupon.coversItemName}` : ""}
+                </em>
               </span>
               <b>{formatMoney(coupon.remainingValue, coupon.currency)}</b>
             </button>

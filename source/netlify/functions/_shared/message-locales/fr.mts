@@ -226,7 +226,9 @@ const catalog: Record<string, string> = {
   "Here's your gift voucher": "Voici votre bon cadeau",
   "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "Merci {{firstName}}. Voici votre bon cadeau pour {{recipient}}. Présentez le code au moment de payer et sa valeur sera déduite de la note.",
   "Thanks, {{business}}": "Merci, {{business}}",
-  "Your gift card is attached, ready to print or pass on.": "Votre carte cadeau est jointe, prête à être imprimée ou offerte."
+  "Your gift card is attached, ready to print or pass on.": "Votre carte cadeau est jointe, prête à être imprimée ou offerte.",
+  "Paid from account credit": "Payé par avoir",
+  "Redeemable for {item}": "Valable pour {item}"
 };
 
 export default catalog;

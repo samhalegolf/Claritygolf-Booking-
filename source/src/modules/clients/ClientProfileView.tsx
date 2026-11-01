@@ -475,11 +475,15 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
                     <div className="profile-history-row" key={`coupon-${row.coupon.id}`}>
                       <div>
                         <strong>
-                          <ClarityPassesCredits size={15} /> {row.coupon.code}
+                          <ClarityPassesCredits size={15} /> {row.coupon.kind === "credit" ? t("Account credit") : row.coupon.code}
                         </strong>
-                        <span>{t("Gift voucher")}{row.coupon.issuedToName ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName }) : ""}
-                          {row.coupon.note ? ` · ${row.coupon.note}` : ""}
-                        </span>
+                        {row.coupon.kind === "credit" ? (
+                          <span>{t("Spent at the till like a voucher: search their name.")}</span>
+                        ) : (
+                          <span>{t("Gift voucher")}{row.coupon.coversItemName ? ` · ${t("For {item}", { item: row.coupon.coversItemName })}` : ""}{row.coupon.issuedToName ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName }) : ""}
+                            {row.coupon.note ? ` · ${row.coupon.note}` : ""}
+                          </span>
+                        )}
                       </div>
                       <em>
                         {/* What is left, not what it was worth: the

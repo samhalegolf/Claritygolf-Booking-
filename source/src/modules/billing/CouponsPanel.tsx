@@ -890,9 +890,10 @@ export function CouponsPanel({
                     <tr className={coupon.spendable ? "" : "product-row-inactive"}>
                       <td>
                         <button className="link-button coupon-code" onClick={() => void toggleCoupon(coupon)} type="button">
-                          {coupon.code}
+                          {coupon.kind === "credit" ? t("Account credit") : coupon.code}
                         </button>
                         <em className="product-row-meta">
+                          {coupon.coversItemName ? `${t("For {item}", { item: coupon.coversItemName })} - ` : ""}
                           {label}
                           {coupon.expiresAt ? ` - expires ${new Date(coupon.expiresAt).toLocaleDateString(readerLocale())}` : ""}
                         </em>

@@ -37,12 +37,15 @@ const SHIFT: Record<GiftCardAlign, string> = { left: "0%", center: "-50%", right
 
 function fieldLabel(id: GiftCardFieldId) {
   if (id === "name") return t("Name");
+  if (id === "item") return t("What it's for");
   if (id === "code") return t("Code");
   return t("Value");
 }
 
 function sampleText(id: GiftCardFieldId) {
   if (id === "name") return t("Recipient name");
+  // Printed only on a voucher for a lesson or product.
+  if (id === "item") return t("1 hour lesson");
   if (id === "code") return "CG-7KQ4-M2XP";
   return formatMoney(100);
 }
@@ -102,7 +105,7 @@ export function GiftCardDesigner({ design, locked, onChange }: GiftCardDesignerP
       ]);
       if (!response.ok) throw new Error("unreadable");
       const pdf = await buildGiftCardPdf(design, new Uint8Array(await response.arrayBuffer()), [
-        { name: sampleText("name"), code: sampleText("code"), value: sampleText("value") },
+        { name: sampleText("name"), item: sampleText("item"), code: sampleText("code"), value: sampleText("value") },
       ]);
       const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: "application/pdf" }));
       const link = document.createElement("a");
@@ -154,7 +157,7 @@ export function GiftCardDesigner({ design, locked, onChange }: GiftCardDesignerP
           <strong>{t("Gift card")}</strong>
           <p>
             {design.imageUrl
-              ? t("Drag the name, code and value to where they go on your artwork. Each voucher sold gets its own card, attached to this email as a PDF.")
+              ? t("Drag each field to where it goes on your artwork. Each voucher sold gets its own card, attached to this email as a PDF. What it's for prints only on vouchers for a lesson or product, and the value only where the voucher shows it.")
               : t("Upload your voucher artwork and every voucher sold online gets its own card, with the name and code printed on, attached to this email as a PDF.")}
           </p>
         </div>
