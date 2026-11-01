@@ -4,6 +4,8 @@ import {
   cleanNotificationTemplates,
   DEFAULT_NOTIFICATION_TEMPLATES,
   emptyNotificationTemplates,
+  fillMergeFields,
+  GIFT_VOUCHER_MERGE_FIELDS,
   isNotificationTemplateEdited,
   NOTIFICATION_VARIANTS,
   notificationVariantFor,
@@ -146,14 +148,26 @@ test("every default only uses merge fields the engine supplies", () => {
     // A custom group's (customGroupPricing), and the invite's own.
     "groupSize", "totalPrice", "sharePrice", "inviteeFirstName",
   ]);
+  // The gift voucher email is about an order and is filled in by billing-api.mts.
+  const GIFT_VOUCHER = new Set<string>(GIFT_VOUCHER_MERGE_FIELDS);
   const unknown: string[] = [];
   for (const variant of NOTIFICATION_VARIANTS) {
     const template = DEFAULT_NOTIFICATION_TEMPLATES[variant.id];
+    const supplied: Set<string> = variant.id === "giftVoucher" ? GIFT_VOUCHER : SUPPLIED;
     for (const value of Object.values(template)) {
       for (const match of value.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)) {
-        if (!SUPPLIED.has(match[1])) unknown.push(`${variant.id}: {{${match[1]}}}`);
+        if (!supplied.has(match[1])) unknown.push(`${variant.id}: {{${match[1]}}}`);
       }
     }
   }
   assert.deepEqual(unknown, [], unknown.join("\n  "));
+});
+
+test("merge fields are filled, and one nobody supplied renders as empty", () => {
+  assert.equal(fillMergeFields("Hi {{ firstName }}, from {{business}}{{missing}}.", { firstName: "Ana", business: "Riverside" }), "Hi Ana, from Riverside.");
+});
+
+test("the gift voucher email is email only and carries no button", () => {
+  assert.equal(NOTIFICATION_VARIANTS.find((variant) => variant.id === "giftVoucher")?.emailOnly, true);
+  assert.equal(DEFAULT_NOTIFICATION_TEMPLATES.giftVoucher.cta, "");
 });

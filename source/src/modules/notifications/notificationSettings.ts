@@ -1,4 +1,5 @@
 import type { NotificationTemplates } from "../../../netlify/functions/_shared/notification-templates.mts";
+import type { GiftCardDesign } from "../../../netlify/functions/_shared/gift-card.mts";
 
 export type NotificationSettings = {
   emailNotificationsEnabled: boolean;
@@ -40,6 +41,9 @@ export type NotificationSettings = {
   notificationTemplates: NotificationTemplates;
   // What the map link beside the venue is called, on every message.
   mapLinkLabel: string;
+  // The card a voucher bought online is printed on: the coach's artwork and
+  // where the name, code and value go on it. See _shared/gift-card.mts.
+  giftCardDesign: GiftCardDesign;
   // The player portal's slot for an outside booking widget: a URL, what the
   // tab is called, a line above it and how tall it starts. An empty URL means
   // the tab does not exist in the portal at all.

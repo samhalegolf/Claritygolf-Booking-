@@ -725,6 +725,8 @@ test("a save or publish from a copy older than the saved site is refused; pages 
         { document: null, published_document: { blocks: [{ type: "hero", image: { url: "https://cdn.example/still-shown.jpg", alt: "" } }] } },
       ];
     }
+    if (text.startsWith("SELECT image_url FROM billing_products_services")) return [{ image_url: "https://cdn.example/voucher.jpg" }];
+    if (text.startsWith("SELECT value FROM settings")) return [{ value: JSON.stringify({ imageUrl: "https://cdn.example/gift-card.png" }) }];
     return [];
   });
   try {
@@ -742,7 +744,11 @@ test("a save or publish from a copy older than the saved site is refused; pages 
     const published = issued.findIndex((statement) => statement.text.startsWith("UPDATE site_pages SET published_document = document"));
     assert.ok(gone >= 0 && gone < published, "a page the draft dropped goes before the rest is published");
 
-    assert.deepEqual(await siteImageUrlsInUse("riverside"), ["https://cdn.example/draft.jpg", "https://cdn.example/still-shown.jpg"], "a dropped page's published picture is still in use");
+    assert.deepEqual(
+      await siteImageUrlsInUse("riverside"),
+      ["https://cdn.example/draft.jpg", "https://cdn.example/still-shown.jpg", "https://cdn.example/voucher.jpg", "https://cdn.example/gift-card.png"],
+      "a dropped page's published picture, a product's picture and the gift card artwork are all still in use",
+    );
   } finally {
     setDatabaseForTests(null);
   }

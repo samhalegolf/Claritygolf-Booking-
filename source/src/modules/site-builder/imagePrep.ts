@@ -43,10 +43,13 @@ async function base64Of(blob: Blob): Promise<string> {
  * Shrink and re-encode. A GIF is sent as it is (re-encoding would lose the
  * animation); everything else becomes WebP where the browser can make one,
  * or JPEG, with transparency kept as PNG.
+ *
+ * `printable` is for a picture that goes into a PDF (the gift card), which
+ * takes JPEG and PNG only: no WebP, and a GIF becomes a still PNG.
  */
-export async function prepareImage(file: File): Promise<PreparedImage> {
+export async function prepareImage(file: File, options: { printable?: boolean } = {}): Promise<PreparedImage> {
   if (!file.type.startsWith("image/")) throw new Error("not-an-image");
-  if (file.type === "image/gif") {
+  if (file.type === "image/gif" && !options.printable) {
     return { type: file.type, dataBase64: await base64Of(file), bytes: file.size };
   }
   const image = await loadImage(file);
@@ -58,8 +61,12 @@ export async function prepareImage(file: File): Promise<PreparedImage> {
   if (!context) throw new Error("unreadable");
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-  const wantsAlpha = file.type === "image/png";
-  const candidates = wantsAlpha ? ["image/webp", "image/png"] : ["image/webp", "image/jpeg"];
+  const wantsAlpha = file.type === "image/png" || file.type === "image/gif";
+  const candidates = options.printable
+    ? [wantsAlpha ? "image/png" : "image/jpeg"]
+    : wantsAlpha
+      ? ["image/webp", "image/png"]
+      : ["image/webp", "image/jpeg"];
   for (const type of candidates) {
     const blob = await toBlob(canvas, type);
     // Safari used to answer a WebP request with a PNG: only trust a blob of

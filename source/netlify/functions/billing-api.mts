@@ -46,6 +46,11 @@ import {
 import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
+import { GIFT_CARD_SETTING, parseGiftCardDesign, type GiftCardDesign } from "./_shared/gift-card.mts";
+import { buildGiftCardPdf } from "./_shared/gift-card-pdf.mts";
+import { fillMergeFields, parseNotificationTemplates, type GiftVoucherMergeField } from "./_shared/notification-templates.mts";
+import { notificationTemplateText } from "./_shared/notification-template-text.mts";
+import { siteMediaPathFromUrl } from "./_shared/site/media.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
@@ -6988,6 +6993,90 @@ export async function settlePosCheckoutFromWebhook(accountId: string, session: R
   }
 }
 
+/**
+ * The wording and the gift card for an order with a voucher in it.
+ *
+ * The words are the coach's gift voucher template (Settings › Templates), so
+ * the buyer reads what the business wrote rather than a generic receipt. The
+ * card is the coach's artwork with each voucher's name, code and value written
+ * on it, as one PDF with a page per voucher. No artwork uploaded, no card: the
+ * codes are in the email either way.
+ */
+async function giftVoucherEmail(
+  accountId: string,
+  row: Record<string, unknown>,
+  coupons: Array<ReturnType<typeof couponRowToApi>>,
+  branding: Awaited<ReturnType<typeof resolveInvoiceBranding>>,
+) {
+  const [templatesValue, designValue] = await Promise.all([
+    readSettingValue(accountId, "notificationTemplatesJson"),
+    readSettingValue(accountId, GIFT_CARD_SETTING),
+  ]);
+  const templates = parseNotificationTemplates(templatesValue);
+  const buyer = cleanString(row.customer_name, "", 140);
+  const variables: Record<GiftVoucherMergeField, string> = {
+    client: buyer,
+    firstName: buyer.split(/\s+/)[0] || "",
+    business: branding.businessName,
+    recipient: cleanString(row.gift_recipient_name, "", 140) || buyer,
+    receiptNumber: String(row.receipt_number ?? ""),
+    total: formatMoney(row.amount, String(row.currency || "NZD")),
+  };
+  const wording = (field: "subject" | "heading" | "body" | "signoff") =>
+    fillMergeFields(notificationTemplateText(templates, "giftVoucher", field, branding.messageLanguage), variables).trim();
+
+  let attachment: { filename: string; content: string } | null = null;
+  try {
+    attachment = await giftCardAttachment(accountId, parseGiftCardDesign(designValue), coupons);
+  } catch (error) {
+    // The codes are in the email. A card that cannot be made must not stop it.
+    console.error("billing_api:gift_card_failed", accountId, String(row.id ?? ""), error);
+  }
+  return {
+    subject: wording("subject"),
+    heading: wording("heading"),
+    body: wording("body"),
+    signoff: wording("signoff"),
+    attachment,
+  };
+}
+
+/** The gift card PDF, or null when the business has not uploaded artwork. */
+async function giftCardAttachment(accountId: string, design: GiftCardDesign, coupons: Array<ReturnType<typeof couponRowToApi>>) {
+  if (!design.imageUrl || !coupons.length) return null;
+  // Fetched only from this business's own folder in our bucket: the address is
+  // stored by the coach's browser, and the server will not fetch anywhere else.
+  if (!siteMediaPathFromUrl(design.imageUrl).startsWith(`${accountId}/`)) {
+    throw new Error("gift card artwork is not in this business's media folder");
+  }
+  const response = await fetch(design.imageUrl, { signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`gift card artwork answered ${response.status}`);
+  const image = new Uint8Array(await response.arrayBuffer());
+  const pdf = await buildGiftCardPdf(
+    design,
+    image,
+    coupons.map((coupon) => ({
+      name: coupon.issuedToName,
+      code: coupon.code,
+      value: formatMoney(coupon.originalValue, coupon.currency),
+    })),
+  );
+  return {
+    filename: coupons.length === 1 ? `gift-voucher-${coupons[0].code}.pdf` : "gift-vouchers.pdf",
+    content: Buffer.from(pdf).toString("base64"),
+  };
+}
+
+/** Prose as paragraphs: a blank line starts a new one, a single line break stays a break. */
+function paragraphsHtml(text: string, style: string) {
+  return text
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p style="${style}">${escapeHtml(part).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+}
+
 /** The buyer's receipt, with their voucher code or a word about their package. */
 async function emailOnlineOrder(accountId: string, id: string) {
   const row = await posTransactionRow(accountId, id);
@@ -7004,8 +7093,11 @@ async function emailOnlineOrder(accountId: string, id: string) {
   const downloads = await onlineOrderDownloads(accountId, id);
   const shipping = Number(row.shipping_amount) || 0;
   const address = cleanString(row.shipping_address, "", 600);
+  // An order with a voucher in it is the gift voucher email, in the coach's words.
+  const gift = coupons.length ? await giftVoucherEmail(accountId, row, coupons, branding) : null;
 
   const greeting = row.customer_name ? mt("Hi {name},", { name: String(row.customer_name) }) : mt("Hi there,");
+  const intro = mt("Thanks for your purchase. Here is your receipt.");
   const lines = items.map((item) => ({ label: item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name, amount: formatMoney(item.lineTotal, currency) }));
   if (shipping > 0) lines.push({ label: mt("Shipping"), amount: formatMoney(shipping, currency) });
   const downloadLines = downloads.map((download) => `${download.name}: ${download.url}`);
@@ -7015,29 +7107,28 @@ async function emailOnlineOrder(accountId: string, id: string) {
     code: mt("Gift voucher code: {code}", { code: coupon.code }),
     worth: mt("Worth {amount}", { amount: formatMoney(coupon.originalValue, coupon.currency) }),
   }));
+  const attachedLine = gift?.attachment ? mt("Your gift card is attached, ready to print or pass on.") : "";
   const packageLines = packages.map((name) => mt("{item} is on your account.", { item: name }));
 
   const text = [
-    greeting,
+    ...(gift ? [gift.heading, "", gift.body] : [greeting, "", intro]),
     "",
-    mt("Thanks for your purchase. Here is your receipt."),
+    ...voucherLines.flatMap((line) => [line.code, line.worth]),
+    recipient ? mt("For {name}", { name: recipient }) : "",
+    message ? `"${message}"` : "",
+    attachedLine,
     "",
     mt("Receipt: {number}", { number: String(row.receipt_number ?? "") }),
     ...lines.map((line) => `${line.label}: ${line.amount}`),
     mt("Total: {amount}", { amount: total }),
     mt("Paid by card"),
     "",
-    ...voucherLines.flatMap((line) => [line.code, line.worth]),
-    recipient ? mt("For {name}", { name: recipient }) : "",
-    message ? `"${message}"` : "",
-    voucherLines.length ? mt("Show this code when you pay and its value comes off the bill.") : "",
     ...packageLines,
     ...(downloadLines.length ? ["", mt("Your downloads:"), ...downloadLines] : []),
     postedLine ? "" : "",
     postedLine,
     "",
-    mt("Thanks,"),
-    branding.businessName,
+    ...(gift ? [gift.signoff] : [mt("Thanks,"), branding.businessName]),
   ]
     .filter((line, index, all) => line !== "" || all[index - 1] !== "")
     .join("\n");
@@ -7047,8 +7138,10 @@ async function emailOnlineOrder(accountId: string, id: string) {
     `<td style="padding:4px 0;text-align:right;${bold ? "font-weight:600;" : ""}">${escapeHtml(amount)}</td></tr>`;
   const html =
     `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f;max-width:480px">` +
-    `<p style="margin:0 0 8px">${escapeHtml(greeting)}</p>` +
-    `<p style="margin:0 0 16px">${escapeHtml(mt("Thanks for your purchase. Here is your receipt."))}</p>` +
+    (gift
+      ? `<h1 style="margin:0 0 12px;font-size:20px;line-height:1.3">${escapeHtml(gift.heading)}</h1>` +
+        paragraphsHtml(gift.body, "margin:0 0 16px")
+      : `<p style="margin:0 0 8px">${escapeHtml(greeting)}</p>` + `<p style="margin:0 0 16px">${escapeHtml(intro)}</p>`) +
     voucherLines
       .map(
         (line) =>
@@ -7060,9 +7153,7 @@ async function emailOnlineOrder(accountId: string, id: string) {
           `</div>`,
       )
       .join("") +
-    (voucherLines.length
-      ? `<p style="margin:0 0 16px">${escapeHtml(mt("Show this code when you pay and its value comes off the bill."))}</p>`
-      : "") +
+    (attachedLine ? `<p style="margin:0 0 16px">${escapeHtml(attachedLine)}</p>` : "") +
     packageLines.map((line) => `<p style="margin:0 0 16px">${escapeHtml(line)}</p>`).join("") +
     (downloads.length
       ? `<p style="margin:0 0 8px">${escapeHtml(mt("Your downloads:"))}</p><ul style="margin:0 0 16px;padding-left:20px">` +
@@ -7076,17 +7167,20 @@ async function emailOnlineOrder(accountId: string, id: string) {
     row2(mt("Total"), total, true) +
     row2(mt("Paid by card"), total) +
     `</table>` +
-    `<p style="margin:16px 0 0">${escapeHtml(mt("Thanks,"))}<br/>${escapeHtml(branding.businessName)}</p>` +
+    (gift
+      ? paragraphsHtml(gift.signoff, "margin:16px 0 0")
+      : `<p style="margin:16px 0 0">${escapeHtml(mt("Thanks,"))}<br/>${escapeHtml(branding.businessName)}</p>`) +
     `</div>`;
 
   const result = await deliverEmail({
     accountId,
     to,
-    subject: mt("Your purchase from {businessName}", { businessName: branding.businessName }),
+    subject: gift?.subject || mt("Your purchase from {businessName}", { businessName: branding.businessName }),
     text,
     html,
     replyTo: branding.contactEmail || undefined,
     idempotencyKey: `online-order-${id}`,
+    attachments: gift?.attachment ? [gift.attachment] : undefined,
   });
   if (!result.sent) console.error("billing_api:online_order_email_not_sent", accountId, id, result.reason);
 }

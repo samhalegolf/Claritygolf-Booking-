@@ -23,7 +23,8 @@ export type NotificationVariantId =
   | "cancelled"
   | "group"
   | "package"
-  | "groupInvite";
+  | "groupInvite"
+  | "giftVoucher";
 
 export type NotificationTemplateField =
   | "subject"
@@ -57,6 +58,12 @@ export const NOTIFICATION_VARIANTS: Array<{
     id: "groupInvite",
     label: "Group invite",
     when: "Sent to each person the booker invites to a custom group lesson",
+    emailOnly: true,
+  },
+  {
+    id: "giftVoucher",
+    label: "Gift voucher",
+    when: "Sent to the buyer when a gift voucher is bought in your online shop, with the gift card attached",
     emailOnly: true,
   },
 ];
@@ -98,6 +105,13 @@ export const DEFAULT_MAP_LINK_LABEL = "Take me there";
  * A custom group lesson adds groupSize, totalPrice and sharePrice (the total
  * split evenly across everyone in the group), and the group invite adds
  * inviteeFirstName, the person the invite is addressed to.
+ *
+ * The gift voucher email is not about a lesson, so it has its own short list,
+ * supplied by billing-api.mts: client, firstName, business, recipient (who the
+ * voucher is for, or the buyer when nobody was named), receiptNumber and
+ * total. It has no button: the codes and the gift card are the point of it.
+ * Whether a card is attached depends on artwork having been uploaded, so the
+ * default does not promise one; the send path adds that line itself.
  *
  * `cta` names the primary button, which links to the manage/reschedule page --
  * except on the group invite, where it confirms the invitee is coming.
@@ -168,7 +182,26 @@ export const DEFAULT_NOTIFICATION_TEMPLATES: NotificationTemplates = {
     // Invites go by email only.
     smsText: "",
   },
+  giftVoucher: {
+    subject: "Your gift voucher from {{business}}",
+    heading: "Here's your gift voucher",
+    body:
+      "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.",
+    cta: "",
+    signoff: "Thanks, {{business}}",
+    // Sent by email only, with the card attached.
+    smsText: "",
+  },
 };
+
+/**
+ * The merge fields the gift voucher email supplies (billing-api.mts builds them
+ * from the order). The booking emails' list is variablesFor() in
+ * notification-engine.mts; this one is short because the email is about an
+ * order, not a lesson.
+ */
+export const GIFT_VOUCHER_MERGE_FIELDS = ["client", "firstName", "business", "recipient", "receiptNumber", "total"] as const;
+export type GiftVoucherMergeField = (typeof GIFT_VOUCHER_MERGE_FIELDS)[number];
 
 /**
  * An untouched template: every field blank, meaning "use Clarity's wording".
@@ -189,6 +222,7 @@ export function emptyNotificationTemplates(): NotificationTemplates {
     group: emptyNotificationTemplate(),
     package: emptyNotificationTemplate(),
     groupInvite: emptyNotificationTemplate(),
+    giftVoucher: emptyNotificationTemplate(),
   };
 }
 
@@ -259,6 +293,14 @@ export function notificationVariantFor(
   if (lessonFormat === "group" && !customGroup) return "group";
   if (lessonFormat === "package") return "package";
   return "booked";
+}
+
+/**
+ * Fills {{merge}} fields. A field the message does not supply renders as empty,
+ * the same rule the booking emails follow.
+ */
+export function fillMergeFields(template: string, variables: Record<string, string>): string {
+  return String(template || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => variables[key] ?? "");
 }
 
 /**

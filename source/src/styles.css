@@ -14689,6 +14689,196 @@
   margin-top: var(--c-space-5);
 }
 
+/* Templates › Gift voucher: the card designer under the email. Its own sheet,
+   because it is not part of the message: it is what the message carries. */
+.gift-card-designer {
+  margin-top: var(--c-space-5);
+  padding: var(--c-space-5);
+  display: grid;
+  gap: var(--c-space-5);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.gcd-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--c-space-4);
+}
+
+.gcd-head p {
+  margin: var(--c-space-1) 0 0;
+  max-width: 52ch;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  line-height: 1.5;
+}
+
+.gcd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.gcd-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.gcd-error {
+  margin: 0;
+  color: var(--c-danger);
+  font-size: var(--c-size-meta);
+}
+
+.gcd-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: var(--c-space-5);
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .gcd-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Sized in container units so text scales with the picture, as on the PDF. */
+.gcd-stage {
+  position: relative;
+  container-type: inline-size;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.gcd-stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gcd-field {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: grab;
+  outline: 1px dashed var(--c-pencil);
+  outline-offset: 3px;
+}
+
+.gcd-field:active {
+  cursor: grabbing;
+}
+
+.gcd-field.is-selected,
+.gcd-field:focus-visible {
+  outline: 2px solid var(--c-accent);
+  box-shadow: 0 0 0 5px var(--c-surface);
+}
+
+.gcd-controls {
+  display: grid;
+  gap: var(--c-space-4);
+  font-size: var(--c-size-meta);
+}
+
+.gcd-tabs {
+  display: flex;
+  gap: var(--c-space-1);
+  padding: var(--c-space-1);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+}
+
+.gcd-tabs button {
+  flex: 1;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-text-soft);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.gcd-tabs button.is-active {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.gcd-check,
+.gcd-row {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-3);
+}
+
+.gcd-row > span {
+  width: 56px;
+  flex: none;
+  color: var(--c-text-soft);
+  font-weight: 600;
+}
+
+.gcd-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.gcd-row select {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  font: inherit;
+}
+
+.gcd-row input[type="color"] {
+  width: 36px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+}
+
+.gcd-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.gcd-icon.is-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.gcd-note {
+  margin: 0;
+  color: var(--c-muted);
+  line-height: 1.5;
+}
+
 /* The mat the message sits on, so the sheet reads as a document rather than
    another panel of the settings screen. */
 .mt-mat {

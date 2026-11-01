@@ -26,7 +26,9 @@ import type {
   NotificationTemplates,
   NotificationVariantId,
 } from "../../../netlify/functions/_shared/notification-templates.mts";
+import type { GiftCardDesign } from "../../../netlify/functions/_shared/gift-card.mts";
 import { t, tn } from "../../lib/i18n";
+import { GiftCardDesigner } from "./GiftCardDesigner";
 
 // The rows Clarity fills in per lesson. Not editable and deliberately shown:
 // they are most of what a client actually reads, and a coach writing the body
@@ -70,6 +72,12 @@ const PREVIEW_ROWS: Record<NotificationVariantId, Array<[string, string]>> = {
     [t("Group"), t("[booker], [invitee], [invitee]")],
     [t("Price"), t("$240 for the group · $80 each")],
   ],
+  giftVoucher: [
+    [t("Code"), "CG-7KQ4-M2XP"],
+    [t("Worth"), "$100"],
+    [t("For"), t("[recipient name]")],
+    [t("Receipt"), t("Each item, the total and how it was paid")],
+  ],
 };
 
 // The tab names and "when it is sent" lines, on the coach's screen. The shared
@@ -91,6 +99,11 @@ function variantScreenText(id: NotificationVariantId): { label: string; when: st
       return { label: t("Package"), when: t("Sent instead of New booking when the lesson type is a package") };
     case "groupInvite":
       return { label: t("Group invite"), when: t("Sent to each person the booker invites to a custom group lesson") };
+    case "giftVoucher":
+      return {
+        label: t("Gift voucher"),
+        when: t("Sent to the buyer when a gift voucher is bought in your online shop, with the gift card attached"),
+      };
     default:
       return { label: String(id), when: "" };
   }
@@ -121,6 +134,9 @@ export type MessageTemplatesPanelProps = {
   renderPreview: (template: string) => string;
   onChange: (templates: NotificationTemplates) => void;
   onMapLinkLabelChange: (label: string) => void;
+  /** The card the gift voucher email attaches. Edited on that tab. */
+  giftCardDesign: GiftCardDesign;
+  onGiftCardDesignChange: (design: GiftCardDesign) => void;
 };
 
 export function MessageTemplatesPanel({
@@ -134,6 +150,8 @@ export function MessageTemplatesPanel({
   renderPreview,
   onChange,
   onMapLinkLabelChange,
+  giftCardDesign,
+  onGiftCardDesignChange,
 }: MessageTemplatesPanelProps) {
   const [variant, setVariant] = useState<NotificationVariantId>("booked");
   const [channel, setChannel] = useState<"email" | "text">("email");
@@ -239,6 +257,8 @@ export function MessageTemplatesPanel({
 
   const smsBody = text("smsText");
   const ctaLabel = text("cta");
+  // About an order, not a lesson: no venue, and no button to manage anything.
+  const giftVoucher = variant === "giftVoucher";
 
   return (
     <div className="message-templates">
@@ -367,34 +387,40 @@ export function MessageTemplatesPanel({
                   })}
 
                   <div className="mt-rows">
-                    <div className="mt-rows-head">{t("The booking · filled in by Clarity")}</div>
+                    <div className="mt-rows-head">
+                      {giftVoucher ? t("The voucher and receipt · filled in by Clarity") : t("The booking · filled in by Clarity")}
+                    </div>
                     {PREVIEW_ROWS[variant].map(([key, value]) => (
                       <div className="mt-row" key={key}>
                         <span>{key}</span>
                         <span>{value}</span>
                       </div>
                     ))}
-                    <div className="mt-row mt-row-where">
-                      <span>{t("Where")}</span>
-                      <span className="mt-where-value">
-                        <em>{venueName || t("Your venue")}</em>
-                        {field("mapLink", { className: "mt-maplink", label: t("Map link name"), value: mapLinkLabel })}
-                      </span>
-                    </div>
+                    {!giftVoucher && (
+                      <div className="mt-row mt-row-where">
+                        <span>{t("Where")}</span>
+                        <span className="mt-where-value">
+                          <em>{venueName || t("Your venue")}</em>
+                          {field("mapLink", { className: "mt-maplink", label: t("Map link name"), value: mapLinkLabel })}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="mt-actions">
-                    {field("cta", {
-                      className: "mt-cta",
-                      label: t("Button"),
-                      value: ctaLabel || t("No button on this message"),
-                    })}
-                    <span className="mt-cta-note">
-                      {variant === "groupInvite"
-                        ? t("Lets the invited person confirm they are coming. Clear it to drop the button.")
-                        : t("Links to the manage / reschedule page. Clear it to drop the button.")}
-                    </span>
-                  </div>
+                  {!giftVoucher && (
+                    <div className="mt-actions">
+                      {field("cta", {
+                        className: "mt-cta",
+                        label: t("Button"),
+                        value: ctaLabel || t("No button on this message"),
+                      })}
+                      <span className="mt-cta-note">
+                        {variant === "groupInvite"
+                          ? t("Lets the invited person confirm they are coming. Clear it to drop the button.")
+                          : t("Links to the manage / reschedule page. Clear it to drop the button.")}
+                      </span>
+                    </div>
+                  )}
 
                   {field("signoff", { className: "mt-signoff", label: t("Sign-off"), value: renderPreview(text("signoff")) })}
 
@@ -405,8 +431,12 @@ export function MessageTemplatesPanel({
           </div>
         </div>
 
+        {giftVoucher && <GiftCardDesigner design={giftCardDesign} locked={locked} onChange={onGiftCardDesignChange} />}
+
         <p className="mt-note">
-          {isText
+          {giftVoucher
+            ? t("The codes, the receipt and the gift card are filled in per order. What you write is saved against {label} only.", { label: activeScreen.label })
+            : isText
             ? t("Links and merge fields are filled in per lesson. What you write is saved against {label} only.", { label: activeScreen.label })
             : t("The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against {label} only.", { label: activeScreen.label })}
         </p>
