@@ -5125,5 +5125,10 @@
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Squarespace-sivusto tuodaan sivuineen, artikkeleineen, videoineen, teksteineen ja kuvineen samoihin osoitteisiin, yllä valitsemassasi ulkoasussa. Se korvaa tämän luonnoksen; mitään ei julkaista ennen kuin painat Julkaise.",
   "Bringing it over…": "Tuodaan…",
   "Bringing pictures over: {done} of {total}": "Tuodaan kuvia: {done}/{total}",
-  "{count} pictures are now in your own storage.": "{count} kuvaa on nyt omassa tallennustilassasi."
+  "{count} pictures are now in your own storage.": "{count} kuvaa on nyt omassa tallennustilassasi.",
+  "Headings": "Otsikot",
+  "Top edge": "Yläreuna",
+  "Plain": "Tavallinen",
+  "A wave, in the button colour": "Aalto, painikkeen värissä",
+  "Picture beside text": "Kuva tekstin vieressä"
 }

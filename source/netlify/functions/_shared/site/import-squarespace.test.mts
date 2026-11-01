@@ -33,6 +33,9 @@ test("the sections of a page come with their theme and backdrop, and the meta ta
   assert.equal(sections[0].theme, "black-bold");
   assert.equal(sections[0].background, "https://cdn.example/bg.jpg");
   assert.deepEqual(metaOf(html, "Riverside Golf"), { title: "Group Coaching", description: "Join us", image: "https://cdn.example/og.jpg" });
+  const [withBackdrop] = blocksOfSection(sections[0], { bookingSlug: "riverside", first: true, report: [] });
+  assert.equal(withBackdrop.block.style?.background?.url, "https://cdn.example/bg.jpg", "the backdrop rides on the first block");
+  assert.ok(withBackdrop.images.includes("https://cdn.example/bg.jpg"), "and is a picture to bring over");
   assert.equal(metaOf("<title>Riverside Golf</title>", "Riverside Golf").title, "", "the bare site name is no title of its own");
 });
 
@@ -62,7 +65,7 @@ test("two venues with hours and a frame each become a venues block, hours split 
 
 test("a row of pictures with a line each is logos; review screenshots are testimonials; posts are an instagram grid", () => {
   const logos = blocksOfSection(sectionsOf(section("white", `<h2>Certifications</h2><img src="https://cdn.example/1.png"><p>PGA</p><img src="https://cdn.example/2.png"><p>TPI</p>`))[0], options)[0].block;
-  assert.ok(logos.type === "logos" && logos.items.map((item) => item.caption).join(",") === "PGA,TPI" && logos.style?.theme === "white");
+  assert.ok(logos.type === "logos" && logos.items.map((item) => item.caption).join(",") === "PGA,TPI" && logos.style?.theme === "light", "Squarespace's white is the site's light palette colour: our light panel");
   const reviews = blocksOfSection(sectionsOf(section("", `<h2>Customer Feedback</h2><img src="https://cdn.example/a.jpg" alt="Ann Review"><img src="https://cdn.example/b.jpg" alt="Bob Review"><img src="https://cdn.example/c.jpg" alt=""><a class="sqs-button-element" href="https://g.page/r/x/review">Leave a Review</a>`))[0], options)[0].block;
   assert.ok(reviews.type === "testimonials" && reviews.items.length === 3 && reviews.items[0].name === "Ann" && reviews.button?.href === "https://g.page/r/x/review");
   const grid = blocksOfSection(sectionsOf(section("", `<h2>Follow On Instagram</h2>${[1, 2, 3, 4].map((n) => `<img src="https://cdn.example/ig${n}.jpg">`).join("")}`))[0], options)[0].block;
@@ -81,13 +84,17 @@ test("pictures, headings, lines and buttons laid out by kind still zip into card
   ]);
 });
 
-test("the first section of the home page is a hero; a dark section with a logo, words and a group frame keeps that order", () => {
+test("the first section of the home page is a hero with the picture on its own side; a dark section with a logo, words and a group frame is a hero and a booking", () => {
   const hero = blocksOfSection(sectionsOf(section("", `<img src="https://cdn.example/sam.jpg"><p>Sam coaches.</p><p>Golf is fun.</p>`))[0], { ...options, first: true })[0].block;
-  assert.ok(hero.type === "hero" && hero.heading === "Riverside Golf" && hero.layout === "split" && hero.text === "Sam coaches.\n\nGolf is fun.");
+  assert.ok(hero.type === "hero" && hero.heading === "" && hero.layout === "split-left" && hero.text === "Sam coaches.\n\nGolf is fun.", "no heading is invented, and a picture that came first stays on the left");
+  const right = blocksOfSection(sectionsOf(section("", `<h2>Hello</h2><p>Words.</p><img src="https://cdn.example/sam.jpg">`))[0], { ...options, first: true })[0].block;
+  assert.ok(right.type === "hero" && right.layout === "split");
   const blocks = blocksOfSection(sectionsOf(section("black-bold", `<img src="https://cdn.example/logo.png"><h1>Group Coaching</h1><iframe src="https://book.claritygolf.app/riverside/group-lessons?embed=booking"></iframe><p>Round up some friends.</p>`))[0], options).map((entry) => entry.block);
-  assert.deepEqual(blocks.map((block) => block.type), ["image", "text", "booking"]);
-  assert.ok(blocks[1].type === "text" && blocks[1].heading === "Group Coaching" && blocks[1].body === "Round up some friends." && blocks[1].style?.theme === "dark");
-  assert.ok(blocks[2].type === "booking" && blocks[2].screen === "group-lessons");
+  assert.deepEqual(blocks.map((block) => block.type), ["hero", "booking"]);
+  assert.ok(blocks[0].type === "hero" && blocks[0].heading === "Group Coaching" && blocks[0].text === "Round up some friends." && blocks[0].layout === "split-left" && blocks[0].style?.theme === "dark");
+  assert.ok(blocks[1].type === "booking" && blocks[1].screen === "group-lessons");
+  const divided = blocksOfSection(sectionsOf(`<section class="page-section" data-section-theme="white"><div class="section-divider-display"></div><h2>Certs</h2><img src="https://cdn.example/1.png"><p>PGA</p><img src="https://cdn.example/2.png"><p>TPI</p></section>`)[0], options)[0].block;
+  assert.equal(divided.style?.divider, "wave", "a Squarespace section divider becomes a wave along the top edge");
   const other = blocksOfSection(sectionsOf(section("", `<h2>Elsewhere</h2><iframe src="https://book.claritygolf.app/someone-else?embed=booking"></iframe>`))[0], options).map((entry) => entry.block);
   assert.ok(other[1].type === "embed", "another business's booking page is an embed, not this one's booking block");
 });

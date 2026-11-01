@@ -21,9 +21,18 @@ function luminance(hex: string): number {
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
+/** Words that read on a given surface: the site's own text colour when it does, else near-black or white. */
+function wordsOn(surface: string, text: string): { text: string; muted: string } {
+  const lightSurface = luminance(surface) >= 0.4;
+  const lightText = luminance(text) >= 0.5;
+  if (lightSurface === !lightText) return { text, muted: lightText ? "rgba(255, 255, 255, 0.74)" : "#5c6066" };
+  return lightSurface ? { text: "#171717", muted: "#5c6066" } : { text: "#ffffff", muted: "rgba(255, 255, 255, 0.74)" };
+}
+
 /** The custom properties site.css reads, as an inline style for the page root. */
 export function siteThemeStyle(theme: SiteTheme): CSSProperties {
   const dark = luminance(theme.colors.background) < 0.3;
+  const onSurface = wordsOn(theme.colors.surface, theme.colors.text);
   return {
     "--site-bg": theme.colors.background,
     "--site-surface": theme.colors.surface,
@@ -32,6 +41,13 @@ export function siteThemeStyle(theme: SiteTheme): CSSProperties {
     "--site-primary": theme.colors.primary,
     "--site-on-primary": theme.colors.onPrimary,
     "--site-accent": theme.colors.accent,
+    "--site-heading": theme.colors.heading,
+    // Cards and panels sit on the surface colour; their words must read on it
+    // even when the page's words would not (a light panel on a dark site).
+    "--site-surface-text": onSurface.text,
+    "--site-surface-muted": onSurface.muted,
+    // What a backdrop is darkened with; a light block lightens instead.
+    "--site-overlay": "#000000",
     // A hairline that reads on the page's own background, light or dark.
     "--site-line": dark ? "rgba(255, 255, 255, 0.14)" : "rgba(0, 0, 0, 0.1)",
     "--site-heading-font": siteFont(theme.headingFont).family,
@@ -56,18 +72,39 @@ export function blockStyleVars(theme: SiteTheme, style: SiteBlockStyle): CSSProp
     vars["--site-text"] = "#ffffff";
     vars["--site-muted"] = "rgba(255, 255, 255, 0.74)";
     vars["--site-surface"] = "rgba(255, 255, 255, 0.1)";
+    vars["--site-surface-text"] = "#ffffff";
+    vars["--site-surface-muted"] = "rgba(255, 255, 255, 0.74)";
     vars["--site-line"] = "rgba(255, 255, 255, 0.2)";
     vars.colorScheme = "dark";
+  };
+  // A light panel on a dark site needs dark words, whatever the site's text colour.
+  const darkOnLight = () => {
+    if (luminance(colors.text) >= 0.5) {
+      vars["--site-text"] = "#171717";
+      vars["--site-muted"] = "#4a5057";
+      vars["--site-line"] = "rgba(0, 0, 0, 0.1)";
+      vars.colorScheme = "light";
+    }
+    vars["--site-overlay"] = "#ffffff";
+  };
+  // Cards inside a light panel: white on a dark site (the page colour would be a dark box), else the page colour.
+  const cardsOnLight = () => {
+    const surface = luminance(colors.background) < 0.4 ? "#ffffff" : colors.background;
+    const words = wordsOn(surface, colors.text);
+    vars["--site-surface"] = surface;
+    vars["--site-surface-text"] = words.text;
+    vars["--site-surface-muted"] = words.muted;
   };
   switch (style.theme) {
     case "light":
       vars["--site-bg"] = colors.surface;
-      vars["--site-surface"] = colors.background;
+      cardsOnLight();
+      darkOnLight();
       break;
     case "white":
       vars["--site-bg"] = "#ffffff";
-      vars["--site-surface"] = colors.surface.toLowerCase() === "#ffffff" ? colors.background : colors.surface;
-      vars["--site-text"] = luminance(colors.text) < 0.5 ? colors.text : "#171717";
+      if (colors.surface.toLowerCase() === "#ffffff") cardsOnLight();
+      darkOnLight();
       break;
     case "dark":
       vars["--site-bg"] = luminance(colors.text) < 0.3 ? colors.text : "#161616";
@@ -78,6 +115,8 @@ export function blockStyleVars(theme: SiteTheme, style: SiteBlockStyle): CSSProp
       vars["--site-text"] = colors.onPrimary;
       vars["--site-muted"] = `color-mix(in srgb, ${colors.onPrimary} 78%, transparent)`;
       vars["--site-surface"] = "rgba(0, 0, 0, 0.12)";
+      vars["--site-surface-text"] = colors.onPrimary;
+      vars["--site-surface-muted"] = `color-mix(in srgb, ${colors.onPrimary} 78%, transparent)`;
       vars["--site-line"] = `color-mix(in srgb, ${colors.onPrimary} 30%, transparent)`;
       // Buttons swap, or a filled button would vanish into the band.
       vars["--site-primary"] = colors.onPrimary;

@@ -16,6 +16,10 @@
   --site-primary: rgb(23 23 23);
   --site-on-primary: rgb(255 255 255);
   --site-accent: rgb(201 162 39);
+  --site-heading: rgb(23 23 23);
+  --site-surface-text: rgb(23 23 23);
+  --site-surface-muted: rgb(92 96 102);
+  --site-overlay: rgb(0 0 0);
   --site-line: rgb(0 0 0 / 0.1);
   --site-heading-font: ui-sans-serif, system-ui, sans-serif;
   --site-body-font: ui-sans-serif, system-ui, sans-serif;
@@ -44,7 +48,9 @@
   max-width: 100%;
 }
 
-.site-root a {
+/* Links take the words' colour around them. Weightless, so a card or button
+   that is itself a link keeps its own colour. */
+.site-root :where(a) {
   color: inherit;
 }
 
@@ -59,6 +65,11 @@
   font-weight: 700;
   line-height: 1.12;
   letter-spacing: -0.015em;
+}
+
+h1.site-heading,
+h2.site-heading {
+  color: var(--site-heading);
 }
 
 h1.site-heading {
@@ -280,6 +291,14 @@ h3.site-heading {
 
 .site-hero.is-split .site-hero-inner {
   grid-template-columns: 1.1fr 1fr;
+}
+
+.site-hero.is-split-left .site-hero-inner {
+  grid-template-columns: 1fr 1.1fr;
+}
+
+.site-hero.is-split-left .site-hero-media {
+  order: -1;
 }
 
 .site-hero-media img {
@@ -1084,7 +1103,23 @@ h3.site-heading {
 .site-block-overlay {
   position: absolute;
   inset: 0;
-  background: rgb(0 0 0);
+  background: var(--site-overlay);
+}
+
+/* A wave along the block's top edge, in the button colour, over the join with the block above. */
+.site-block.has-divider {
+  position: relative;
+}
+
+.site-block-divider {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  width: 100%;
+  height: 36px;
+  z-index: 2;
+  color: var(--site-primary);
+  pointer-events: none;
 }
 
 .site-block-inner {
@@ -1390,6 +1425,9 @@ h3.site-heading {
 
 .site-video-card {
   display: grid;
+  /* One column the card's own width: an auto column would size itself from
+     the 16:9 still and the still from the column, and grow past the card. */
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
   border-radius: var(--site-radius);
   background: var(--site-surface);
@@ -1409,8 +1447,11 @@ h3.site-heading {
   background: rgb(0 0 0 / 0.8);
 }
 
+/* The still fills the 16:9 box from outside the flow, so a tall thumbnail
+   neither stretches the card nor widens its column past the card. */
 .site-video-card-picture img {
-  display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1628,6 +1669,26 @@ h3.site-heading {
 
 .site-shop-address {
   white-space: pre-line;
+}
+
+/* --- Words on a surface ------------------------------------------------------- */
+
+/* Everything drawn on the surface colour speaks in the surface's own words,
+   and the quiet text inside it follows, so a light card on a dark site reads. */
+.site-feature,
+.site-price,
+.site-testimonial,
+.site-cta.is-surface,
+.site-article-card,
+.site-shop-card,
+.site-shop-form,
+.site-shop-receipt,
+.site-card,
+.site-form-thanks,
+.site-video-card,
+.site-shop-bar {
+  --site-muted: var(--site-surface-muted);
+  color: var(--site-surface-text);
 }
 
 /* --- Frames in the editor ----------------------------------------------------- */

@@ -107,9 +107,15 @@ page, a light panel (the theme's surface colour), white, dark (the text
 colour as background, white text) or accent (the primary colour). A
 picture or a muted, looping video can sit behind the block, darkened by a
 chosen amount; text over a backdrop is white unless the block is light or
-white. Height sets a minimum (small, medium, large) and content width can
-override the theme's for that one block. A plain style adds nothing to
-the markup, so untouched blocks render as before.
+white, which lighten the backdrop instead. A light or white panel on a
+dark site gets dark words. Height sets a minimum (small, medium, large),
+content width can override the theme's for that one block, and the top
+edge can carry a wave in the button colour over the join with the block
+above. A plain style adds nothing to the markup, so untouched blocks
+render as before. The theme has a heading colour of its own (the text
+colour unless a preset or the coach picks another), applied to the large
+headings; the Ember preset is slate with light-blue text and orange
+headings, the look of samhalegolf.com.
 
 The header can be transparent: it sits over the first block with no
 background of its own, in light text when that block is dark, and scrolls

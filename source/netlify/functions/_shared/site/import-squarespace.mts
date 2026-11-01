@@ -194,7 +194,7 @@ export function piecesOf(fragment: string): Piece[] {
 }
 
 /** The page-sections of a Squarespace 7.1 page, each with its theme and background picture. */
-export function sectionsOf(html: string): Array<{ theme: string; background: string; html: string }> {
+export function sectionsOf(html: string): Array<{ theme: string; background: string; divider: boolean; html: string }> {
   const starts: number[] = [];
   const pattern = /<section\b[^>]*\bpage-section\b/gi;
   let match: RegExpExecArray | null;
@@ -204,7 +204,7 @@ export function sectionsOf(html: string): Array<{ theme: string; background: str
     const section = html.slice(start, end);
     const open = section.match(/<section\b[^>]*>/i)?.[0] || "";
     const background = section.match(/class="section-background"[^>]*>[\s\S]{0,400}?<img\b[^>]*(?:data-src|src)="([^"?]+)/i)?.[1] || "";
-    return { theme: attr(open, "data-section-theme"), background: pictureUrl(background), html: section };
+    return { theme: attr(open, "data-section-theme"), background: pictureUrl(background), divider: /section-divider-display/.test(section), html: section };
   });
 }
 
@@ -225,10 +225,14 @@ export function metaOf(html: string, siteName: string): { title: string; descrip
 
 // --- Sections into blocks ------------------------------------------------------
 
+/**
+ * A Squarespace section theme as one of ours. Its "white" and "light" are the
+ * site's own light palette colour, which is our light panel; only "black"
+ * and "dark" are dark; the rest is the page itself.
+ */
 function styleFor(theme: string): Partial<SiteBlockStyle> {
   if (/black|dark/i.test(theme)) return { theme: "dark" };
-  if (/white/i.test(theme)) return { theme: "white" };
-  if (/light|bright/i.test(theme)) return { theme: "light" };
+  if (/white|light|bright/i.test(theme)) return { theme: "light" };
   return {};
 }
 
@@ -292,9 +296,22 @@ function pageLink(pathname: string): string {
  * shape of the content, not its words: a row of small pictures with a line
  * each is a Logos block whatever it is called.
  */
-export function blocksOfSection(section: { theme: string; background: string; html: string }, options: { bookingSlug: string; first: boolean; report: string[]; siteName?: string; instagram?: string }): Imported[] {
+export function blocksOfSection(section: { theme: string; background: string; divider?: boolean; html: string }, options: { bookingSlug: string; first: boolean; report: string[]; siteName?: string; instagram?: string }): Imported[] {
+  const out = sectionBlocks(section, options);
+  // The section's backdrop rides on its first block's style, and is a picture to bring over like any other.
+  if (section.background && out.length) out[0].images = [...out[0].images, section.background];
+  // The wave along the section's top edge belongs to its first block only.
+  for (const entry of out.slice(1)) if (entry.block.style?.divider) entry.block.style = { ...entry.block.style, divider: "none" };
+  return out;
+}
+
+function sectionBlocks(section: { theme: string; background: string; divider?: boolean; html: string }, options: { bookingSlug: string; first: boolean; report: string[]; siteName?: string; instagram?: string }): Imported[] {
   const pieces = piecesOf(section.html).filter((piece) => !(piece.kind === "image" && piece.src === section.background));
-  const style: Partial<SiteBlockStyle> = { ...styleFor(section.theme), ...(section.background ? { background: image(section.background), overlay: 40 } : {}) };
+  const style: Partial<SiteBlockStyle> = {
+    ...styleFor(section.theme),
+    ...(section.background ? { background: image(section.background), overlay: 40 } : {}),
+    ...(section.divider ? { divider: "wave" as const } : {}),
+  };
   const headings = pieces.filter((piece) => piece.kind === "heading");
   const paragraphs = pieces.filter((piece) => piece.kind === "paragraph");
   const images = pieces.filter((piece) => piece.kind === "image");
@@ -416,7 +433,7 @@ export function blocksOfSection(section: { theme: string; background: string; ht
 
   // The first section of a page with one picture and words: a hero.
   if (options.first && images.length <= 1 && (headings.length || paragraphs.length) && !frames.length) {
-    const heading = headings[0]?.text || options.siteName || "";
+    const heading = headings[0]?.text || "";
     const body = paragraphs.map((piece) => piece.text).join("\n\n");
     const picture = images[0];
     out.push({
@@ -427,7 +444,7 @@ export function blocksOfSection(section: { theme: string; background: string; ht
         heading: headings.length > 1 && headings[0].level > headings[1].level ? headings[1].text : heading,
         text: body.slice(0, 1000),
         image: picture ? image(picture.src, picture.alt) : null,
-        layout: picture ? "split" : "left",
+        layout: picture ? (pictureFirst(pieces) ? "split-left" : "split") : "left",
         height: "regular",
         buttons: buttons.slice(0, 2).map((piece, index) => ({ ...button(piece.label, piece.href), style: index === 0 ? ("primary" as const) : ("secondary" as const) })),
         style,
@@ -438,11 +455,28 @@ export function blocksOfSection(section: { theme: string; background: string; ht
     return out;
   }
 
+  // Words with one picture beside them (a logo, a portrait): a hero with the
+  // picture on the side it came from, then any frames and buttons.
+  if (images.length === 1 && words.length && headings.length) {
+    const [first, ...others] = words;
+    const heading = first.kind === "heading" ? first.text : "";
+    const body = (first.kind === "heading" ? others : words).map((piece) => piece.text).join("\n\n");
+    out.push({
+      block: { id: id("hero"), type: "hero", eyebrow: "", heading, text: body.slice(0, 1000), image: image(images[0].src, images[0].alt), layout: pictureFirst(pieces) ? "split-left" : "split", height: "regular", buttons: [], style },
+      images: [images[0].src],
+    });
+    for (const piece of frames) out.push(frameBlock(piece.src, options.bookingSlug, "", style, id));
+    for (const piece of buttons.filter((entry) => entry.kind === "button" && entry.href !== "#")) {
+      out.push({ block: { id: id("cta"), type: "cta", heading: "", text: "", button: button(piece.label, piece.href), tone: "surface", style }, images: [] });
+    }
+    return out;
+  }
+
   // Otherwise: the words as one text block (first heading above, later headings as lines of their own),
   // then the pictures, then the frames, then any button as a call to action.
   const firstWords = pieces.findIndex((piece) => piece.kind === "heading" || piece.kind === "paragraph");
   const leading = images.filter((piece) => pieces.indexOf(piece) < firstWords);
-  const picture = (piece: Extract<Piece, { kind: "image" }>): Imported => ({ block: { id: id("image"), type: "image", image: image(piece.src, piece.alt), caption: "", size: "wide", style }, images: [piece.src] });
+  const picture = (piece: Extract<Piece, { kind: "image" }>): Imported => ({ block: { id: id("image"), type: "image", image: image(piece.src, piece.alt), caption: "", size: words.length ? "inset" : "wide", style }, images: [piece.src] });
   for (const piece of leading) out.push(picture(piece));
   if (words.length) {
     const [first, ...others] = words;
@@ -480,6 +514,13 @@ function reviewerName(piece: Extract<Piece, { kind: "image" }>): string {
   const file = decodeURIComponent(piece.src.split("/").pop() || "").replace(/\+/g, " ").replace(/\.[a-z0-9]+$/i, "");
   const fromFile = file.replace(/\b(google|facebook|customer)?\s*reviews?\b/gi, "").replace(/[-_]/g, " ").trim();
   return /^[A-Za-z][A-Za-z .'-]{1,60}$/.test(fromFile) && !/^(image asset|screenshot)/i.test(fromFile) ? fromFile : "";
+}
+
+/** True when the section's picture comes before its words, as a grid lays a left-hand picture out. */
+function pictureFirst(pieces: Piece[]): boolean {
+  const picture = pieces.findIndex((piece) => piece.kind === "image");
+  const words = pieces.findIndex((piece) => piece.kind === "heading" || piece.kind === "paragraph");
+  return picture >= 0 && (words < 0 || picture < words);
 }
 
 function hostOf(href: string): string {
@@ -765,7 +806,7 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
       const lead = sections.length ? blocksOfSection(sections[0], { bookingSlug: input.bookingSlug, first: true, report, siteName }).filter((entry) => entry.block.type === "hero" || entry.block.type === "text") : [];
       page("page", collection.navigationTitle || collection.title || "", [
         ...(lead.length ? lead.slice(0, 1) : [{ block: { id: siteId("hero"), type: "hero", eyebrow: "", heading: collection.title || "Videos", text: "", image: null, layout: "left", height: "regular", buttons: [] }, images: [] } as Imported]),
-        { block: { id: siteId("videos"), type: "videos", heading: "", intro: "", limit: 24, layout: "list" }, images: [] },
+        { block: { id: siteId("videos"), type: "videos", heading: "", intro: "", limit: 24, layout: "grid" }, images: [] },
       ]);
       continue;
     }
@@ -836,7 +877,8 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
     theme: themeFromPreset(input.preset),
     header: {
       showLogo: true,
-      showName: true,
+      // The old header showed a logo; the name is there for a business without one.
+      showName: false,
       links: extraLinks.slice(0, 6),
       button: headerButton?.href ? headerButton : null,
       sticky: true,

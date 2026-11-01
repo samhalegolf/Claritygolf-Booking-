@@ -75,6 +75,7 @@ export function SiteInspector({ settings, onChange }: { settings: SiteSettings; 
         <ColorInput label={t("Buttons")} value={theme.colors.primary} onChange={(value) => setColor("primary", value)} />
         <ColorInput label={t("Text on buttons")} value={theme.colors.onPrimary} onChange={(value) => setColor("onPrimary", value)} />
         <ColorInput label={t("Highlight")} value={theme.colors.accent} onChange={(value) => setColor("accent", value)} />
+        <ColorInput label={t("Headings")} value={theme.colors.heading} onChange={(value) => setColor("heading", value)} />
       </div>
       <SelectInput
         label={t("Corners")}
@@ -318,6 +319,15 @@ function SectionStyleFields({ style, onChange, onError }: { style: SiteBlockStyl
             { value: "wide", label: t("Wide") },
           ]}
         />
+        <SelectInput
+          label={t("Top edge")}
+          value={style.divider}
+          onChange={(divider) => set({ divider })}
+          options={[
+            { value: "none", label: t("Plain") },
+            { value: "wave", label: t("A wave, in the button colour") },
+          ]}
+        />
       </div>
     </details>
   );
@@ -445,6 +455,7 @@ function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: 
               { value: "centre", label: t("Centred") },
               { value: "left", label: t("Left") },
               { value: "split", label: t("Text beside picture") },
+              { value: "split-left", label: t("Picture beside text") },
               { value: "cover", label: t("Text over picture") },
             ]}
           />
