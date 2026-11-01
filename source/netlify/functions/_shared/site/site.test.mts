@@ -16,6 +16,7 @@ import {
   cleanSitePageContent,
   cleanSitePageMeta,
   cleanSiteSettings,
+  cleanTheme,
   googleFontsUrl,
   instagramUrl,
   newSiteBlock,
@@ -126,6 +127,12 @@ test("pictures are https only, and a block keeps its button while it still has a
   assert.deepEqual(sitePageImageUrls(content), ["https://cdn.example.com/a.jpg"]);
 });
 
+test("a theme's heading colour defaults to its text colour, and a preset may pick its accent", () => {
+  assert.equal(cleanTheme({ preset: "classic" }).colors.heading, themeFromPreset("classic").colors.text);
+  assert.equal(cleanTheme({ preset: "ember" }).colors.heading, "#fe914d");
+  assert.equal(cleanTheme({ preset: "classic", colors: { heading: "#ff0000" } }).colors.heading, "#ff0000");
+});
+
 test("the theme only speaks six-digit hex, known fonts and known options", () => {
   const theme = cleanSiteSettings({
     theme: {
@@ -196,7 +203,9 @@ const presetInput = {
 };
 
 test("every block carries a section style, and a plain one changes nothing", () => {
-  assert.deepEqual(cleanBlockStyle(undefined), { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit" });
+  assert.deepEqual(cleanBlockStyle(undefined), { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit", divider: "none" });
+  assert.equal(cleanBlockStyle({ divider: "wave" }).divider, "wave");
+  assert.ok(!blockStyleIsPlain(cleanBlockStyle({ divider: "wave" })), "a wave is drawn, so the block is not plain");
   assert.ok(blockStyleIsPlain(cleanBlockStyle({})));
   const styled = cleanBlockStyle({
     theme: "dark",

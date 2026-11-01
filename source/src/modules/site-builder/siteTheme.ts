@@ -32,6 +32,9 @@ export function siteThemeStyle(theme: SiteTheme): CSSProperties {
     "--site-primary": theme.colors.primary,
     "--site-on-primary": theme.colors.onPrimary,
     "--site-accent": theme.colors.accent,
+    "--site-heading": theme.colors.heading,
+    // What a backdrop is darkened with; a light block lightens instead.
+    "--site-overlay": "#000000",
     // A hairline that reads on the page's own background, light or dark.
     "--site-line": dark ? "rgba(255, 255, 255, 0.14)" : "rgba(0, 0, 0, 0.1)",
     "--site-heading-font": siteFont(theme.headingFont).family,
@@ -59,15 +62,26 @@ export function blockStyleVars(theme: SiteTheme, style: SiteBlockStyle): CSSProp
     vars["--site-line"] = "rgba(255, 255, 255, 0.2)";
     vars.colorScheme = "dark";
   };
+  // A light panel on a dark site needs dark words, whatever the site's text colour.
+  const darkOnLight = () => {
+    if (luminance(colors.text) >= 0.5) {
+      vars["--site-text"] = "#171717";
+      vars["--site-muted"] = "#4a5057";
+      vars["--site-line"] = "rgba(0, 0, 0, 0.1)";
+      vars.colorScheme = "light";
+    }
+    vars["--site-overlay"] = "#ffffff";
+  };
   switch (style.theme) {
     case "light":
       vars["--site-bg"] = colors.surface;
       vars["--site-surface"] = colors.background;
+      darkOnLight();
       break;
     case "white":
       vars["--site-bg"] = "#ffffff";
       vars["--site-surface"] = colors.surface.toLowerCase() === "#ffffff" ? colors.background : colors.surface;
-      vars["--site-text"] = luminance(colors.text) < 0.5 ? colors.text : "#171717";
+      darkOnLight();
       break;
     case "dark":
       vars["--site-bg"] = luminance(colors.text) < 0.3 ? colors.text : "#161616";

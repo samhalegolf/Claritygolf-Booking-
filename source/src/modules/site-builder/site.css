@@ -16,6 +16,8 @@
   --site-primary: rgb(23 23 23);
   --site-on-primary: rgb(255 255 255);
   --site-accent: rgb(201 162 39);
+  --site-heading: rgb(23 23 23);
+  --site-overlay: rgb(0 0 0);
   --site-line: rgb(0 0 0 / 0.1);
   --site-heading-font: ui-sans-serif, system-ui, sans-serif;
   --site-body-font: ui-sans-serif, system-ui, sans-serif;
@@ -44,7 +46,7 @@
   max-width: 100%;
 }
 
-.site-root a {
+.site-root a:not(.site-button) {
   color: inherit;
 }
 
@@ -59,6 +61,11 @@
   font-weight: 700;
   line-height: 1.12;
   letter-spacing: -0.015em;
+}
+
+h1.site-heading,
+h2.site-heading {
+  color: var(--site-heading);
 }
 
 h1.site-heading {
@@ -280,6 +287,14 @@ h3.site-heading {
 
 .site-hero.is-split .site-hero-inner {
   grid-template-columns: 1.1fr 1fr;
+}
+
+.site-hero.is-split-left .site-hero-inner {
+  grid-template-columns: 1fr 1.1fr;
+}
+
+.site-hero.is-split-left .site-hero-media {
+  order: -1;
 }
 
 .site-hero-media img {
@@ -1084,7 +1099,23 @@ h3.site-heading {
 .site-block-overlay {
   position: absolute;
   inset: 0;
-  background: rgb(0 0 0);
+  background: var(--site-overlay);
+}
+
+/* A wave along the block's top edge, in the button colour, over the join with the block above. */
+.site-block.has-divider {
+  position: relative;
+}
+
+.site-block-divider {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  width: 100%;
+  height: 36px;
+  z-index: 2;
+  color: var(--site-primary);
+  pointer-events: none;
 }
 
 .site-block-inner {

@@ -295,14 +295,20 @@ export function SiteRenderer({
   const frame = (target: SiteSelection, className: string, children: ReactNode, id?: string, style?: SiteBlockStyle) => {
     const plain = !style || blockStyleIsPlain(style);
     const backdrop = style && (style.background || style.video);
+    const divider = style?.divider === "wave";
     return (
       <div
-        className={`${className}${plain ? "" : ` has-style is-theme-${style.theme} is-height-${style.height}`}${preview ? " is-editable" : ""}${isSelected(selected, target) ? " is-selected" : ""}`}
+        className={`${className}${plain ? "" : ` has-style is-theme-${style.theme} is-height-${style.height}`}${divider ? " has-divider" : ""}${preview ? " is-editable" : ""}${isSelected(selected, target) ? " is-selected" : ""}`}
         id={id}
         key={id ?? className}
         style={style && !plain ? blockStyleVars(theme, style) : undefined}
         onClick={select(target)}
       >
+        {divider ? (
+          <svg className="site-block-divider" viewBox="0 0 1200 36" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0 18 C 200 -4, 400 40, 600 18 S 1000 -4, 1200 18" fill="none" stroke="currentColor" strokeWidth="4" />
+          </svg>
+        ) : null}
         {backdrop ? (
           <div className="site-block-backdrop" aria-hidden="true">
             {style.video ? <video src={style.video} poster={style.background?.url} autoPlay muted loop playsInline /> : <img src={style.background!.url} alt="" />}

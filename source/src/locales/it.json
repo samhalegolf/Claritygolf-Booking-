@@ -5125,5 +5125,10 @@
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Un sito Squarespace viene importato con pagine, articoli, video, testi e immagini, agli stessi indirizzi, nello stile scelto sopra. Sostituisce questa bozza; nulla viene pubblicato finché non premi Pubblica.",
   "Bringing it over…": "Importazione in corso…",
   "Bringing pictures over: {done} of {total}": "Importazione immagini: {done} di {total}",
-  "{count} pictures are now in your own storage.": "{count} immagini sono ora nel tuo spazio di archiviazione."
+  "{count} pictures are now in your own storage.": "{count} immagini sono ora nel tuo spazio di archiviazione.",
+  "Headings": "Titoli",
+  "Top edge": "Bordo superiore",
+  "Plain": "Semplice",
+  "A wave, in the button colour": "Un'onda, nel colore dei pulsanti",
+  "Picture beside text": "Immagine accanto al testo"
 }

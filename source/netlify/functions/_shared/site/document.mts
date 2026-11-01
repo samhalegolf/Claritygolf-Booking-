@@ -100,6 +100,8 @@ export type SiteColors = {
   primary: string;
   onPrimary: string;
   accent: string;
+  /** Large headings. Usually the text colour; a site may pick its accent. */
+  heading: string;
 };
 
 export type SiteTheme = {
@@ -127,7 +129,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "playfair",
       bodyFont: "inter",
-      colors: { background: "#f6f7f2", surface: "#ffffff", text: "#14201a", muted: "#5d6b63", primary: "#1f6f43", onPrimary: "#ffffff", accent: "#c9a227" },
+      colors: { background: "#f6f7f2", surface: "#ffffff", text: "#14201a", muted: "#5d6b63", primary: "#1f6f43", onPrimary: "#ffffff", accent: "#c9a227", heading: "#14201a" },
       corners: "soft",
       width: "regular",
       buttons: "filled",
@@ -140,7 +142,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "manrope",
       bodyFont: "inter",
-      colors: { background: "#ffffff", surface: "#f4f5f7", text: "#111827", muted: "#6b7280", primary: "#111827", onPrimary: "#ffffff", accent: "#2563eb" },
+      colors: { background: "#ffffff", surface: "#f4f5f7", text: "#111827", muted: "#6b7280", primary: "#111827", onPrimary: "#ffffff", accent: "#2563eb", heading: "#111827" },
       corners: "sharp",
       width: "regular",
       buttons: "filled",
@@ -153,7 +155,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "cormorant",
       bodyFont: "nunito",
-      colors: { background: "#faf6ef", surface: "#ffffff", text: "#2b2419", muted: "#7a6e5f", primary: "#b4532a", onPrimary: "#ffffff", accent: "#2d6a4f" },
+      colors: { background: "#faf6ef", surface: "#ffffff", text: "#2b2419", muted: "#7a6e5f", primary: "#b4532a", onPrimary: "#ffffff", accent: "#2d6a4f", heading: "#2b2419" },
       corners: "round",
       width: "regular",
       buttons: "pill",
@@ -166,7 +168,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "space-grotesk",
       bodyFont: "inter",
-      colors: { background: "#0f1a14", surface: "#16241c", text: "#f3f6f1", muted: "#a8b3aa", primary: "#58c48a", onPrimary: "#0b140f", accent: "#e9c46a" },
+      colors: { background: "#0f1a14", surface: "#16241c", text: "#f3f6f1", muted: "#a8b3aa", primary: "#58c48a", onPrimary: "#0b140f", accent: "#e9c46a", heading: "#f3f6f1" },
       corners: "soft",
       width: "wide",
       buttons: "filled",
@@ -179,7 +181,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "playfair",
       bodyFont: "lora",
-      colors: { background: "#fffdf8", surface: "#f6f1e7", text: "#1f1d1a", muted: "#6f6861", primary: "#1f1d1a", onPrimary: "#ffffff", accent: "#8c6a3f" },
+      colors: { background: "#fffdf8", surface: "#f6f1e7", text: "#1f1d1a", muted: "#6f6861", primary: "#1f1d1a", onPrimary: "#ffffff", accent: "#8c6a3f", heading: "#1f1d1a" },
       corners: "sharp",
       width: "narrow",
       buttons: "outline",
@@ -192,7 +194,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "manrope",
       bodyFont: "poppins",
-      colors: { background: "#ffffff", surface: "#dfe7f7", text: "#000000", muted: "#4a5057", primary: "#fe914d", onPrimary: "#ffffff", accent: "#282d30" },
+      colors: { background: "#4a5057", surface: "#dfe7f7", text: "#dfe7f7", muted: "#b9c2d1", primary: "#fe914d", onPrimary: "#ffffff", accent: "#282d30", heading: "#fe914d" },
       corners: "sharp",
       width: "wide",
       buttons: "filled",
@@ -205,7 +207,7 @@ export const SITE_THEME_PRESETS: readonly SiteThemePreset[] = [
     theme: {
       headingFont: "montserrat",
       bodyFont: "dm-sans",
-      colors: { background: "#f3f8fa", surface: "#ffffff", text: "#0f2a3a", muted: "#587283", primary: "#0f6e8c", onPrimary: "#ffffff", accent: "#f2a541" },
+      colors: { background: "#f3f8fa", surface: "#ffffff", text: "#0f2a3a", muted: "#587283", primary: "#0f6e8c", onPrimary: "#ffffff", accent: "#f2a541", heading: "#0f2a3a" },
       corners: "round",
       width: "regular",
       buttons: "pill",
@@ -247,6 +249,7 @@ export function cleanTheme(value: unknown): SiteTheme {
       primary: cleanColor(colors.primary, base.colors.primary),
       onPrimary: cleanColor(colors.onPrimary, base.colors.onPrimary),
       accent: cleanColor(colors.accent, base.colors.accent),
+      heading: cleanColor(colors.heading, base.colors.heading),
     },
     corners: oneOf(input.corners, ["sharp", "soft", "round"], base.corners),
     width: oneOf(input.width, ["narrow", "regular", "wide"], base.width),
@@ -380,10 +383,12 @@ export type SiteBlockStyle = {
   overlay: number;
   height: "auto" | "small" | "medium" | "large";
   width: "inherit" | "narrow" | "regular" | "wide";
+  /** A line along the block's top edge, in the button colour. */
+  divider: "none" | "wave";
 };
 
 export function defaultBlockStyle(): SiteBlockStyle {
-  return { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit" };
+  return { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit", divider: "none" };
 }
 
 function cleanVideoUrl(input: unknown): string {
@@ -401,12 +406,13 @@ export function cleanBlockStyle(value: unknown): SiteBlockStyle {
     overlay: Number.isFinite(overlay) ? Math.min(90, Math.max(0, Math.round(overlay))) : 30,
     height: oneOf(input.height, ["auto", "small", "medium", "large"], "auto"),
     width: oneOf(input.width, ["inherit", "narrow", "regular", "wide"], "inherit"),
+    divider: oneOf(input.divider, ["none", "wave"], "none"),
   };
 }
 
 /** True when the style changes anything about how the block is drawn. */
 export function blockStyleIsPlain(style: SiteBlockStyle): boolean {
-  return style.theme === "default" && !style.background && !style.video && style.height === "auto" && style.width === "inherit";
+  return style.theme === "default" && !style.background && !style.video && style.height === "auto" && style.width === "inherit" && style.divider === "none";
 }
 
 /** An address a page may frame: https only. Pasted iframe code gives up its src. */
@@ -497,7 +503,7 @@ export type SiteHeroBlock = BlockBase & {
   heading: string;
   text: string;
   image: SiteImage | null;
-  layout: "centre" | "left" | "split" | "cover";
+  layout: "centre" | "left" | "split" | "split-left" | "cover";
   height: "regular" | "tall";
   buttons: SiteButton[];
 };
@@ -780,11 +786,14 @@ export function sitePageMeta(site: {
   business: { name: string; logo?: string };
 }): { title: string; description: string; image: string } {
   const { page, business } = site;
-  const title = page.content.seoTitle || (page.slug === HOME_PAGE_SLUG ? business.name : `${page.title || page.slug} · ${business.name}`);
+  const own = page.content.seoTitle;
+  const title = own
+    ? own.toLowerCase().includes(business.name.toLowerCase()) ? own : `${own} · ${business.name}`
+    : page.slug === HOME_PAGE_SLUG ? business.name : `${page.title || page.slug} · ${business.name}`;
   const description = page.content.description || page.content.summary;
   const logo = business.logo && /^https?:/.test(business.logo) ? business.logo : "";
   const image = page.content.socialImage?.url || page.content.cover?.url || youtubeThumbnail(page.content.video) || logo;
-  return { title: title.slice(0, 200), description: description.slice(0, 300), image };
+  return { title: title.slice(0, 200), description: description.slice(0, 500), image };
 }
 
 /** The picture YouTube keeps for a video, for a card with no cover of its own. */
@@ -853,7 +862,7 @@ function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlock
         heading: text(input.heading, 160),
         text: text(input.text, 1000),
         image: cleanImage(input.image),
-        layout: oneOf(input.layout, ["centre", "left", "split", "cover"], "centre"),
+        layout: oneOf(input.layout, ["centre", "left", "split", "split-left", "cover"], "centre"),
         height: oneOf(input.height, ["regular", "tall"], "regular"),
         buttons: cleanButtons(input.buttons, 2),
       };
@@ -1174,7 +1183,7 @@ export function cleanSitePageContent(value: unknown): SitePageContent {
   const date = text(input.date, 10);
   return {
     version: SITE_DOCUMENT_VERSION,
-    description: text(input.description, 300),
+    description: text(input.description, 500),
     seoTitle: text(input.seoTitle, 120),
     socialImage: cleanImage(input.socialImage),
     summary: text(input.summary, 400),
