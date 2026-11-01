@@ -126,9 +126,11 @@ import {
   cleanNotificationTemplates,
   DEFAULT_MAP_LINK_LABEL,
   emptyNotificationTemplates,
+  fillMergeFields,
   isNotificationTemplateEdited,
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
+import { cleanGiftCardDesign, defaultGiftCardDesign } from "../netlify/functions/_shared/gift-card.mts";
 import {
   drillToBlock,
   reviewBlockVideoIds,
@@ -904,10 +906,6 @@ function formatBookingNoticeLabel(minutes: number) {
   return t("{normalized} minutes", { normalized });
 }
 
-function renderTemplate(template: string, variables: Record<string, string>) {
-  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
-}
-
 function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor()) {
   switch (view) {
     case "clients":
@@ -1326,6 +1324,7 @@ const defaultNotificationSettings: NotificationSettings = {
   sendAdminSms: false,
   notificationTemplates: emptyNotificationTemplates(),
   mapLinkLabel: DEFAULT_MAP_LINK_LABEL,
+  giftCardDesign: defaultGiftCardDesign(),
   playerBookingEmbedUrl: "",
   playerBookingEmbedLabel: PLAYER_BOOKING_EMBED_DEFAULT_LABEL,
   playerBookingEmbedIntro: "",
@@ -1368,6 +1367,7 @@ const NOTIFICATION_BLOCK_KEYS = {
   templates: [
     "notificationTemplates",
     "mapLinkLabel",
+    "giftCardDesign",
     "notificationSubjectLine",
     "adminEmailSubject",
     "adminEmailIntro",
@@ -3633,9 +3633,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     groupSize: "3",
     totalPrice: "$240",
     sharePrice: "$80",
+    // The gift voucher email's, which is about an order rather than a lesson.
+    recipient: t("[recipient name]"),
+    receiptNumber: "R-1042",
+    total: "$100",
   };
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
-    ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
+    ? fillMergeFields(notificationSettings.notificationSubjectLine, emailTemplateVariables)
     : "";
   const bookingNoticeDraftHours = Math.max(0, Math.round((bookingNoticeDraft.minBookingNoticeMinutes / 60) * 100) / 100);
   const bookingNoticeDraftSummary = formatBookingNoticeLabel(bookingNoticeDraft.minBookingNoticeMinutes);
@@ -3644,8 +3648,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // previewed on the message itself in Templates, so a second rendering of the
   // legacy one-size wording here was showing an email nobody receives.
   const adminAlertExample = {
-    subject: renderTemplate(notificationSettings.adminEmailSubject, emailTemplateVariables),
-    intro: renderTemplate(notificationSettings.adminEmailIntro, emailTemplateVariables),
+    subject: fillMergeFields(notificationSettings.adminEmailSubject, emailTemplateVariables),
+    intro: fillMergeFields(notificationSettings.adminEmailIntro, emailTemplateVariables),
   };
 
   useEffect(() => {
@@ -3782,9 +3786,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       publicBookingLookBusy: settings?.publicBookingLookBusy === true,
       reminderLeadMinutes: Number.isFinite(reminderLeadMinutes) ? clamp(reminderLeadMinutes, 60, 14 * 24 * 60) : 24 * 60,
       googleReviewUrl: cleanUrl(settings?.googleReviewUrl, ""),
-      // Always a complete set of six, whatever the server sent - the editor
-      // indexes into it directly and a missing variant would blank the tab.
+      // Always a complete set, whatever the server sent - the editor indexes
+      // into it directly and a missing variant would blank the tab.
       notificationTemplates: cleanNotificationTemplates(settings?.notificationTemplates),
+      giftCardDesign: cleanGiftCardDesign(settings?.giftCardDesign),
       mapLinkLabel:
         typeof settings?.mapLinkLabel === "string" && settings.mapLinkLabel.trim()
           ? settings.mapLinkLabel
@@ -18041,7 +18046,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 title={t("Templates")}
                 className="notification-card message-templates-card"
               >
-                <p className="settings-note">{t("One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.")}</p>
+                <p className="settings-note">{t("One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.")}</p>
                 <EditableSettingsBlock
                   id="message-templates-block"
                   title={t("Templates")}
@@ -18061,12 +18066,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       messageLanguage={coachAccount.messageLanguage}
                       logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
                       venueName={coachAccount.venueShortName || coachAccount.venueName}
-                      renderPreview={(template) => renderTemplate(template, emailTemplateVariables)}
+                      renderPreview={(template) => fillMergeFields(template, emailTemplateVariables)}
                       onChange={(templates) =>
                         updateNotificationBlockDraft(messageTemplatesEditor, "notificationTemplates", templates)
                       }
                       onMapLinkLabelChange={(label) =>
                         updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
+                      }
+                      giftCardDesign={messageTemplatesDraft.giftCardDesign}
+                      onGiftCardDesignChange={(design) =>
+                        updateNotificationBlockDraft(messageTemplatesEditor, "giftCardDesign", design)
                       }
                     />
                   </Suspense>
@@ -18083,7 +18092,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       <span>{t("Subject override")}</span>
                       <strong>
                         {notificationSettings.notificationSubjectLine.trim()
-                          ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
+                          ? fillMergeFields(notificationSettings.notificationSubjectLine, emailTemplateVariables)
                           : t("Each message keeps its own")}
                       </strong>
                     </div>

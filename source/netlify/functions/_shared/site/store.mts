@@ -9,6 +9,7 @@
 
 import { randomBytes } from "node:crypto";
 
+import { GIFT_CARD_SETTING, parseGiftCardDesign } from "../gift-card.mts";
 import { db } from "../settings-store.mts";
 import {
   HOME_PAGE_SLUG,
@@ -180,16 +181,40 @@ export async function listSitePages(accountId: string): Promise<SitePageRecord[]
   return rows.map(pageFromRow);
 }
 
-/** Every picture a page still shows, in its draft or its published copy, including pages the draft has dropped. */
+/**
+ * Every picture in the business's site-media folder that something still shows:
+ * a page, in its draft or its published copy (including pages the draft has
+ * dropped), a product in the shop, or the gift card artwork.
+ *
+ * The bucket is shared. Billing's product pictures and the gift card are
+ * uploaded to it too, so the sweep after a site save has to know about them,
+ * or it deletes a shop's pictures an hour after they were added.
+ */
 export async function siteImageUrlsInUse(accountId: string): Promise<string[]> {
   if (!accountId) return [];
-  const rows = (await db().sql`
-    SELECT document, published_document
-    FROM site_pages
-    WHERE account_id = ${accountId}
-  `) as Array<Pick<PageRow, "document" | "published_document">>;
+  const [pages, products, giftCard] = await Promise.all([
+    db().sql`
+      SELECT document, published_document
+      FROM site_pages
+      WHERE account_id = ${accountId}
+    ` as Promise<Array<Pick<PageRow, "document" | "published_document">>>,
+    db().sql`
+      SELECT image_url
+      FROM billing_products_services
+      WHERE account_id = ${accountId} AND image_url IS NOT NULL AND image_url <> ''
+    ` as Promise<Array<{ image_url: string }>>,
+    db().sql`
+      SELECT value
+      FROM settings
+      WHERE account_id = ${accountId} AND key = ${GIFT_CARD_SETTING}
+    ` as Promise<Array<{ value: string }>>,
+  ]);
   const urlsOf = (document: unknown) => (document ? sitePageImageUrls(cleanSitePageContent(parseJson(document))) : []);
-  return rows.flatMap((row) => [...urlsOf(row.document), ...urlsOf(row.published_document)]);
+  return [
+    ...pages.flatMap((row) => [...urlsOf(row.document), ...urlsOf(row.published_document)]),
+    ...products.map((row) => String(row.image_url)),
+    ...giftCard.map((row) => parseGiftCardDesign(row.value).imageUrl).filter(Boolean),
+  ];
 }
 
 /**

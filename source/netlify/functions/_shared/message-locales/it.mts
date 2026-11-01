@@ -141,7 +141,6 @@ const catalog: Record<string, string> = {
   "Set a password to see your lessons, lesson notes and videos, and to book your next session:": "Imposta una password per vedere le tue lezioni, le note delle lezioni e i video, e per prenotare la prossima sessione:",
   "Set your password": "Imposta la tua password",
   "Share for {name}": "Quota di {name}",
-  "Show this code when you pay and its value comes off the bill.": "Mostra questo codice quando paghi e il suo valore verrà scalato dal conto.",
   "Sign in and open Videos to watch it: {url}": "Accedi e apri Video per guardarlo: {url}",
   "Someone": "Qualcuno",
   "Someone asked to reset the password for your {business} player portal.": "Qualcuno ha chiesto di reimpostare la password del tuo portale giocatore di {business}.",
@@ -222,7 +221,12 @@ const catalog: Record<string, string> = {
   "Shipping": "Spedizione",
   "Order from {businessName}": "Ordine da {businessName}",
   "We will post it to:": "Lo spediremo a:",
-  "Your downloads:": "I tuoi download:"
+  "Your downloads:": "I tuoi download:",
+  "Your gift voucher from {{business}}": "Il tuo buono regalo da {{business}}",
+  "Here's your gift voucher": "Ecco il tuo buono regalo",
+  "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "Grazie {{firstName}}. Ecco il tuo buono regalo per {{recipient}}. Mostra il codice quando paghi e il suo valore verrà scalato dal conto.",
+  "Thanks, {{business}}": "Grazie, {{business}}",
+  "Your gift card is attached, ready to print or pass on.": "In allegato trovi il tuo biglietto regalo, pronto da stampare o da regalare."
 };
 
 export default catalog;

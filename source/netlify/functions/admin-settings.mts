@@ -10,6 +10,7 @@ import {
   DEFAULT_MAP_LINK_LABEL,
   parseNotificationTemplates,
 } from "./_shared/notification-templates.mts";
+import { cleanGiftCardDesign, GIFT_CARD_SETTING, parseGiftCardDesign } from "./_shared/gift-card.mts";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
@@ -169,6 +170,9 @@ async function readAdminSettings(accountId: string) {
     sendAdminSms: settings.sendAdminSms === "true",
     notificationTemplates: parseNotificationTemplates(settings.notificationTemplatesJson),
     mapLinkLabel: cleanString(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL,
+    // The card a voucher bought online is printed on. Edited beside the gift
+    // voucher email in Templates, so it saves with them.
+    giftCardDesign: parseGiftCardDesign(settings[GIFT_CARD_SETTING]),
     // The player portal's slot for someone else's booking widget. Flattened
     // into this object rather than nested, so it saves through the same PUT as
     // everything else on the Settings screen.
@@ -220,6 +224,9 @@ async function writeAdminSettings(accountId: string, settings: any) {
   }
   if (hasOwn(settings, "mapLinkLabel")) {
     stage("mapLinkLabel", cleanString(settings?.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL);
+  }
+  if (hasOwn(settings, "giftCardDesign")) {
+    stage(GIFT_CARD_SETTING, JSON.stringify(cleanGiftCardDesign(settings?.giftCardDesign)));
   }
   // Written key by key like everything above rather than in a loop: the
   // "every setting the API accepts is editable somewhere" test in

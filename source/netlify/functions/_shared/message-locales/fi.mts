@@ -141,7 +141,6 @@ const catalog: Record<string, string> = {
   "Set a password to see your lessons, lesson notes and videos, and to book your next session:": "Aseta salasana, niin näet tuntisi, tuntimuistiinpanosi ja videosi ja voit varata seuraavan tuntisi:",
   "Set your password": "Aseta salasana",
   "Share for {name}": "Osuus: {name}",
-  "Show this code when you pay and its value comes off the bill.": "Näytä tämä koodi maksaessasi, niin sen arvo vähennetään laskusta.",
   "Sign in and open Videos to watch it: {url}": "Kirjaudu sisään ja avaa Videot katsoaksesi sen: {url}",
   "Someone": "Joku",
   "Someone asked to reset the password for your {business} player portal.": "Joku pyysi vaihtamaan salasanan {business}-pelaajaportaaliisi.",
@@ -222,7 +221,12 @@ const catalog: Record<string, string> = {
   "Shipping": "Toimitus",
   "Order from {businessName}": "Tilaus: {businessName}",
   "We will post it to:": "Postitamme sen osoitteeseen:",
-  "Your downloads:": "Latauksesi:"
+  "Your downloads:": "Latauksesi:",
+  "Your gift voucher from {{business}}": "Lahjakorttisi: {{business}}",
+  "Here's your gift voucher": "Tässä on lahjakorttisi",
+  "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "Kiitos, {{firstName}}. Tässä on lahjakorttisi saajalle {{recipient}}. Näytä koodi maksaessasi, niin sen arvo vähennetään laskusta.",
+  "Thanks, {{business}}": "Kiitos, {{business}}",
+  "Your gift card is attached, ready to print or pass on.": "Lahjakorttisi on liitteenä valmiina tulostettavaksi tai annettavaksi eteenpäin."
 };
 
 export default catalog;

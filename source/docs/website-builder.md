@@ -64,6 +64,20 @@ once; the address is kept on the sale (Billing › Sales shows it) and the
 business is emailed the order to post or have ready. In "embed" mode
 Clarity's own shop page is framed instead.
 
+The buyer is emailed a receipt too. When the order has a voucher in it,
+that email is the "Gift voucher" template under Settings › Templates
+(subject, headline, message and sign-off are the coach's; the codes and
+receipt are filled in). Beside it is the gift card designer: the coach
+uploads artwork (kept as JPEG or PNG, which is all a PDF takes) and drags
+the recipient's name, the code and the value onto it. Each order's cards
+are then made as one PDF, a page per voucher, and attached
+(`_shared/gift-card-pdf.mts`). No artwork, no attachment; the codes are in
+the email either way.
+
+Product pictures and the gift card artwork share the site's bucket, so the
+sweep that tidies the bucket after a site save keeps them as well as the
+pictures on pages (`siteImageUrlsInUse`).
+
 The block's inspector is where the coach edits the shop: the switch that
 opens it, the shipping fee, what is on the shelf with prices, and why it is
 closed if it is (no card payments, nothing for sale). Prices and contents

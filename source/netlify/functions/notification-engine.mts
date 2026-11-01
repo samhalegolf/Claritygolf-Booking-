@@ -12,6 +12,7 @@ const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
 import {
   DEFAULT_MAP_LINK_LABEL,
+  fillMergeFields,
   notificationVariantFor,
   parseNotificationTemplates,
 } from "./_shared/notification-templates.mts";
@@ -146,10 +147,6 @@ function escapeHtml(value: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function render(template: string, variables: Record<string, string>) {
-  return String(template || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => variables[key] ?? "");
 }
 
 function supabaseConfig() {
@@ -745,7 +742,7 @@ function clientText(
   variables: Record<string, string>,
 ) {
   const written = settings.notificationTemplates?.[variant]?.[field];
-  if (typeof written === "string" && written.trim()) return render(written, variables);
+  if (typeof written === "string" && written.trim()) return fillMergeFields(written, variables);
 
   for (const legacy of Object.values(LEGACY_CLIENT_WORDING)) {
     if (legacy.variant !== variant || legacy.field !== field) continue;
@@ -755,10 +752,10 @@ function clientText(
     // lesson, which the Manage/Reschedule button does better. Only legacy
     // values are screened - wording typed into the new editor is the coach's.
     if (legacy.field === "signoff" && LEGACY_CHANGE_FOOTER.test(value)) continue;
-    return render(value, variables);
+    return fillMergeFields(value, variables);
   }
 
-  return render(notificationTemplateText(settings.notificationTemplates, variant, field, settings.messageLanguage), variables);
+  return fillMergeFields(notificationTemplateText(settings.notificationTemplates, variant, field, settings.messageLanguage), variables);
 }
 
 function templateSubjects(
@@ -769,23 +766,23 @@ function templateSubjects(
 ) {
   const mt = messageText(settings.messageLanguage);
   const sharedSubjectTemplate = cleanString(settings.notificationSubjectLine, "", 180);
-  const sharedSubject = sharedSubjectTemplate.trim() ? render(sharedSubjectTemplate, variables) : "";
+  const sharedSubject = sharedSubjectTemplate.trim() ? fillMergeFields(sharedSubjectTemplate, variables) : "";
   if (sharedSubject) return { client: sharedSubject, admin: sharedSubject };
 
   // The admin/coach copy is an internal alert and has no template of its own -
   // a coach writes what their clients read, not what their own inbox says.
   const admin =
     action === "rescheduled"
-      ? render(settings.rescheduleAdminSubject, variables)
+      ? fillMergeFields(settings.rescheduleAdminSubject, variables)
       : action === "cancelled"
-        ? render(settings.cancellationAdminSubject, variables)
+        ? fillMergeFields(settings.cancellationAdminSubject, variables)
         : action === "updated"
-          ? render(settings.updateAdminSubject, variables)
+          ? fillMergeFields(settings.updateAdminSubject, variables)
           : action === "reminder"
             ? mt("Reminder: {client}", { client: variables.client })
             : action === "test"
               ? mt("Clarity Golf booking email test")
-              : render(settings.adminEmailSubject, variables);
+              : fillMergeFields(settings.adminEmailSubject, variables);
 
   if (action === "test") return { client: mt("Clarity Golf booking email test"), admin };
   return { client: clientText(variant, "subject", settings, variables), admin };
@@ -915,7 +912,7 @@ function bodyFor(
         [mt("Where"), variables.venue],
         [mt("Booking ID"), appt.id],
       ];
-  const intro = isClient ? clientIntro(action, variant, settings, variables) : render(settings.adminEmailIntro, variables);
+  const intro = isClient ? clientIntro(action, variant, settings, variables) : fillMergeFields(settings.adminEmailIntro, variables);
   const footer = isClient
     ? clientFooter(action, variant, settings, variables)
     : channel === "coach"
