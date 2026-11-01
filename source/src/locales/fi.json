@@ -5133,5 +5133,7 @@
   "Picture beside text": "Kuva tekstin vieressä",
   "Picture shape": "Kuvan muoto",
   "As it is": "Sellaisenaan",
-  "Rounded corners": "Pyöristetyt kulmat"
+  "Rounded corners": "Pyöristetyt kulmat",
+  "Inside {page}": "Sivulla {page}",
+  "{count} inside": "{count} sisällä"
 }

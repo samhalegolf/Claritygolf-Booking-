@@ -5133,5 +5133,7 @@
   "Picture beside text": "テキストの横に画像",
   "Picture shape": "画像の形",
   "As it is": "そのまま",
-  "Rounded corners": "角丸"
+  "Rounded corners": "角丸",
+  "Inside {page}": "{page} の中",
+  "{count} inside": "{count} 件を含む"
 }

@@ -636,6 +636,27 @@
   color: var(--c-text);
 }
 
+/* The pages inside the page being edited, on a row of their own under the menu's pages. */
+.site-pages-strip.is-inside {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--c-border);
+}
+
+.site-pages-inside-label {
+  align-self: center;
+  font-size: 12px;
+  color: var(--c-text-soft);
+}
+
+.site-outline-list.is-inside {
+  margin: 0 0 4px 14px;
+}
+
+.site-outline-list.is-inside strong {
+  font-weight: 500;
+}
+
 .site-outline-title {
   margin: 10px 0 2px 10px;
   font-size: 12px;

@@ -23,6 +23,8 @@ import {
   pageHref,
   pageSlugFromHref,
   sitePageCard,
+  sitePageParent,
+  sitePageTree,
   sitePageImageUrls,
   siteYoutubeId,
   themeFromPreset,
@@ -125,6 +127,34 @@ test("pictures are https only, and a block keeps its button while it still has a
   assert.deepEqual(content.blocks[2].type === "cta" && content.blocks[2].button, { label: "Book", href: "", style: "primary" });
   assert.equal(content.blocks[3].type === "cta" && content.blocks[3].button, null);
   assert.deepEqual(sitePageImageUrls(content), ["https://cdn.example.com/a.jpg"]);
+});
+
+test("pages sit inside the nearest page up their address, in a tree that keeps their order", () => {
+  const pages = [
+    { slug: "home", kind: "page" as const },
+    { slug: "articles/late", kind: "article" as const },
+    { slug: "articles", kind: "page" as const, content: { blocks: [{ type: "articles" }] } },
+    { slug: "videos", kind: "page" as const, content: { blocks: [{ type: "videos" }] } },
+    { slug: "videos/v/flow", kind: "video" as const },
+    { slug: "videos/v/flow/extra", kind: "page" as const },
+    { slug: "loose/one", kind: "page" as const },
+    { slug: "made-here", kind: "article" as const },
+    { slug: "a-clip", kind: "video" as const, content: { blocks: [{ type: "videos" }] } },
+  ];
+  assert.equal(sitePageParent(pages[1], pages)?.slug, "articles");
+  assert.equal(sitePageParent(pages[4], pages)?.slug, "videos", "a segment with no page of its own is skipped");
+  assert.equal(sitePageParent(pages[6], pages), null, "no page up the address: at the top");
+  assert.equal(sitePageParent(pages[7], pages)?.slug, "articles", "an article made at the top sits in the page that lists articles");
+  assert.deepEqual(
+    sitePageTree(pages).map((group) => [group.page.slug, group.inside.map((page) => page.slug)]),
+    [
+      ["home", []],
+      ["articles", ["articles/late", "made-here"]],
+      ["videos", ["videos/v/flow", "videos/v/flow/extra", "a-clip"]],
+      ["loose/one", []],
+    ],
+    "every page inside a top page is under it, however deep; only a plain page can hold others",
+  );
 });
 
 test("a theme's heading colour defaults to its text colour, and a preset may pick its accent", () => {

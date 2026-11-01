@@ -5133,5 +5133,7 @@
   "Picture beside text": "Immagine accanto al testo",
   "Picture shape": "Forma dell'immagine",
   "As it is": "Com'è",
-  "Rounded corners": "Angoli arrotondati"
+  "Rounded corners": "Angoli arrotondati",
+  "Inside {page}": "Dentro {page}",
+  "{count} inside": "{count} all'interno"
 }

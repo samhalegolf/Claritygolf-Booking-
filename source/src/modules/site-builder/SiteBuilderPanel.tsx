@@ -21,6 +21,8 @@ import {
   googleFontsUrl,
   newSiteBlock,
   sitePageCard,
+  sitePageParent,
+  sitePageTree,
   uniquePageSlug,
   type SiteBlock,
   type SiteBlockType,
@@ -287,7 +289,10 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     const preset = SITE_PAGE_PRESETS.find((candidate) => candidate.id === presetId);
     if (!preset) return;
     const built = preset.build(presetInput);
-    const slug = uniquePageSlug(built.slug, draft.pages.map((page) => page.slug));
+    // A new article or video lives under the page that lists it ("articles/new-article"), like one brought over from an old site.
+    const lists = built.kind === "article" ? "articles" : built.kind === "video" ? "videos" : "";
+    const index = lists ? draft.pages.find((page) => page.kind === "page" && page.content.blocks.some((block) => block.type === lists)) : null;
+    const slug = uniquePageSlug(index ? `${index.slug}/${built.slug}` : built.slug, draft.pages.map((page) => page.slug));
     const page: SitePage = { ...built, slug, id: "", sortOrder: draft.pages.length };
     update({ ...draft, pages: [...draft.pages, page] });
     setCurrentSlug(slug);
@@ -310,15 +315,24 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     setSelected("page");
   }
 
+  /** The pages beside a page: those inside the same page, or at the top with it. Home stays first at the top: it is the page the domain lands on. */
+  const siblingsOf = (page: SitePage): { siblings: SitePage[]; at: number; first: number } => {
+    const pages = draft?.pages || [];
+    const parent = sitePageParent(page, pages);
+    const siblings = pages.filter((candidate) => sitePageParent(candidate, pages) === parent);
+    return { siblings, at: siblings.indexOf(page), first: parent ? 0 : 1 };
+  };
+
+  /** Move a page one place among the pages beside it; a page inside another never leaves it. */
   function movePage(slug: string, delta: number) {
     if (!draft) return;
-    const index = draft.pages.findIndex((page) => page.slug === slug);
-    const target = index + delta;
-    // Home stays first: it is the page the domain lands on.
-    if (index < 1 || target < 1 || target >= draft.pages.length) return;
-    const pages = [...draft.pages];
-    const [page] = pages.splice(index, 1);
-    pages.splice(target, 0, page);
+    const page = draft.pages.find((candidate) => candidate.slug === slug);
+    if (!page) return;
+    const { siblings, at, first } = siblingsOf(page);
+    const target = at + delta;
+    if (at < first || target < first || target >= siblings.length) return;
+    const pages = draft.pages.filter((candidate) => candidate !== page);
+    pages.splice(pages.indexOf(siblings[target]) + (delta > 0 ? 1 : 0), 0, page);
     update({ ...draft, pages: pages.map((candidate, order) => ({ ...candidate, sortOrder: order })) });
   }
 
@@ -485,28 +499,76 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     </button>
   );
 
-  const pageStrip = draft ? (
-    <div className="site-pages-strip" role="tablist" aria-label={t("Pages")}>
-      {draft.pages.map((page) => (
+  // The pages at the top, each with the pages inside it (articles under
+  // Articles, videos under the video library), so the list stays the menu.
+  const pageTree = useMemo(() => (draft ? sitePageTree(draft.pages) : []), [draft]);
+  const currentGroup = currentPage ? pageTree.find((group) => group.page === currentPage || group.inside.includes(currentPage)) || null : null;
+
+  const pageTab = (page: SitePage) => (
+    <button
+      type="button"
+      role="tab"
+      key={page.slug}
+      aria-selected={page.slug === currentPage?.slug}
+      className={`site-page-tab${page.slug === currentPage?.slug ? " is-active" : ""}${page.inNav ? "" : " is-hidden"}`}
+      onClick={() => {
+        setCurrentSlug(page.slug);
+        if (typeof selected === "object") setSelected("page");
+      }}
+    >
+      {page.title || page.slug}
+    </button>
+  );
+
+  /** One page in the outline: its title, a note (what kind it is, or how many pages it holds), and its move buttons. */
+  const pageRow = (page: SitePage, note: string) => {
+    const { siblings, at, first } = siblingsOf(page);
+    const kind = !page.inNav ? (page.kind === "article" ? t("Article") : page.kind === "video" ? t("Video") : t("Not in the menu")) : "";
+    return (
+      <div key={page.slug} className={`site-outline-row${page.slug === currentPage?.slug ? " is-current" : ""}`}>
         <button
           type="button"
-          role="tab"
-          key={page.slug}
-          aria-selected={page.slug === currentPage?.slug}
-          className={`site-page-tab${page.slug === currentPage?.slug ? " is-active" : ""}${page.inNav ? "" : " is-hidden"}`}
+          className="site-outline-main"
           onClick={() => {
             setCurrentSlug(page.slug);
-            if (typeof selected === "object") setSelected("page");
+            setSelected("page");
           }}
         >
-          {page.title || page.slug}
+          <span>
+            <strong>{page.title || page.slug}</strong>
+            {note || kind ? <em>{[kind, note].filter(Boolean).join(" · ")}</em> : null}
+          </span>
         </button>
-      ))}
-      <button type="button" className="site-page-tab is-add" onClick={() => setChoosingPage(true)}>
-        <FilePlus size={15} />
-        {t("Add page")}
-      </button>
-    </div>
+        {page.slug !== HOME_PAGE_SLUG ? (
+          <span className="site-outline-actions">
+            <button type="button" className="icon-button" aria-label={t("Move up")} disabled={at <= first} onClick={() => movePage(page.slug, -1)}>
+              <ArrowUp size={14} />
+            </button>
+            <button type="button" className="icon-button" aria-label={t("Move down")} disabled={at >= siblings.length - 1} onClick={() => movePage(page.slug, 1)}>
+              <ArrowDown size={14} />
+            </button>
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
+  const pageStrip = draft ? (
+    <>
+      <div className="site-pages-strip" role="tablist" aria-label={t("Pages")}>
+        {pageTree.map((group) => pageTab(group.page))}
+        <button type="button" className="site-page-tab is-add" onClick={() => setChoosingPage(true)}>
+          <FilePlus size={15} />
+          {t("Add page")}
+        </button>
+      </div>
+      {currentGroup && currentGroup.inside.length ? (
+        <div className="site-pages-strip is-inside" role="tablist" aria-label={t("Inside {page}", { page: currentGroup.page.title || currentGroup.page.slug })}>
+          <span className="site-pages-inside-label">{t("Inside {page}", { page: currentGroup.page.title || currentGroup.page.slug })}</span>
+          {currentGroup.inside.map(pageTab)}
+        </div>
+      ) : null}
+    </>
   ) : null;
 
   const preview = currentPage ? (
@@ -567,33 +629,13 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
               <aside className="site-outline" aria-label={t("Pages and blocks")}>
                 <h4 className="site-outline-title">{t("Pages")}</h4>
                 <ol className="site-outline-list">
-                  {draft.pages.map((page, index) => {
-                    const isCurrent = page.slug === currentPage.slug;
+                  {pageTree.map((group) => {
+                    // The pages inside a page are listed only under the one being edited; the rest show how many they hold.
+                    const open = group === currentGroup && group.inside.length > 0;
                     return (
-                      <li key={page.slug} className={`site-outline-row${isCurrent ? " is-current" : ""}`}>
-                        <button
-                          type="button"
-                          className="site-outline-main"
-                          onClick={() => {
-                            setCurrentSlug(page.slug);
-                            setSelected("page");
-                          }}
-                        >
-                          <span>
-                            <strong>{page.title || page.slug}</strong>
-                            {!page.inNav ? <em>{page.kind === "article" ? t("Article") : page.kind === "video" ? t("Video") : t("Not in the menu")}</em> : null}
-                          </span>
-                        </button>
-                        {page.slug !== HOME_PAGE_SLUG ? (
-                          <span className="site-outline-actions">
-                            <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index <= 1} onClick={() => movePage(page.slug, -1)}>
-                              <ArrowUp size={14} />
-                            </button>
-                            <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === draft.pages.length - 1} onClick={() => movePage(page.slug, 1)}>
-                              <ArrowDown size={14} />
-                            </button>
-                          </span>
-                        ) : null}
+                      <li key={group.page.slug}>
+                        {pageRow(group.page, open ? "" : group.inside.length ? t("{count} inside", { count: group.inside.length }) : "")}
+                        {open ? <ol className="site-outline-list is-inside">{group.inside.map((page) => pageRow(page, ""))}</ol> : null}
                       </li>
                     );
                   })}

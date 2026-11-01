@@ -5133,5 +5133,7 @@
   "Picture beside text": "Bilde ved siden av teksten",
   "Picture shape": "Bildeform",
   "As it is": "Som det er",
-  "Rounded corners": "Avrundede hjørner"
+  "Rounded corners": "Avrundede hjørner",
+  "Inside {page}": "Inne i {page}",
+  "{count} inside": "{count} inni"
 }
