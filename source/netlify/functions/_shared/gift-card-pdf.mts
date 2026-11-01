@@ -107,7 +107,7 @@ export async function buildGiftCardPdf(design: GiftCardDesign, image: Uint8Array
     if (!fonts.has(name)) fonts.set(name, await pdf.embedFont(name));
     return fonts.get(name)!;
   };
-  for (const card of cards.length ? cards : [{ name: "", code: "", value: "" }]) {
+  for (const card of cards.length ? cards : [{ name: "", item: "", code: "", value: "" }]) {
     const page = pdf.addPage([width, height]);
     page.drawImage(artwork, { x: 0, y: 0, width, height });
     for (const id of GIFT_CARD_FIELDS) {

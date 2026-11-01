@@ -40,7 +40,8 @@ import {
 import { usePhoneLayout } from "../phone/phoneLayout";
 import { PhoneStepSwipe } from "../phone/PhoneStepSwipe";
 import type { BillingCatalogItem, BillingCatalogKind, BillingCoupon, PosPaymentMethod, PosTransaction } from "./types";
-import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
+import { remainingAfterCoupon } from "./couponMath";
+import { canHoldCredit, voucherRedemption, voucherSaleLines } from "../../../netlify/functions/_shared/voucher-redemption.mts";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
 import { tillLessonGroups, tillLessonIsUpcoming, tillLessonWhen } from "./tillLessons";
@@ -224,8 +225,13 @@ export function SellScreen({
   const itemCount = lines.reduce((count, line) => count + line.quantity, 0);
   const selectedMethod = methods.find((method) => method.id === methodId) || null;
   // Capped by the balance and by the sale: a $100 voucher against a $40 sale
-  // spends $40 and keeps $60, it does not hand out change.
-  const couponAmount = coupon ? couponApplyAmount(coupon, total) : 0;
+  // spends $40 and keeps $60, it does not hand out change. A voucher for a
+  // lesson or product in the basket pays for it at today's price instead. The
+  // server decides the same way when the sale is recorded.
+  const redemption = coupon
+    ? voucherRedemption(coupon, voucherSaleLines(lines.filter((line) => line.productId)), total, { hasClient: canHoldCredit(customerId) })
+    : null;
+  const couponAmount = redemption?.pays ?? 0;
   const couponCovers = Boolean(coupon) && couponAmount > 0 && couponAmount >= total;
   // Only credit that has been put down counts against what is owed. A held
   // voucher is shown, not subtracted.
@@ -1023,7 +1029,7 @@ export function SellScreen({
         <CouponPicker
           book={couponBook}
           held={coupon}
-          applyAmount={couponAmount}
+          redemption={redemption}
           applied={couponApplied}
           clientNames={clientNames}
           formatMoney={formatMoney}

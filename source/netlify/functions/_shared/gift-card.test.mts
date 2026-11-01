@@ -14,7 +14,13 @@ const WEBP = Uint8Array.from(Buffer.from("RIFF\0\0\0\0WEBPVP8 ", "latin1"));
 test("a fresh design has no picture and every field on the card", () => {
   const design = defaultGiftCardDesign();
   assert.equal(design.imageUrl, "");
-  assert.ok(design.fields.name.show && design.fields.code.show && design.fields.value.show);
+  assert.ok(design.fields.name.show && design.fields.item.show && design.fields.code.show && design.fields.value.show);
+});
+
+test("a design saved before 'what it's for' existed gains the field in its default place", () => {
+  const design = parseGiftCardDesign(JSON.stringify({ imageUrl: "https://storage.example/a.png", fields: { name: { x: 0.2 } } }));
+  assert.deepEqual(design.fields.item, defaultGiftCardDesign().fields.item);
+  assert.equal(design.fields.name.x, 0.2);
 });
 
 test("cleaning keeps what makes sense and puts the rest back to the default", () => {
@@ -59,8 +65,8 @@ test("the picture's type is read from its bytes, and only PNG and JPEG are taken
 test("one page per voucher, shaped like the artwork", async () => {
   const design = cleanGiftCardDesign({ imageUrl: "https://storage.example/a.png" });
   const bytes = await buildGiftCardPdf(design, PNG, [
-    { name: "Ana", code: "CG-AAAA-BBBB", value: "$50.00" },
-    { name: "Ben", code: "CG-CCCC-DDDD", value: "$100.00" },
+    { name: "Ana", item: "", code: "CG-AAAA-BBBB", value: "$50.00" },
+    { name: "Ben", item: "1 hour lesson", code: "CG-CCCC-DDDD", value: "" },
   ]);
   const pdf = await PDFDocument.load(bytes);
   assert.equal(pdf.getPageCount(), 2);
@@ -72,15 +78,15 @@ test("one page per voucher, shaped like the artwork", async () => {
 test("a name the built-in fonts cannot spell, or one far too long, still makes a card", async () => {
   const design = cleanGiftCardDesign({ imageUrl: "https://storage.example/a.png", fields: { name: { x: 0.95, align: "center" } } });
   const bytes = await buildGiftCardPdf(design, PNG, [
-    { name: "Łukasz 山田 Zoë", code: "CG-EEEE-FFFF", value: "€20" },
-    { name: "A".repeat(140), code: "CG-GGGG-HHHH", value: "$20" },
+    { name: "Łukasz 山田 Zoë", item: "", code: "CG-EEEE-FFFF", value: "€20" },
+    { name: "A".repeat(140), item: "", code: "CG-GGGG-HHHH", value: "$20" },
   ]);
   assert.equal((await PDFDocument.load(bytes)).getPageCount(), 2);
 });
 
 test("a picture the PDF cannot hold is refused, not half-drawn", async () => {
   await assert.rejects(
-    () => buildGiftCardPdf(defaultGiftCardDesign(), WEBP, [{ name: "Ana", code: "CG-AAAA-BBBB", value: "$5" }]),
+    () => buildGiftCardPdf(defaultGiftCardDesign(), WEBP, [{ name: "Ana", item: "", code: "CG-AAAA-BBBB", value: "$5" }]),
     /PNG or JPEG/,
   );
 });

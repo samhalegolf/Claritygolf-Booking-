@@ -79,6 +79,12 @@ export type BillingCatalogItem = {
   lowStock?: boolean;
   // Selling this issues a gift voucher rather than just taking money.
   isVoucher?: boolean;
+  // A voucher product's vouchers: for an amount (voucherItemId ""), or for a
+  // lesson type or product by its catalog id; whether the gift card shows the
+  // value; and how many months they last (0: they don't expire).
+  voucherItemId?: string;
+  voucherShowsValue?: boolean;
+  voucherExpiryMonths?: number;
   // The website's shop: on the shelf, how it reaches the buyer, its picture,
   // its download and its options (sizes, packs). A variant priced null sells
   // at the product's own price.
@@ -502,6 +508,14 @@ export type BillingCoupon = {
   issuedToName: string;
   issuedToEmail: string;
   customerId: string;
+  // "credit": the client's account credit, not a voucher.
+  kind?: "voucher" | "credit";
+  // A voucher for a lesson type or product rather than an amount: which, and
+  // its name when the voucher was issued. While unspent, it pays for that item
+  // at any price (netlify/functions/_shared/voucher-redemption.mts).
+  coversItemId?: string;
+  coversItemName?: string;
+  showsValue?: boolean;
   source: CouponSource;
   productId: string;
   sourceLineId: string;

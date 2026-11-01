@@ -51,6 +51,7 @@ import { buildGiftCardPdf } from "./_shared/gift-card-pdf.mts";
 import { fillMergeFields, parseNotificationTemplates, type GiftVoucherMergeField } from "./_shared/notification-templates.mts";
 import { notificationTemplateText } from "./_shared/notification-template-text.mts";
 import { siteMediaPathFromUrl } from "./_shared/site/media.mts";
+import { canHoldCredit, voucherRedemption, voucherSaleLines } from "./_shared/voucher-redemption.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
@@ -258,6 +259,14 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     low_stock_threshold: Math.round(cleanNumber(raw?.lowStockThreshold, 0, { min: 0, max: 1e6 })),
     // Selling one of these issues a coupon rather than just taking money.
     is_voucher: raw?.isVoucher === true,
+    // What its vouchers are for: an amount (null), or a lesson type or product
+    // by its till id. See the vouchers_for_items migration.
+    voucher_item_id: raw?.isVoucher === true ? cleanString(raw?.voucherItemId, "", 160) || null : null,
+    voucher_shows_value: raw?.voucherShowsValue !== false,
+    voucher_expiry_months: (() => {
+      const months = Math.round(cleanNumber(raw?.voucherExpiryMonths, 0, { min: 0, max: 120 }));
+      return raw?.isVoucher === true && months > 0 ? months : null;
+    })(),
     // The website's shop. A voucher is on it by being a voucher; this is for goods.
     sell_online: raw?.sellOnline === true,
     fulfilment: cleanFulfilment(raw?.fulfilment),
@@ -300,6 +309,9 @@ function productRowToApi(row: Record<string, unknown>) {
     // 0 means "don't warn me", so only out-of-stock counts.
     lowStock: trackStock && (stockLevel <= 0 || (lowStockThreshold > 0 && stockLevel <= lowStockThreshold)),
     isVoucher: row.is_voucher === true,
+    voucherItemId: String(row.voucher_item_id ?? ""),
+    voucherShowsValue: row.voucher_shows_value !== false,
+    voucherExpiryMonths: Number(row.voucher_expiry_months) || 0,
     sellOnline: row.sell_online === true,
     fulfilment: cleanFulfilment(row.fulfilment),
     imageUrl: String(row.image_url || ""),
@@ -4115,13 +4127,61 @@ async function couponsForSale(accountId: string, transactionId: string) {
   return rows.map(couponRowToApi);
 }
 
+/**
+ * Put what a lesson voucher had left over after paying for its lesson onto the
+ * client's account credit, and note it on the sale so a refund can take it
+ * back. Should the credit not take, the surplus goes back on the voucher
+ * instead: it is the customer's money either way, and must land somewhere.
+ */
+async function creditVoucherSurplus(accountId: string, row: Record<string, unknown>, couponId: string, surplus: number) {
+  const saleId = String(row.id ?? "");
+  try {
+    const credit = await addAccountCredit(accountId, String(row.customer_id ?? ""), surplus, String(row.currency ?? ""), String(row.customer_name ?? ""));
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(saleId)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: { credit_coupon_id: credit.id, credit_amount: surplus, updated_at: nowIso() },
+      prefer: "return=minimal",
+    });
+    row.credit_coupon_id = credit.id;
+    row.credit_amount = surplus;
+    await writeCouponRedemption(accountId, credit.id, {
+      amount: -surplus,
+      resultingBalance: credit.balance,
+      posTransactionId: saleId,
+      note: `${row.receipt_number ?? ""} voucher surplus`.trim(),
+    });
+  } catch (error) {
+    console.error("billing_api:voucher_surplus_credit_failed", accountId, saleId, error);
+    const balance = await restoreCouponValue(accountId, couponId, surplus).catch(() => null);
+    if (balance === null) return;
+    const used = round2(Number(row.coupon_value_used) - surplus);
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(saleId)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: { coupon_value_used: used, updated_at: nowIso() },
+      prefer: "return=minimal",
+    });
+    row.coupon_value_used = used;
+    await writeCouponRedemption(accountId, couponId, {
+      amount: -surplus,
+      resultingBalance: balance,
+      posTransactionId: saleId,
+      note: `${row.receipt_number ?? ""} surplus left on the voucher`.trim(),
+    });
+  }
+}
+
 // Refunding or voiding a sale puts the voucher value back; re-paying it takes
 // it off again. Guarded by coupon_reversed with the same compare-and-swap as
 // stock_applied, so each hop moves the balance exactly once however many times
 // the status is flipped.
 async function syncPosCoupon(accountId: string, row: Record<string, unknown>, status: string) {
   const couponId = cleanString(row?.coupon_id, "", 160);
-  const amount = round2(Number(row?.coupon_amount) || 0);
+  // What the sale took off the voucher. Older sales did not record it apart
+  // from coupon_amount because the two were always the same.
+  const used = row?.coupon_value_used;
+  const amount = round2(Number(used === null || used === undefined || used === "" ? row?.coupon_amount : used) || 0);
   if (!couponId || amount <= 0) return;
 
   const shouldReverse = status !== "paid";
@@ -4160,6 +4220,34 @@ async function syncPosCoupon(accountId: string, row: Record<string, unknown>, st
     posTransactionId: String(row.id ?? ""),
     note: `${row.receipt_number ?? ""} ${status}`.trim(),
   });
+
+  // A lesson voucher's surplus went to the client's credit with this sale, so
+  // it moves with the voucher: back off the credit on a refund (what is left of
+  // it -- credit already spent stays spent), on again if the sale is re-paid.
+  const creditId = cleanString(row?.credit_coupon_id, "", 160);
+  const creditAmount = round2(Number(row?.credit_amount) || 0);
+  const customerId = cleanString(row?.customer_id, "", 160);
+  if (!creditId || creditAmount <= 0) return;
+  if (shouldReverse) {
+    const taken = await takeBackAccountCredit(accountId, creditId, creditAmount);
+    if (taken < creditAmount) console.warn("billing_api:credit_already_spent", accountId, String(row.id ?? ""), creditAmount - taken);
+    if (taken > 0) {
+      await writeCouponRedemption(accountId, creditId, {
+        amount: taken,
+        resultingBalance: null,
+        posTransactionId: String(row.id ?? ""),
+        note: `${row.receipt_number ?? ""} ${status}`.trim(),
+      });
+    }
+  } else if (canHoldCredit(customerId)) {
+    const credit = await addAccountCredit(accountId, customerId, creditAmount, String(row.currency ?? ""), String(row.customer_name ?? ""));
+    await writeCouponRedemption(accountId, credit.id, {
+      amount: -creditAmount,
+      resultingBalance: credit.balance,
+      posTransactionId: String(row.id ?? ""),
+      note: `${row.receipt_number ?? ""} ${status}`.trim(),
+    });
+  }
 }
 
 /** What only the server may say about a sale: the till cannot ring one up as "online". */
@@ -4239,15 +4327,30 @@ export async function createPosTransaction(
   // rather than a receipt that has to be unpicked.
   const couponId = cleanString(body?.couponId, "", 160);
   let couponAmount = 0;
+  // What comes off the voucher. The same as couponAmount, except for a voucher
+  // paying for the lesson or product it is for (_shared/voucher-redemption.mts).
+  let couponValueUsed = 0;
+  // A lesson voucher worth more than the lesson: the rest, for the client's credit.
+  let surplusToCredit = 0;
   let couponBalance: number | null = null;
   if (settledByCoupon && !couponId) {
     throw Object.assign(new Error("Choose a coupon to pay with."), { status: 400, code: "COUPON_REQUIRED" });
   }
   if (couponId) {
+    const voucher = await couponRowById(accountId, couponId);
+    if (!voucher) throw Object.assign(new Error("That coupon was not found."), { status: 404, code: "COUPON_NOT_FOUND" });
     const requested = round2(cleanNumber(body?.couponAmount, 0, { min: 0 }));
-    couponAmount = Math.min(requested > 0 ? requested : amount, amount);
+    const redemption = voucherRedemption(
+      couponRowToApi(voucher),
+      voucherSaleLines(items, { serviceId: cleanString(body?.serviceId, "", 120), saleTotal: amount }),
+      amount,
+      { requested: requested > 0 ? requested : undefined, hasClient: canHoldCredit(customerId) },
+    );
+    couponAmount = redemption.pays;
+    couponValueUsed = redemption.takes;
+    surplusToCredit = redemption.credit;
     if (couponAmount <= 0) {
-      throw Object.assign(new Error("The coupon amount must be greater than zero."), { status: 400 });
+      throw Object.assign(new Error("That coupon can no longer cover this sale."), { status: 409, code: "COUPON_UNAVAILABLE" });
     }
     if (settledByCoupon && couponAmount < amount) {
       throw Object.assign(
@@ -4255,7 +4358,7 @@ export async function createPosTransaction(
         { status: 400, code: "COUPON_SHORT" },
       );
     }
-    couponBalance = await redeemCouponValue(accountId, couponId, couponAmount);
+    couponBalance = await redeemCouponValue(accountId, couponId, couponValueUsed);
     if (couponBalance === null) {
       throw Object.assign(new Error("That coupon can no longer cover this sale."), {
         status: 409,
@@ -4302,6 +4405,7 @@ export async function createPosTransaction(
     status,
     coupon_id: couponId || null,
     coupon_amount: couponAmount,
+    coupon_value_used: couponId ? couponValueUsed : null,
     payment_method_id: method.id,
     payment_method_name: method.name,
     payment_method_kind: method.kind,
@@ -4351,8 +4455,8 @@ export async function createPosTransaction(
       }
       // The sale is not going to exist, so the value reserved above has to go
       // back on the coupon or it is lost with nothing to show for it.
-      if (couponId && couponAmount > 0) {
-        await restoreCouponValue(accountId, couponId, couponAmount).catch(() => null);
+      if (couponId && couponValueUsed > 0) {
+        await restoreCouponValue(accountId, couponId, couponValueUsed).catch(() => null);
       }
       // Same for the credit. Reversed rather than deleted: the ledger keeps the
       // evidence that it was taken and given back, which is the difference
@@ -4386,13 +4490,16 @@ export async function createPosTransaction(
     }
   }
 
-  if (couponId && couponAmount > 0) {
+  if (couponId && couponValueUsed > 0) {
     await writeCouponRedemption(accountId, couponId, {
-      amount: couponAmount,
+      amount: couponValueUsed,
       resultingBalance: couponBalance,
       posTransactionId: String(row.id),
       note: row.receipt_number,
     });
+  }
+  if (couponId && surplusToCredit > 0 && canHoldCredit(customerId)) {
+    await creditVoucherSurplus(accountId, row, couponId, surplusToCredit);
   }
 
   await insertPosItems(accountId, String(row.id), items);
@@ -4534,8 +4641,11 @@ export async function emailPosReceipt(accountId: string, id: string, body: Recor
         amount: item.lineTotal,
       }))
     : [{ label: transaction.description, amount: transaction.amount }];
+  // Account credit is spent the way a voucher is, but the receipt says which.
+  const fromCredit =
+    couponAmount > 0 && transaction.couponId ? (await couponRowById(accountId, transaction.couponId))?.kind === "credit" : false;
   const paymentLines = [
-    couponAmount > 0 ? { label: mt("Paid by gift voucher"), amount: couponAmount } : null,
+    couponAmount > 0 ? { label: fromCredit ? mt("Paid from account credit") : mt("Paid by gift voucher"), amount: couponAmount } : null,
     transaction.paymentMethodKind === "coupon" || (couponAmount > 0 && paidOnMethod <= 0)
       ? null
       : {
@@ -5660,6 +5770,12 @@ function couponRowToApi(row: Record<string, unknown>) {
     issuedToName: String(row.issued_to_name ?? ""),
     issuedToEmail: String(row.issued_to_email ?? ""),
     customerId: String(row.customer_id ?? ""),
+    // 'credit': the client's account credit rather than a voucher.
+    kind: row.kind === "credit" ? ("credit" as const) : ("voucher" as const),
+    // What a voucher is for, when it is for a lesson or product rather than an amount.
+    coversItemId: String(row.covers_item_id ?? ""),
+    coversItemName: String(row.covers_item_name ?? ""),
+    showsValue: row.shows_value !== false,
     source: String(row.source ?? "manual"),
     productId: String(row.product_id ?? ""),
     sourceLineId: String(row.source_line_id ?? ""),
@@ -5704,6 +5820,56 @@ async function insertCouponRow(row: Record<string, unknown>) {
   }
 }
 
+/** The date `months` calendar months after `from`, as an ISO string. The 31st lands on the month's last day. */
+function addMonthsIso(from: Date, months: number) {
+  const date = new Date(from.getTime());
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
+  return date.toISOString();
+}
+
+/**
+ * What a voucher product's vouchers are: for an amount, or for one lesson type
+ * or product (named as it is now, so a card printed today says what was
+ * bought), whether the card shows the value, and how many months they last.
+ * An item that no longer exists makes it an amount voucher: the money is
+ * still owed, and the till could never match it to anything.
+ */
+async function voucherProductTerms(accountId: string, productId: string) {
+  const rows = (await supabase("billing_products_services", {
+    query:
+      `select=voucher_item_id,voucher_shows_value,voucher_expiry_months` +
+      `&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(productId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  const row = rows[0];
+  if (!row) return null;
+  const itemId = cleanString(row.voucher_item_id, "", 160);
+  const itemName = itemId ? await catalogItemName(accountId, itemId) : "";
+  const months = Math.round(Number(row.voucher_expiry_months) || 0);
+  return {
+    itemId: itemName ? itemId : "",
+    itemName,
+    showsValue: !itemName || row.voucher_shows_value !== false,
+    expiryMonths: months > 0 ? months : 0,
+  };
+}
+
+/** A lesson type's or product's name by its till id, or "" when there is no such thing. */
+async function catalogItemName(accountId: string, itemId: string) {
+  if (itemId.startsWith(LESSON_ITEM_PREFIX)) {
+    const serviceId = itemId.slice(LESSON_ITEM_PREFIX.length);
+    const service = (await readServiceList(accountId)).find((entry) => String(entry?.id || "") === serviceId);
+    return cleanString(service?.name, "", 180);
+  }
+  const rows = (await supabase("billing_products_services", {
+    query: `select=name&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(itemId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  return cleanString(rows[0]?.name, "", 180);
+}
+
 async function issueCoupon(
   accountId: string,
   input: {
@@ -5723,6 +5889,9 @@ async function issueCoupon(
 ) {
   const value = round2(cleanNumber(input.value, 0, { min: 0 }));
   if (value <= 0) throw Object.assign(new Error("A coupon needs a value greater than zero."), { status: 400 });
+  // Sold from a voucher product: what that product says its vouchers are for,
+  // whether the card shows the value, and how long they last.
+  const terms = input.productId ? await voucherProductTerms(accountId, input.productId) : null;
 
   const row: Record<string, unknown> = {
     id: randomUUID(),
@@ -5739,7 +5908,14 @@ async function issueCoupon(
     product_id: cleanString(input.productId, "", 160) || null,
     source_line_id: cleanString(input.sourceLineId, "", 200) || null,
     source_invoice_id: cleanString(input.sourceInvoiceId, "", 200) || null,
-    expires_at: input.expiresAt ? new Date(String(input.expiresAt)).toISOString() : null,
+    expires_at: input.expiresAt
+      ? new Date(String(input.expiresAt)).toISOString()
+      : terms?.expiryMonths
+        ? addMonthsIso(new Date(), terms.expiryMonths)
+        : null,
+    covers_item_id: terms?.itemId || null,
+    covers_item_name: terms?.itemName || null,
+    shows_value: terms ? terms.showsValue : true,
     note: cleanString(input.note, "", 400) || null,
     issued_at: nowIso(),
     created_at: nowIso(),
@@ -5850,6 +6026,49 @@ async function redeemCouponValue(accountId: string, couponId: string, amount: nu
   });
   const balance = Array.isArray(result) ? result[0] : result;
   return balance === null || balance === undefined ? null : Number(balance);
+}
+
+async function couponRowById(accountId: string, couponId: string) {
+  const rows = (await supabase("billing_coupons", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(couponId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  return rows[0] || null;
+}
+
+/** Add to a client's account credit, opening it the first time. Returns its id and balance. */
+async function addAccountCredit(accountId: string, customerId: string, amount: number, currency: string, name: string) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const result = (await supabase("rpc/billing_add_account_credit", {
+        method: "POST",
+        body: {
+          p_account_id: accountId,
+          p_customer_id: customerId,
+          p_amount: amount,
+          p_currency: currency,
+          p_id: randomUUID(),
+          p_code: generateCouponCode(),
+          // Shown wherever the credit is listed, as a voucher shows who it is for.
+          p_name: cleanString(name, "", 140),
+        },
+      })) as Array<{ id?: unknown; balance?: unknown }>;
+      const row = Array.isArray(result) ? result[0] : null;
+      if (!row?.id) throw new Error("account credit was not added");
+      return { id: String(row.id), balance: Number(row.balance) || 0 };
+    } catch (error) {
+      // A new credit's code clashing with a voucher's: try another code.
+      if ((error as { supabaseStatus?: number })?.supabaseStatus !== 409 || attempt >= 5) throw error;
+    }
+  }
+}
+
+/** Take credit back after a refund: what is left of it, at most `amount`. Returns what was taken. */
+async function takeBackAccountCredit(accountId: string, couponId: string, amount: number) {
+  const result = await supabase("rpc/billing_take_back_account_credit", {
+    method: "POST",
+    body: { p_account_id: accountId, p_coupon_id: couponId, p_amount: amount },
+  });
+  return Number(Array.isArray(result) ? result[0] : result) || 0;
 }
 
 async function restoreCouponValue(accountId: string, couponId: string, amount: number) {
@@ -7057,8 +7276,10 @@ async function giftCardAttachment(accountId: string, design: GiftCardDesign, cou
     image,
     coupons.map((coupon) => ({
       name: coupon.issuedToName,
+      item: coupon.coversItemName,
       code: coupon.code,
-      value: formatMoney(coupon.originalValue, coupon.currency),
+      // A lesson voucher given as a gift may leave its price off the card.
+      value: coupon.showsValue ? formatMoney(coupon.originalValue, coupon.currency) : "",
     })),
   );
   return {
@@ -7105,7 +7326,10 @@ async function emailOnlineOrder(accountId: string, id: string) {
   const total = formatMoney(row.amount, currency);
   const voucherLines = coupons.map((coupon) => ({
     code: mt("Gift voucher code: {code}", { code: coupon.code }),
-    worth: mt("Worth {amount}", { amount: formatMoney(coupon.originalValue, coupon.currency) }),
+    // What it is for, when it is for a lesson or product, and its value only
+    // when the voucher shows it: the email is often forwarded as the gift.
+    covers: coupon.coversItemName ? mt("Redeemable for {item}", { item: coupon.coversItemName }) : "",
+    worth: coupon.showsValue ? mt("Worth {amount}", { amount: formatMoney(coupon.originalValue, coupon.currency) }) : "",
   }));
   const attachedLine = gift?.attachment ? mt("Your gift card is attached, ready to print or pass on.") : "";
   const packageLines = packages.map((name) => mt("{item} is on your account.", { item: name }));
@@ -7113,7 +7337,7 @@ async function emailOnlineOrder(accountId: string, id: string) {
   const text = [
     ...(gift ? [gift.heading, "", gift.body] : [greeting, "", intro]),
     "",
-    ...voucherLines.flatMap((line) => [line.code, line.worth]),
+    ...voucherLines.flatMap((line) => [line.code, line.covers, line.worth].filter(Boolean)),
     recipient ? mt("For {name}", { name: recipient }) : "",
     message ? `"${message}"` : "",
     attachedLine,
@@ -7147,7 +7371,8 @@ async function emailOnlineOrder(accountId: string, id: string) {
         (line) =>
           `<div style="margin:0 0 16px;padding:12px 16px;border:1px solid #d9dce1;border-radius:8px">` +
           `<p style="margin:0;font-size:18px;font-weight:600;letter-spacing:0.04em">${escapeHtml(line.code)}</p>` +
-          `<p style="margin:4px 0 0;color:#5b6068">${escapeHtml(line.worth)}</p>` +
+          (line.covers ? `<p style="margin:4px 0 0">${escapeHtml(line.covers)}</p>` : "") +
+          (line.worth ? `<p style="margin:4px 0 0;color:#5b6068">${escapeHtml(line.worth)}</p>` : "") +
           (recipient ? `<p style="margin:4px 0 0">${escapeHtml(mt("For {name}", { name: recipient }))}</p>` : "") +
           (message ? `<p style="margin:8px 0 0;font-style:italic">${escapeHtml(message)}</p>` : "") +
           `</div>`,

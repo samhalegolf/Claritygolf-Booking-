@@ -1,8 +1,9 @@
 // The gift card a voucher bought online is printed on.
 //
 // The coach uploads their own artwork and says where on it the recipient's
-// name, the voucher code and its value go. When a voucher is bought, those
-// three are written onto the artwork and the result is attached to the gift
+// name, what the voucher is for (a lesson or product, when it is for one), the
+// voucher code and its value go. When a voucher is bought, those are written
+// onto the artwork and the result is attached to the gift
 // voucher email as a PDF (gift-card-pdf.mts), one page per voucher.
 //
 // Positions are fractions of the picture, not pixels, so a design survives the
@@ -14,7 +15,8 @@
 // the coach lays out is the card that goes out. It must not touch `process` or
 // any Node API.
 
-export type GiftCardFieldId = "name" | "code" | "value";
+/** "item": what a voucher for a lesson or product is for. Blank on an amount voucher. */
+export type GiftCardFieldId = "name" | "item" | "code" | "value";
 export type GiftCardFont = "sans" | "serif" | "mono";
 export type GiftCardAlign = "left" | "center" | "right";
 
@@ -40,7 +42,7 @@ export type GiftCardDesign = {
   fields: Record<GiftCardFieldId, GiftCardField>;
 };
 
-export const GIFT_CARD_FIELDS: GiftCardFieldId[] = ["name", "code", "value"];
+export const GIFT_CARD_FIELDS: GiftCardFieldId[] = ["name", "item", "code", "value"];
 export const GIFT_CARD_FONTS: GiftCardFont[] = ["sans", "serif", "mono"];
 export const GIFT_CARD_ALIGNS: GiftCardAlign[] = ["left", "center", "right"];
 
@@ -60,6 +62,7 @@ export function defaultGiftCardDesign(): GiftCardDesign {
     imageUrl: "",
     fields: {
       name: { ...base, y: 0.42, size: 0.06 },
+      item: { ...base, y: 0.28, size: 0.05 },
       code: { ...base, y: 0.58, size: 0.065, font: "mono", bold: true },
       value: { ...base, y: 0.74, size: 0.05 },
     },
@@ -102,6 +105,7 @@ export function cleanGiftCardDesign(raw?: unknown): GiftCardDesign {
     imageUrl: /^https:\/\//i.test(imageUrl) ? imageUrl : "",
     fields: {
       name: cleanField(fields.name, defaults.fields.name),
+      item: cleanField(fields.item, defaults.fields.item),
       code: cleanField(fields.code, defaults.fields.code),
       value: cleanField(fields.value, defaults.fields.value),
     },

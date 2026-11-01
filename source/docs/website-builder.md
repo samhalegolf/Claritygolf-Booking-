@@ -74,6 +74,18 @@ are then made as one PDF, a page per voucher, and attached
 (`_shared/gift-card-pdf.mts`). No artwork, no attachment; the codes are in
 the email either way.
 
+A voucher product says what its vouchers are for (Billing › Products):
+an amount, or one lesson type or product. A voucher for an item still
+carries the money paid for it, and while none of it is spent it pays for
+that item at the till at whatever it costs on the day
+(`_shared/voucher-redemption.mts`, read by the till and the server alike).
+A price rise is absorbed; a price drop's surplus goes to the client's
+account credit (one balance per client, a `billing_coupons` row of kind
+`credit`), or stays on the voucher when the sale names no saved client.
+Spent on anything else, it is money. The product can leave the value off
+the gift card, and can set an expiry in months from purchase. The card's
+"What it's for" field prints the item's name on those vouchers.
+
 Product pictures and the gift card artwork share the site's bucket, so the
 sweep that tidies the bucket after a site save keeps them as well as the
 pictures on pages (`siteImageUrlsInUse`).

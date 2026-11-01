@@ -50,6 +50,12 @@ export type ProductFormValues = {
   lowStockThreshold: number;
   // Selling this issues a gift voucher rather than just taking money.
   isVoucher: boolean;
+  // What its vouchers are for: "" for an amount, else a lesson type or
+  // product's catalog id. Whether the gift card prints the value, and how
+  // many months a voucher lasts (0: never expires).
+  voucherItemId: string;
+  voucherShowsValue: boolean;
+  voucherExpiryMonths: number;
   // The website's shop: on the shelf, how it reaches the buyer, its picture,
   // its download, and its options (a size, a pack) each priced or not.
   sellOnline: boolean;
@@ -92,7 +98,8 @@ export type StockAdjustInput = { mode: "delta" | "setTo"; value: number; note: s
 // The form holds its numbers as strings. Parsing on every keystroke turns
 // "29." into 29 and eats the decimal point as you type it, which makes entering
 // a price like 29.95 genuinely hard. They are converted once, on save.
-type ProductFormDraft = Omit<ProductFormValues, "price" | "costPrice" | "taxRate" | "lowStockThreshold" | "openingStock" | "variants"> & {
+type ProductFormDraft = Omit<ProductFormValues, "price" | "costPrice" | "taxRate" | "lowStockThreshold" | "openingStock" | "variants" | "voucherExpiryMonths"> & {
+  voucherExpiryMonths: string;
   price: string;
   costPrice: string;
   taxRate: string;
@@ -161,6 +168,9 @@ function emptyForm(taxRate: number, view: ProductsPanelView): ProductFormDraft {
     lowStockThreshold: "",
     openingStock: "",
     isVoucher: voucher,
+    voucherItemId: "",
+    voucherShowsValue: true,
+    voucherExpiryMonths: "",
     sellOnline: false,
     fulfilment: "collect",
     imageUrl: "",
@@ -184,6 +194,9 @@ function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFo
     lowStockThreshold: String(product.lowStockThreshold || 0),
     openingStock: "",
     isVoucher: product.isVoucher === true,
+    voucherItemId: product.voucherItemId || "",
+    voucherShowsValue: product.voucherShowsValue !== false,
+    voucherExpiryMonths: product.voucherExpiryMonths ? String(product.voucherExpiryMonths) : "",
     sellOnline: product.sellOnline === true,
     fulfilment: product.fulfilment || "collect",
     imageUrl: product.imageUrl || "",
@@ -287,6 +300,16 @@ export function ProductsPanel({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  // What a voucher can be for: the lesson types and products on sale, never
+  // another voucher.
+  const voucherItemChoices = useMemo(
+    () =>
+      products
+        .filter((product) => product.active !== false && product.isVoucher !== true && product.id !== form.id)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [products, form.id],
+  );
+
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   // The picture goes where the website's pictures go: shrunk in the browser,
@@ -324,6 +347,7 @@ export function ProductsPanel({
         taxRate: toNumber(form.taxRate, defaultTaxRate),
         lowStockThreshold: toNumber(form.lowStockThreshold),
         openingStock: toNumber(form.openingStock),
+        voucherExpiryMonths: Math.max(0, Math.round(toNumber(form.voucherExpiryMonths))),
         variants: parseVariantLines(variantsText, products.find((product) => product.id === form.id)?.variants),
       };
       if (await onSave(values)) {
@@ -527,6 +551,43 @@ export function ProductsPanel({
               />
               <span>{t("This is a gift voucher")}</span>
             </label>
+            {form.isVoucher && (
+              <>
+                <label className="settings-field">
+                  <span>{t("Voucher for")}</span>
+                  <select value={form.voucherItemId} onChange={(event) => updateForm("voucherItemId", event.target.value)}>
+                    <option value="">{t("An amount")}</option>
+                    {voucherItemChoices.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {form.voucherItemId && (
+                  <label className="settings-field pos-settles-toggle">
+                    <input
+                      checked={form.voucherShowsValue}
+                      onChange={(event) => updateForm("voucherShowsValue", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{t("Show the value on the gift card")}</span>
+                  </label>
+                )}
+                <label className="settings-field">
+                  <span>{t("Expires after (months)")}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    step="1"
+                    value={form.voucherExpiryMonths}
+                    placeholder={t("Never")}
+                    onChange={(event) => updateForm("voucherExpiryMonths", event.target.value)}
+                  />
+                </label>
+              </>
+            )}
             {!form.isVoucher && (
               <label className="settings-field pos-settles-toggle">
                 <input
@@ -592,6 +653,9 @@ export function ProductsPanel({
 
         {form.isVoucher && (
           <p className="field-help">{t("Selling this issues a coupon with a code for the amount paid, and it turns up under Billing > Vouchers > Voucher Records. Tick it on the products people buy on Squarespace so those purchases can be imported too.")}</p>
+        )}
+        {form.isVoucher && form.voucherItemId && (
+          <p className="field-help">{t("Until any of it is spent, the voucher pays for one of these at whatever it costs on the day. If that is less than the voucher is worth, the rest goes to the client's account credit. It can also be spent like money on anything else.")}</p>
         )}
         {form.sellOnline && !form.isVoucher && (
           <p className="field-help">{t("It goes on the shelf of the Shop block on your website once the shop is open (Settings › Website). An option after an equals sign has its own price; the rest sell at the price above. Stock, when counted, is shared across options.")}</p>
