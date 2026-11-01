@@ -780,6 +780,44 @@ export function sitePageCard<T extends SitePageMeta & { content: SitePageContent
   return { ...meta, summary: content.summary, cover: content.cover, date: content.date, video: content.video };
 }
 
+/** What the page tree needs of a page: its address and kind, and its blocks when it has them. */
+export type SiteTreePage = Pick<SitePageMeta, "slug" | "kind"> & { content?: { blocks: ReadonlyArray<{ type: string }> } };
+
+/**
+ * The page a page sits inside: the nearest page up its address, so
+ * "articles/tips" sits in "articles" and "videos/v/flow" in "videos". An
+ * article or video with no page up its address sits in the page that lists
+ * it (the one with the Articles or Videos block). Null for a page at the top.
+ */
+export function sitePageParent<T extends SiteTreePage>(page: T, pages: readonly T[]): T | null {
+  const parts = page.slug.split("/");
+  for (let depth = parts.length - 1; depth > 0; depth--) {
+    const slug = parts.slice(0, depth).join("/");
+    const parent = pages.find((candidate) => candidate.slug === slug);
+    if (parent) return parent;
+  }
+  const lists = page.kind === "article" ? "articles" : page.kind === "video" ? "videos" : "";
+  if (!lists) return null;
+  return pages.find((candidate) => candidate.kind === "page" && candidate.content?.blocks.some((block) => block.type === lists)) || null;
+}
+
+/** The pages at the top, each with every page inside it (however deep), all in the order given. */
+export function sitePageTree<T extends SiteTreePage>(pages: readonly T[]): Array<{ page: T; inside: T[] }> {
+  const topOf = (page: T): T => {
+    let top = page;
+    for (let parent = sitePageParent(top, pages); parent; parent = sitePageParent(top, pages)) top = parent;
+    return top;
+  };
+  const groups = new Map<T, T[]>();
+  for (const page of pages) {
+    const top = topOf(page);
+    const inside = groups.get(top) || [];
+    if (top !== page) inside.push(page);
+    groups.set(top, inside);
+  }
+  return pages.filter((page) => topOf(page) === page).map((page) => ({ page, inside: groups.get(page) || [] }));
+}
+
 /**
  * What a page says about itself to search engines and link previews: its
  * title, description and picture, with the fallbacks every page gets. The

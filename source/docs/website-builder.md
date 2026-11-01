@@ -94,6 +94,14 @@ phone, address, hours, optional map), divider.
 A hero's picture, and an image block's, can be cut to a shape: left as
 it is, deep rounded corners, or a circle.
 
+In the editor the pages are a tree: a page sits inside the nearest page up
+its address ("articles/tips" inside "articles"), and an article or video
+with no such page sits inside the page that lists it. The page strip shows
+the pages at the top, with the pages inside the one being edited on a row
+beneath; the outline lists them the same way. A page moves only among the
+pages beside it, and a new article or video is given an address under the
+page that lists it.
+
 Pages come in three kinds. An article and a video both carry a date, a
 summary and a cover for the index that lists them; a video page also has
 a YouTube link, played above its blocks.

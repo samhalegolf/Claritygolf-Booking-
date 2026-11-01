@@ -5133,5 +5133,7 @@
   "Picture beside text": "Bild bredvid texten",
   "Picture shape": "Bildform",
   "As it is": "Som den är",
-  "Rounded corners": "Rundade hörn"
+  "Rounded corners": "Rundade hörn",
+  "Inside {page}": "Inuti {page}",
+  "{count} inside": "{count} inuti"
 }
