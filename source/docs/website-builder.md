@@ -157,8 +157,11 @@ store as a Shop block, and a plain page's sections as blocks chosen by
 their shape (a hero, cards, a logo row, review screenshots, an Instagram
 grid, venues with hours and a booking frame each, a contact block, text
 and pictures). The business's own Clarity booking frames become Booking
-blocks; any other frame an Embed. Pictures are downloaded and uploaded
-into the site's bucket so the site outlives the old one. The old header's
+blocks; any other frame an Embed. The pages are read a few at a time so
+the call stays short; the pictures are then brought into the site's bucket
+in batches of six (`POST /api/site/import/pictures`), each a short call of
+its own, and swapped into every page, so the site outlives the old one.
+The old header's
 menu order, social links and button carry over. What could not be placed
 is reported, never invented, and the result replaces the draft without
 publishing anything.

@@ -9,7 +9,7 @@ import { deliverEmail } from "./_shared/email-delivery.mts";
 import { db, readSettingsMap } from "./_shared/settings-store.mts";
 import { cleanEmail, cleanString } from "./_shared/values.mts";
 import { HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageImageUrls, sitePageMeta } from "./_shared/site/document.mts";
-import { importSquarespaceSite } from "./_shared/site/import-squarespace.mts";
+import { bringPictures, importSquarespaceSite, replacePictureUrls } from "./_shared/site/import-squarespace.mts";
 import {
   attachDomainToSite,
   checkDomainDns,
@@ -374,12 +374,27 @@ export default async function handler(req: Request) {
         url: cleanString(body.url, "", 300),
         preset: cleanString(body.preset, "", 40) || current?.settings.theme.preset || "classic",
         bookingSlug: (await readAccountIdentity(accountId)).slug,
-        upload: async (type, dataBase64) => (await uploadSiteImage(accountId, { type, dataBase64 })).url,
       });
       const saved = await saveSite(accountId, { settings: imported.settings, pages: imported.pages });
+      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), pictures: imported.pictures, report: imported.report });
+    }
+
+    // One batch of an imported site's pictures, brought into the bucket and
+    // swapped into every page of the draft. The browser calls this until the
+    // list the import returned is done, so no call runs long.
+    if (action === "import/pictures" && req.method === "POST") {
+      const body = await readBody(req);
+      const urls = (Array.isArray(body.urls) ? body.urls : []).map((url) => cleanString(url, "", 600)).filter(Boolean).slice(0, 8);
+      const brought = await bringPictures(urls, async (type, dataBase64) => (await uploadSiteImage(accountId, { type, dataBase64 })).url);
+      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+      if (!site) return json({ error: "not_found", message: "Save the site before bringing its pictures over." }, 404);
+      const saved = await saveSite(accountId, {
+        settings: site.settings,
+        pages: pages.map((page) => ({ ...page, content: replacePictureUrls(page.content, brought.moved) })),
+      });
       const keep = saved.pages.flatMap((page) => [...sitePageImageUrls(page.content), ...(page.publishedContent ? sitePageImageUrls(page.publishedContent) : [])]);
       await sweepUnusedSiteImages(accountId, keep);
-      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), report: imported.report });
+      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), moved: brought.moved, report: brought.report });
     }
 
     if (action === "domains" && req.method === "POST") {

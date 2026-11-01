@@ -5123,5 +5123,7 @@
   "The site could not be brought over.": "Nettstedet kunne ikke hentes over.",
   "Or bring over a site you already have": "Eller hent et nettsted du allerede har",
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Et Squarespace-nettsted kommer over med sidene, artiklene, videoene, tekstene og bildene sine, på de samme adressene, i utseendet du velger over. Det erstatter dette utkastet; ingenting publiseres før du trykker Publiser.",
-  "Bringing it over…": "Henter over…"
+  "Bringing it over…": "Henter over…",
+  "Bringing pictures over: {done} of {total}": "Henter bilder: {done} av {total}",
+  "{count} pictures are now in your own storage.": "{count} bilder ligger nå i din egen lagring."
 }

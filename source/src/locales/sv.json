@@ -5123,5 +5123,7 @@
   "The site could not be brought over.": "Webbplatsen kunde inte hämtas över.",
   "Or bring over a site you already have": "Eller hämta en webbplats du redan har",
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "En Squarespace-webbplats kommer över med sina sidor, artiklar, videor, texter och bilder, på samma adresser, i det utseende du väljer ovan. Den ersätter det här utkastet; inget publiceras förrän du trycker på Publicera.",
-  "Bringing it over…": "Hämtar över…"
+  "Bringing it over…": "Hämtar över…",
+  "Bringing pictures over: {done} of {total}": "Hämtar bilder: {done} av {total}",
+  "{count} pictures are now in your own storage.": "{count} bilder finns nu i din egen lagring."
 }

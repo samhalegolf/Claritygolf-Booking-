@@ -205,10 +205,17 @@ export async function saveSite(accountId: string, input: { settings: unknown; pa
     const existing = new Set(
       ((await client.query(`SELECT id FROM site_pages WHERE account_id = $1`, [accountId])).rows as Array<{ id: string }>).map((row) => row.id),
     );
-    const kept: string[] = [];
-    for (const page of pages) {
-      const id = page.id && existing.has(page.id) ? page.id : `page-${token(9)}`;
-      kept.push(id);
+    const ids = pages.map((page) => (page.id && existing.has(page.id) ? page.id : `page-${token(9)}`));
+    // The address index is unique per business, so rows that are going must
+    // go before the new ones take their addresses, and rows that stay step
+    // aside first, in case two of them swap addresses.
+    await client.query(`DELETE FROM site_pages WHERE account_id = $1 AND NOT (id = ANY($2::text[]))`, [accountId, ids]);
+    const staying = ids.filter((id) => existing.has(id));
+    if (staying.length) {
+      await client.query(`UPDATE site_pages SET slug = '~' || id WHERE account_id = $1 AND id = ANY($2::text[])`, [accountId, staying]);
+    }
+    for (const [index, page] of pages.entries()) {
+      const id = ids[index];
       await client.query(
         `INSERT INTO site_pages (id, account_id, slug, title, kind, in_nav, sort_order, document, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
@@ -224,7 +231,6 @@ export async function saveSite(accountId: string, input: { settings: unknown; pa
         [id, accountId, page.slug, page.title, page.kind, page.inNav, page.sortOrder, JSON.stringify(page.content)],
       );
     }
-    await client.query(`DELETE FROM site_pages WHERE account_id = $1 AND NOT (id = ANY($2::text[]))`, [accountId, kept]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

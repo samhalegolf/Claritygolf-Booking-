@@ -639,16 +639,20 @@ test("every site read and write names its business in the statement itself", asy
         { slug: "About", title: "About", content: {} },
       ],
     });
-    const writes = issued.filter((statement) => /INSERT INTO|DELETE FROM/.test(statement.text));
+    const writes = issued.filter((statement) => /INSERT INTO|DELETE FROM|UPDATE site_pages/.test(statement.text));
     assert.match(writes[0].text, /INSERT INTO sites/);
     assert.equal(writes[0].values[0], "riverside");
-    assert.match(writes[1].text, /INSERT INTO site_pages/);
-    assert.equal(writes[1].values[0], "page-home", "an existing page keeps its id");
-    assert.equal(writes[1].values[1], "riverside");
-    assert.match(String(writes[2].values[0]), /^page-/, "a new page gets an id");
-    assert.equal(writes[2].values[2], "about", "and a cleaned address");
-    assert.match(writes[3].text, /DELETE FROM site_pages WHERE account_id = \$1 AND NOT \(id = ANY/);
-    assert.deepEqual(writes[3].values[0], "riverside");
+    // Rows that are going leave first, and rows that stay step off their
+    // addresses, so a replaced or reordered site never trips the unique address.
+    assert.match(writes[1].text, /DELETE FROM site_pages WHERE account_id = \$1 AND NOT \(id = ANY/);
+    assert.equal(writes[1].values[0], "riverside");
+    assert.match(writes[2].text, /UPDATE site_pages SET slug = '~' \|\| id WHERE account_id = \$1 AND id = ANY/);
+    assert.deepEqual(writes[2].values, ["riverside", ["page-home"]]);
+    assert.match(writes[3].text, /INSERT INTO site_pages/);
+    assert.equal(writes[3].values[0], "page-home", "an existing page keeps its id");
+    assert.equal(writes[3].values[1], "riverside");
+    assert.match(String(writes[4].values[0]), /^page-/, "a new page gets an id");
+    assert.equal(writes[4].values[2], "about", "and a cleaned address");
     assert.ok(issued.some((statement) => statement.text === "COMMIT"));
 
     await assert.rejects(() => saveSite("riverside", { settings: {}, pages: [{ slug: "about", title: "About" }] }), /home page cannot be removed/);

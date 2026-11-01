@@ -5123,5 +5123,7 @@
   "The site could not be brought over.": "サイトを取り込めませんでした。",
   "Or bring over a site you already have": "または既存のサイトを取り込む",
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Squarespace のサイトは、ページ、記事、動画、文章、画像とともに同じアドレスで、上で選んだ外観に取り込まれます。この下書きを置き換えます。「公開」を押すまで何も公開されません。",
-  "Bringing it over…": "取り込み中…"
+  "Bringing it over…": "取り込み中…",
+  "Bringing pictures over: {done} of {total}": "画像を取り込み中：{done} / {total}",
+  "{count} pictures are now in your own storage.": "{count} 枚の画像があなた自身のストレージに入りました。"
 }

@@ -102,4 +102,4 @@ export default async function handler(request: Request, context: Context): Promi
   return new Response(html, { status: response.status, headers });
 }
 
-export const config = { path: "/*" };
+export const config = { path: "/*", excludedPath: ["/api/*", "/assets/*", "/.netlify/*"] };
