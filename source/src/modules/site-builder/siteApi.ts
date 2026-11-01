@@ -66,14 +66,18 @@ export async function fetchSiteState(): Promise<SiteState> {
   return readJson(await apiFetch("/api/site"));
 }
 
-/** The whole draft: the settings and every page, in menu order. */
-export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta & { content: SitePageContent }>): Promise<SavedSite> {
-  return readJson(await apiFetch("/api/site/site", jsonInit("PUT", { settings, pages })));
+/**
+ * The whole draft: the settings and every page, in menu order. `updatedAt` is
+ * when the site was last seen saved; the server refuses the save if it has
+ * been saved since, so a stale tab never writes over newer work.
+ */
+export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta & { content: SitePageContent }>, updatedAt: string | null): Promise<SavedSite> {
+  return readJson(await apiFetch("/api/site/site", jsonInit("PUT", { settings, pages, updatedAt })));
 }
 
 /** Bring a Squarespace site over. The report says what was found and what could not be; the pictures are brought next, in batches. */
-export async function importSite(url: string, preset: string): Promise<SavedSite & { pictures: string[]; report: string[] }> {
-  return readJson(await apiFetch("/api/site/import", jsonInit("POST", { url, preset })));
+export async function importSite(url: string, preset: string, updatedAt: string | null): Promise<SavedSite & { pictures: string[]; report: string[] }> {
+  return readJson(await apiFetch("/api/site/import", jsonInit("POST", { url, preset, updatedAt })));
 }
 
 /** One batch of an imported site's pictures, into the bucket and into every page of the draft. */
@@ -81,8 +85,8 @@ export async function importPictures(urls: string[]): Promise<SavedSite & { move
   return readJson(await apiFetch("/api/site/import/pictures", jsonInit("POST", { urls })));
 }
 
-export async function publishSite(): Promise<SavedSite> {
-  return readJson(await apiFetch("/api/site/publish", jsonInit("POST")));
+export async function publishSite(updatedAt: string | null): Promise<SavedSite> {
+  return readJson(await apiFetch("/api/site/publish", jsonInit("POST", { updatedAt })));
 }
 
 export async function unpublishSite(): Promise<SavedSite> {

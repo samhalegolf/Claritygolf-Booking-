@@ -37,7 +37,7 @@ import { SettingsGroup } from "../settings/SettingsLayout";
 import { BLOCK_CATALOG, blockCatalogEntry } from "./blockCatalog";
 import { DomainPanel } from "./DomainPanel";
 import { BlockInspector, FooterInspector, HeaderInspector, PageInspector, SiteInspector } from "./Inspectors";
-import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState, importPictures, importSite } from "./siteApi";
+import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState, type SiteView, importPictures, importSite } from "./siteApi";
 import { SitePreviewFrame } from "./SitePreviewFrame";
 import { SiteRenderer, type PreviewLabels, type SiteSelection } from "./SiteRenderer";
 import { bookingPageUrl } from "./siteTheme";
@@ -160,35 +160,43 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     phone: "",
   };
 
-  const applySaved = useCallback((result: SavedSite, sending: Draft | null) => {
+  /**
+   * Take what the server saved. Its cleaned copy (with ids for new pages)
+   * replaces the draft only if nothing changed meanwhile, or always when the
+   * result is a whole new site (an import) that the draft must follow.
+   */
+  const applySaved = useCallback((result: SavedSite, sending: Draft | null, replace = false) => {
     const next = draftFromViews(result.site.settings, result.pages);
     setState((current) => (current ? { ...current, site: result.site, pages: result.pages } : current));
     setSaved(next);
-    // The server's cleaned copy (with ids for new pages) replaces the draft
-    // only if nothing changed meanwhile.
-    setDraft((current) => (current === sending || !current ? next : current));
+    setDraft((current) => (replace || current === sending || !current ? next : current));
   }, []);
 
-  async function save(): Promise<boolean> {
-    if (!draft) return false;
+  /** The site as last seen saved, so the server can tell a stale tab from the latest work. */
+  const lastSeen = state?.site?.updatedAt || null;
+
+  async function save(): Promise<SiteView | null> {
+    if (!draft) return null;
     setBusy("save");
     const sending = draft;
     try {
-      applySaved(await saveSite(sending.settings, sending.pages), sending);
-      return true;
+      const result = await saveSite(sending.settings, sending.pages, lastSeen);
+      applySaved(result, sending);
+      return result.site;
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not save the page."));
-      return false;
+      return null;
     } finally {
       setBusy("");
     }
   }
 
   async function publish() {
-    if (dirty && !(await save())) return;
+    const site = dirty ? await save() : state?.site;
+    if (!site) return;
     setBusy("publish");
     try {
-      applySaved(await publishSite(), draft);
+      applySaved(await publishSite(site.updatedAt), draft);
       onToast(t("Published. Your site is live."));
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not publish the page."));
@@ -219,8 +227,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     setBusy("import");
     setImportReport([]);
     try {
-      const result = await importSite(importUrl.trim(), importPreset);
-      applySaved(result, draftFromViews(result.site.settings, result.pages));
+      const result = await importSite(importUrl.trim(), importPreset, lastSeen);
+      applySaved(result, null, true);
       setImportReport(result.report);
       setCurrentSlug(HOME_PAGE_SLUG);
       setSelected("page");
@@ -231,7 +239,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       for (let index = 0; index < pictures.length; index += 6) {
         setImportReport([...report, t("Bringing pictures over: {done} of {total}", { done: index, total: pictures.length })]);
         const batch = await importPictures(pictures.slice(index, index + 6));
-        applySaved(batch, draftFromViews(batch.site.settings, batch.pages));
+        applySaved(batch, null, true);
         report.push(...batch.report);
       }
       if (pictures.length) report.push(t("{count} pictures are now in your own storage.", { count: pictures.length - report.filter((line) => line.startsWith("A picture stays")).length }));
@@ -260,7 +268,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     onEditingChange(true);
     setBusy("save");
     try {
-      applySaved(await saveSite(next.settings, next.pages), next);
+      applySaved(await saveSite(next.settings, next.pages, lastSeen), next);
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not save the page."));
     } finally {

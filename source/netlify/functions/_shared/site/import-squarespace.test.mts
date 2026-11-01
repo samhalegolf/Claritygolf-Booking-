@@ -20,7 +20,7 @@ test("words come out of markup with their lines, entities and bullets", () => {
     ["heading", "paragraph", "paragraph", "button", "image", "frame"],
   );
   const image = piecesOf(`<a href="https://www.instagram.com/p/abc/"><img src="https://cdn.example/b.jpg" alt=""></a>`)[0];
-  assert.deepEqual(image, { kind: "image", src: "https://cdn.example/b.jpg", alt: "", href: "https://www.instagram.com/p/abc/" });
+  assert.deepEqual(image, { kind: "image", src: "https://cdn.example/b.jpg", alt: "", href: "https://www.instagram.com/p/abc/", shape: "square" });
   // A list item that holds a card is read inside, not swallowed as a bullet.
   const kinds = piecesOf(`<ul><li><img src="https://cdn.example/c.jpg"><h3>Card</h3><p>Line</p></li></ul>`).map((piece) => piece.kind);
   assert.deepEqual(kinds, ["image", "heading", "paragraph"]);
@@ -88,13 +88,15 @@ test("the first section of the home page is a hero with the picture on its own s
   const hero = blocksOfSection(sectionsOf(section("", `<img src="https://cdn.example/sam.jpg"><p>Sam coaches.</p><p>Golf is fun.</p>`))[0], { ...options, first: true })[0].block;
   assert.ok(hero.type === "hero" && hero.heading === "" && hero.layout === "split-left" && hero.text === "Sam coaches.\n\nGolf is fun.", "no heading is invented, and a picture that came first stays on the left");
   const right = blocksOfSection(sectionsOf(section("", `<h2>Hello</h2><p>Words.</p><img src="https://cdn.example/sam.jpg">`))[0], { ...options, first: true })[0].block;
-  assert.ok(right.type === "hero" && right.layout === "split");
+  assert.ok(right.type === "hero" && right.layout === "split" && right.shape === "square");
+  const cut = blocksOfSection(sectionsOf(section("", `<div class="sqs-image-content" data-shape-mask="tv"><img src="https://cdn.example/sam.jpg"></div><p>Sam coaches.</p>`))[0], { ...options, first: true })[0].block;
+  assert.ok(cut.type === "hero" && cut.shape === "rounded", "a picture Squarespace cut to a shape keeps its rounded corners");
   const blocks = blocksOfSection(sectionsOf(section("black-bold", `<img src="https://cdn.example/logo.png"><h1>Group Coaching</h1><iframe src="https://book.claritygolf.app/riverside/group-lessons?embed=booking"></iframe><p>Round up some friends.</p>`))[0], options).map((entry) => entry.block);
   assert.deepEqual(blocks.map((block) => block.type), ["hero", "booking"]);
   assert.ok(blocks[0].type === "hero" && blocks[0].heading === "Group Coaching" && blocks[0].text === "Round up some friends." && blocks[0].layout === "split-left" && blocks[0].style?.theme === "dark");
   assert.ok(blocks[1].type === "booking" && blocks[1].screen === "group-lessons");
   const divided = blocksOfSection(sectionsOf(`<section class="page-section" data-section-theme="white"><div class="section-divider-display"></div><h2>Certs</h2><img src="https://cdn.example/1.png"><p>PGA</p><img src="https://cdn.example/2.png"><p>TPI</p></section>`)[0], options)[0].block;
-  assert.equal(divided.style?.divider, "wave", "a Squarespace section divider becomes a wave along the top edge");
+  assert.equal(divided.style?.divider, "wave", "a section's divider becomes a wave along a top edge (the page import puts it on the section after)");
   const other = blocksOfSection(sectionsOf(section("", `<h2>Elsewhere</h2><iframe src="https://book.claritygolf.app/someone-else?embed=booking"></iframe>`))[0], options).map((entry) => entry.block);
   assert.ok(other[1].type === "embed", "another business's booking page is an embed, not this one's booking block");
 });
@@ -125,7 +127,7 @@ test("a whole site comes over at its own addresses, with the menu in the old ord
     `<html><head><title>${title} — Riverside Golf</title>${description ? `<meta name="description" content="${description}">` : ""}</head><body><header id="header"><div class="header-nav-item"><a href="/">Home</a></div><div class="header-nav-item"><a href="/articles">Articles</a></div><div class="header-nav-item"><a href="/contact">Contact</a></div><a href="https://www.facebook.com/riverside">f</a><a class="btn" href="/contact">Book Now</a></header><main>${body}${footer}</main></body></html>`;
   const files: Record<string, { json?: unknown; html?: string }> = {
     "/": { json: { website: { siteTitle: "Riverside Golf" }, collection: { title: "Home", fullUrl: "/", typeName: "page" } }, html: siteHtml("Riverside Golf", section("", `<img src="https://cdn.example/sam.jpg"><p>Sam coaches here.</p><a class="sqs-button-element" href="/store/p/voucher">Vouchers</a>`), "Golf lessons by the river") },
-    "/contact": { json: { collection: { title: "Contact", fullUrl: "/contact", typeName: "page" } }, html: siteHtml("Contact", section("", `<h2>Contact us.</h2><p>hi@riverside.example</p>`)) },
+    "/contact": { json: { collection: { title: "Contact", fullUrl: "/contact", typeName: "page" } }, html: siteHtml("Contact", `<section class="page-section" data-section-theme=""><div class="section-divider-display"></div><h2>Contact us.</h2><p>Call in any time.</p></section>${section("white", `<h2>Where</h2><p>By the river.</p>`)}`) },
     "/articles": { json: { collection: { title: "Articles", fullUrl: "/articles", typeName: "blog-side-by-side", description: "Tips" }, items: [{}] }, html: siteHtml("Articles", "") },
     "/articles/one": { json: { collection: { typeName: "blog-side-by-side" }, item: { title: "One", fullUrl: "/articles/one", publishOn: Date.UTC(2023, 2, 26), excerpt: "<p>About one</p>", body: "<p>Body of one.</p>", assetUrl: "https://cdn.example/one.jpg", seoData: { seoTitle: "Article One", seoDescription: "Read one" } } }, html: siteHtml("One", "") },
     "/videos/v/flow": { json: { collection: { typeName: "lessons" }, item: { title: "Flow", fullUrl: "/videos/v/flow", publishOn: Date.UTC(2022, 2, 19), excerpt: "<p>Flow it.</p>" } }, html: siteHtml("Flow", `<a href="https://www.youtube.com/watch?v=neYfj2DzbY8">v</a>`) },
@@ -161,6 +163,8 @@ test("a whole site comes over at its own addresses, with the menu in the old ord
   assert.ok(home.blocks[0].type === "hero" && home.blocks[0].image?.url === "https://cdn.example/sam.jpg", "pictures stay where they were until they are brought over");
   assert.deepEqual(result.pictures, ["https://cdn.example/sam.jpg", "https://cdn.example/one.jpg"], "the pictures to bring over are listed, each once");
   assert.ok(home.blocks[0].type === "hero" && home.blocks[0].buttons[0].href === "https://www.riverside.example/store/p/voucher", "a link to a page that did not come over goes back to the old site");
+  const contact = result.pages[2].content;
+  assert.deepEqual(contact.blocks.map((block) => block.style?.divider), ["none", "wave"], "a section's bottom divider is the wave along the top of the section after it");
   const article = result.pages[3].content;
   assert.deepEqual([article.seoTitle, article.description, article.summary, article.date], ["Article One", "Read one", "About one", "2023-03-26"]);
   assert.equal(article.cover?.url, "https://cdn.example/one.jpg");

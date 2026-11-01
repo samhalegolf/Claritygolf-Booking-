@@ -91,6 +91,9 @@ grid or a list, each with its cover or YouTube's own picture), instagram
 needs an app review, so the pictures are the coach's), contact (email,
 phone, address, hours, optional map), divider.
 
+A hero's picture, and an image block's, can be cut to a shape: left as
+it is, deep rounded corners, or a circle.
+
 Pages come in three kinds. An article and a video both carry a date, a
 summary and a cover for the index that lists them; a video page also has
 a YouTube link, played above its blocks.
@@ -162,7 +165,8 @@ blog index as an Articles block, the video library as a Videos block, the
 store as a Shop block, and a plain page's sections as blocks chosen by
 their shape (a hero, cards, a logo row, review screenshots, an Instagram
 grid, venues with hours and a booking frame each, a contact block, text
-and pictures). The business's own Clarity booking frames become Booking
+and pictures; a picture Squarespace cut to a shape keeps its rounded
+corners). The business's own Clarity booking frames become Booking
 blocks; any other frame an Embed. The pages are read a few at a time so
 the call stays short; the pictures are then brought into the site's bucket
 in batches of six (`POST /api/site/import/pictures`), each a short call of
@@ -238,7 +242,16 @@ through a portal, so it is the same component tree as the public page.
 Pictures are shrunk in the browser (longest edge 1800px, WebP where the
 browser can make one) before upload, land in the public `site-media`
 bucket under the business's own folder, and a sweep after each save
-removes uploads older than an hour that no saved page refers to.
+removes uploads older than an hour that no page refers to, in its draft
+or its published copy.
+
+A save or publish carries the time the browser last saw the site saved,
+and the server refuses it (409, `site_changed`) if the site has been
+saved since: a stale tab never writes over newer work. A page removed
+from the draft keeps its row, without a draft, while the public site
+still shows its published copy; the row goes at the next publish. So
+pressing Import, or deleting a page, changes nothing visitors see until
+Publish.
 
 ## Custom domains
 

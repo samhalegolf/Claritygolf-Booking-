@@ -313,6 +313,17 @@ h3.site-heading {
   width: 100%;
 }
 
+/* A picture cut to a shape: deep corners that follow its proportions, or a circle. */
+.site-root img.is-rounded {
+  border-radius: 24%;
+}
+
+.site-root img.is-circle {
+  border-radius: 50%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
 .site-hero.has-cover {
   position: relative;
   background-size: cover;

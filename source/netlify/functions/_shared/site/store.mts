@@ -16,6 +16,7 @@ import {
   cleanSitePageMeta,
   cleanSiteSettings,
   sitePageCard,
+  sitePageImageUrls,
   type SitePage,
   type SitePageCard,
   type SitePageContent,
@@ -146,6 +147,15 @@ export class PageSlugTakenError extends Error {
   code = "slug_taken";
 }
 
+/** A save or publish from a copy of the site older than the one saved, say from another tab. */
+export class SiteChangedError extends Error {
+  status = 409;
+  code = "site_changed";
+  constructor() {
+    super("This site changed since you opened it, maybe in another tab. Reload the page to see the latest, then make your change again.");
+  }
+}
+
 // --- The site and its pages -------------------------------------------------
 
 export async function readSite(accountId: string): Promise<SiteRecord | null> {
@@ -164,21 +174,42 @@ export async function listSitePages(accountId: string): Promise<SitePageRecord[]
   const rows = (await db().sql`
     SELECT id, slug, title, kind, in_nav, sort_order, document, published_document, published_at, updated_at
     FROM site_pages
-    WHERE account_id = ${accountId}
+    WHERE account_id = ${accountId} AND document IS NOT NULL
     ORDER BY sort_order ASC, created_at ASC
   `) as PageRow[];
   return rows.map(pageFromRow);
+}
+
+/** Every picture a page still shows, in its draft or its published copy, including pages the draft has dropped. */
+export async function siteImageUrlsInUse(accountId: string): Promise<string[]> {
+  if (!accountId) return [];
+  const rows = (await db().sql`
+    SELECT document, published_document
+    FROM site_pages
+    WHERE account_id = ${accountId}
+  `) as Array<Pick<PageRow, "document" | "published_document">>;
+  const urlsOf = (document: unknown) => (document ? sitePageImageUrls(cleanSitePageContent(parseJson(document))) : []);
+  return rows.flatMap((row) => [...urlsOf(row.document), ...urlsOf(row.published_document)]);
 }
 
 /**
  * Save the whole draft: the settings and every page, in one transaction.
  *
  * The list sent is the list that remains: a page the coach removed in the
- * editor is deleted here, a page without an id is new. The home page must
- * be among them, and no two pages may share an address. The published copies
- * are untouched.
+ * editor leaves the draft here, a page without an id is new. The home page
+ * must be among them, and no two pages may share an address. The published
+ * copies are untouched: a removed page's row stays, without a draft, for as
+ * long as the public site still shows it.
+ *
+ * With `expectedUpdatedAt`, the save goes through only if the site has not
+ * been saved since the caller read it, so a stale copy in another tab never
+ * writes over newer work.
  */
-export async function saveSite(accountId: string, input: { settings: unknown; pages: unknown }): Promise<{ site: SiteRecord; pages: SitePageRecord[] }> {
+export async function saveSite(
+  accountId: string,
+  input: { settings: unknown; pages: unknown },
+  expectedUpdatedAt: string | null = null,
+): Promise<{ site: SiteRecord; pages: SitePageRecord[] }> {
   if (!accountId) throw new Error("saveSite: accountId is required");
   const settings = cleanSiteSettings(input.settings);
   const rawPages = Array.isArray(input.pages) ? input.pages.slice(0, 60) : [];
@@ -196,6 +227,10 @@ export async function saveSite(accountId: string, input: { settings: unknown; pa
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
+    if (expectedUpdatedAt) {
+      const current = (await client.query(`SELECT updated_at FROM sites WHERE account_id = $1 FOR UPDATE`, [accountId])).rows[0] as Pick<SiteRow, "updated_at"> | undefined;
+      if (current && iso(current.updated_at) !== expectedUpdatedAt) throw new SiteChangedError();
+    }
     await client.query(
       `INSERT INTO sites (account_id, document, updated_at)
        VALUES ($1, $2::jsonb, NOW())
@@ -207,9 +242,11 @@ export async function saveSite(accountId: string, input: { settings: unknown; pa
     );
     const ids = pages.map((page) => (page.id && existing.has(page.id) ? page.id : `page-${token(9)}`));
     // The address index is unique per business, so rows that are going must
-    // go before the new ones take their addresses, and rows that stay step
-    // aside first, in case two of them swap addresses.
-    await client.query(`DELETE FROM site_pages WHERE account_id = $1 AND NOT (id = ANY($2::text[]))`, [accountId, ids]);
+    // go (or step off their address, when a published copy keeps them) before
+    // the new ones take their addresses, and rows that stay step aside first,
+    // in case two of them swap addresses.
+    await client.query(`DELETE FROM site_pages WHERE account_id = $1 AND NOT (id = ANY($2::text[])) AND published_document IS NULL`, [accountId, ids]);
+    await client.query(`UPDATE site_pages SET document = NULL, slug = '~' || id, updated_at = NOW() WHERE account_id = $1 AND NOT (id = ANY($2::text[]))`, [accountId, ids]);
     const staying = ids.filter((id) => existing.has(id));
     if (staying.length) {
       await client.query(`UPDATE site_pages SET slug = '~' || id WHERE account_id = $1 AND id = ANY($2::text[])`, [accountId, staying]);
@@ -248,10 +285,17 @@ export async function saveSite(accountId: string, input: { settings: unknown; pa
 /**
  * Make the draft the site strangers see: the settings and every page at
  * once. Each page's meta rides along in its published copy, so a title or
- * address changed afterwards stays private until the next publish.
+ * address changed afterwards stays private until the next publish. A page
+ * the draft dropped goes now. With `expectedUpdatedAt`, the publish goes
+ * through only if the draft is the one the caller last saw.
  */
-export async function publishSite(accountId: string): Promise<boolean> {
+export async function publishSite(accountId: string, expectedUpdatedAt: string | null = null): Promise<boolean> {
   if (!accountId) return false;
+  if (expectedUpdatedAt) {
+    const current = await readSite(accountId);
+    if (current && current.updatedAt !== expectedUpdatedAt) throw new SiteChangedError();
+  }
+  await db().sql`DELETE FROM site_pages WHERE account_id = ${accountId} AND document IS NULL`;
   const rows = (await db().sql`
     UPDATE sites
     SET published_document = document, published_at = NOW(), updated_at = NOW()
@@ -284,6 +328,8 @@ export async function unpublishSite(accountId: string): Promise<boolean> {
     SET published_document = NULL, published_at = NULL, updated_at = NOW()
     WHERE account_id = ${accountId}
   `;
+  // A page that was only still around for its published copy has nothing left.
+  await db().sql`DELETE FROM site_pages WHERE account_id = ${accountId} AND document IS NULL`;
   return true;
 }
 
