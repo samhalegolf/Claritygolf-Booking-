@@ -23,6 +23,7 @@ import {
   type SiteSettings,
   type SiteSocialLink,
   type SiteTheme,
+  type SitePictureShape,
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
 import { BOOKING_SCREENS } from "../public-booking/bookingScreens";
@@ -438,6 +439,21 @@ export function BlockInspector({ block, onChange, pages, bookingHref, onError }:
   );
 }
 
+function PictureShapeInput({ value, onChange }: { value: SitePictureShape; onChange: (shape: SitePictureShape) => void }) {
+  return (
+    <SelectInput
+      label={t("Picture shape")}
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: "square", label: t("As it is") },
+        { value: "rounded", label: t("Rounded corners") },
+        { value: "circle", label: t("Circle") },
+      ]}
+    />
+  );
+}
+
 function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
   const set = <B extends SiteBlock>(patch: Partial<B>) => onChange({ ...block, ...patch } as SiteBlock);
   switch (block.type) {
@@ -468,6 +484,7 @@ function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: 
               { value: "tall", label: t("Tall") },
             ]}
           />
+          <PictureShapeInput value={block.shape} onChange={(shape) => set({ shape })} />
           <ImageInput label={t("Picture")} value={block.image} onChange={(image) => set({ image })} onError={onError} />
           <ButtonInput label={t("Add a button")} value={block.buttons[0] || null} onChange={(button) => set({ buttons: [button, block.buttons[1]].filter(Boolean) as typeof block.buttons })} pages={pages} bookingHref={bookingHref} />
           {block.buttons[0] ? (
@@ -496,6 +513,7 @@ function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: 
       return (
         <>
           <ImageInput label={t("Picture")} value={block.image} onChange={(image) => set({ image })} onError={onError} />
+          <PictureShapeInput value={block.shape} onChange={(shape) => set({ shape })} />
           <TextInput label={t("Caption")} value={block.caption} maxLength={300} onChange={(caption) => set({ caption })} />
           <SelectInput
             label={t("Size")}

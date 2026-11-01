@@ -497,18 +497,23 @@ export type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omi
 /** A block as a template or preset writes it: everything but its style, which cleaning adds. */
 export type SiteBlockInput = DistributiveOmit<SiteBlock, "style">;
 
+/** How a picture is cut: as it is, with deep rounded corners, or as a circle. */
+export type SitePictureShape = "square" | "rounded" | "circle";
+export const SITE_PICTURE_SHAPES: SitePictureShape[] = ["square", "rounded", "circle"];
+
 export type SiteHeroBlock = BlockBase & {
   type: "hero";
   eyebrow: string;
   heading: string;
   text: string;
   image: SiteImage | null;
+  shape: SitePictureShape;
   layout: "centre" | "left" | "split" | "split-left" | "cover";
   height: "regular" | "tall";
   buttons: SiteButton[];
 };
 export type SiteTextBlock = BlockBase & { type: "text"; heading: string; body: string; align: "left" | "centre"; columns: 1 | 2 };
-export type SiteImageBlock = BlockBase & { type: "image"; image: SiteImage | null; caption: string; size: "inset" | "wide" | "full" };
+export type SiteImageBlock = BlockBase & { type: "image"; image: SiteImage | null; shape: SitePictureShape; caption: string; size: "inset" | "wide" | "full" };
 export type SiteGalleryBlock = BlockBase & { type: "gallery"; heading: string; images: SiteImage[]; columns: 2 | 3 | 4; button: SiteButton | null };
 export type SiteFeatureItem = { id: string; icon: SiteFeatureIcon; title: string; text: string };
 export type SiteFeaturesBlock = BlockBase & { type: "features"; heading: string; intro: string; items: SiteFeatureItem[]; columns: 2 | 3 };
@@ -862,6 +867,7 @@ function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlock
         heading: text(input.heading, 160),
         text: text(input.text, 1000),
         image: cleanImage(input.image),
+        shape: oneOf(input.shape, SITE_PICTURE_SHAPES, "square"),
         layout: oneOf(input.layout, ["centre", "left", "split", "split-left", "cover"], "centre"),
         height: oneOf(input.height, ["regular", "tall"], "regular"),
         buttons: cleanButtons(input.buttons, 2),
@@ -880,6 +886,7 @@ function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlock
         id,
         type: "image",
         image: cleanImage(input.image),
+        shape: oneOf(input.shape, SITE_PICTURE_SHAPES, "square"),
         caption: text(input.caption, 300),
         size: oneOf(input.size, ["inset", "wide", "full"], "wide"),
       };
@@ -1243,11 +1250,11 @@ function newBlockFields(type: SiteBlockType): SiteBlockInput {
   const id = siteId("block");
   switch (type) {
     case "hero":
-      return { id, type, eyebrow: "", heading: "A heading that says what you do", text: "A sentence or two about who this is for and why they should book.", image: null, layout: "centre", height: "regular", buttons: [{ label: "Book a lesson", href: "", style: "primary" }] };
+      return { id, type, eyebrow: "", heading: "A heading that says what you do", text: "A sentence or two about who this is for and why they should book.", image: null, shape: "square", layout: "centre", height: "regular", buttons: [{ label: "Book a lesson", href: "", style: "primary" }] };
     case "text":
       return { id, type, heading: "About", body: "Tell your story here. Blank lines start new paragraphs.", align: "left", columns: 1 };
     case "image":
-      return { id, type, image: null, caption: "", size: "wide" };
+      return { id, type, image: null, shape: "square", caption: "", size: "wide" };
     case "gallery":
       return { id, type, heading: "", images: [], columns: 3, button: null };
     case "cards":
@@ -1379,6 +1386,7 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
           heading: input.coachName || input.businessName,
           text: "A line or two on who you coach and what players can expect.",
           image: null,
+          shape: "square",
           layout: "split",
           height: "regular",
           buttons: [book("Book a lesson", input.bookingHref)],
@@ -1391,7 +1399,7 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
           align: "left",
           columns: 1,
         },
-        { id: "picture", type: "image", image: null, caption: "", size: "wide" },
+        { id: "picture", type: "image", image: null, shape: "square", caption: "", size: "wide" },
         { id: "cta", type: "cta", heading: "Ready when you are", text: "", button: book("Book a lesson", input.bookingHref), tone: "primary" },
       ]),
   },
@@ -1489,7 +1497,7 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
         "new-article",
         "New article",
         [
-          { id: "title", type: "hero", eyebrow: "", heading: "New article", text: "", image: null, layout: "left", height: "regular", buttons: [] },
+          { id: "title", type: "hero", eyebrow: "", heading: "New article", text: "", image: null, shape: "square", layout: "left", height: "regular", buttons: [] },
           { id: "body", type: "text", heading: "", body: "Write the article here. Blank lines start new paragraphs.", align: "left", columns: 1 },
         ],
         { kind: "article", inNav: false, summary: "One line that says what the article is about.", date: new Date().toISOString().slice(0, 10) },
@@ -1501,7 +1509,7 @@ export const SITE_PAGE_PRESETS: readonly SitePagePreset[] = [
     summary: "A library of your instructional videos, newest first. Add videos as pages.",
     build: () =>
       page("videos", "Videos", [
-        { id: "intro", type: "hero", eyebrow: "", heading: "Instructional Videos", text: "Short lessons you can watch any time.", image: null, layout: "left", height: "regular", buttons: [] },
+        { id: "intro", type: "hero", eyebrow: "", heading: "Instructional Videos", text: "Short lessons you can watch any time.", image: null, shape: "square", layout: "left", height: "regular", buttons: [] },
         { id: "list", type: "videos", heading: "", intro: "", limit: 24, layout: "list" },
       ]),
   },

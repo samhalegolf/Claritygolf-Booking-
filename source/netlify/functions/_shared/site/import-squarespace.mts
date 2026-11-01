@@ -42,6 +42,7 @@ import {
   type SiteImage,
   type SitePage,
   type SitePageKind,
+  type SitePictureShape,
   type SiteSettings,
   type SiteSocialLink,
 } from "./document.mts";
@@ -123,7 +124,7 @@ function pictureUrl(src: string): string {
 type Piece =
   | { kind: "heading"; level: number; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "image"; src: string; alt: string; href: string }
+  | { kind: "image"; src: string; alt: string; href: string; shape: SitePictureShape }
   | { kind: "frame"; src: string }
   | { kind: "button"; label: string; href: string }
   | { kind: "link"; label: string; href: string };
@@ -131,8 +132,10 @@ type Piece =
 /** The parts of a fragment of page in the order they appear. */
 export function piecesOf(fragment: string): Piece[] {
   const pieces: Piece[] = [];
-  const pattern = /<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>|<p\b[^>]*>([\s\S]*?)<\/p>|<li\b[^>]*>([\s\S]*?)<\/li>|<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>|(<a\b[^>]*>)([\s\S]*?)<\/a>|(<img\b[^>]*>)|(<iframe\b[^>]*>)/gi;
+  const pattern = /<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>|<p\b[^>]*>([\s\S]*?)<\/p>|<li\b[^>]*>([\s\S]*?)<\/li>|<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>|(<a\b[^>]*>)([\s\S]*?)<\/a>|(<img\b[^>]*>)|(<iframe\b[^>]*>)|(<div\b[^>]*\bdata-shape-mask=[^>]*>)/gi;
   let linkDepthUntil = -1;
+  // A Squarespace picture cut to a shape says so on the box around it, before the picture itself.
+  let shape: SitePictureShape = "square";
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(fragment))) {
     const at = match.index;
@@ -168,7 +171,8 @@ export function piecesOf(fragment: string): Piece[] {
       const image = inner.match(/<img\b[^>]*>/i);
       if (image) {
         const src = pictureUrl(attr(image[0], "data-src") || attr(image[0], "src"));
-        if (src) pieces.push({ kind: "image", src, alt: attr(image[0], "alt"), href });
+        if (src) pieces.push({ kind: "image", src, alt: attr(image[0], "alt"), href, shape });
+        shape = "square";
         linkDepthUntil = at + match[0].length;
         continue;
       }
@@ -181,13 +185,16 @@ export function piecesOf(fragment: string): Piece[] {
     if (match[8]) {
       if (at < linkDepthUntil) continue;
       const src = pictureUrl(attr(match[8], "data-src") || attr(match[8], "src"));
-      if (src) pieces.push({ kind: "image", src, alt: attr(match[8], "alt"), href: "" });
+      if (src) pieces.push({ kind: "image", src, alt: attr(match[8], "alt"), href: "", shape });
+      shape = "square";
       continue;
     }
     if (match[9]) {
       const src = attr(match[9], "src");
       if (src) pieces.push({ kind: "frame", src });
+      continue;
     }
+    if (match[10]) shape = /circle|oval|round/i.test(attr(match[10], "data-shape-mask")) ? "circle" : "rounded";
   }
   // A paragraph that is only a link's words appears twice: once as the link, once as the paragraph.
   return pieces.filter((piece, index) => !(piece.kind === "paragraph" && pieces[index - 1]?.kind === "button" && pieces[index - 1].kind === "button" && (pieces[index - 1] as { label: string }).label === piece.text));
@@ -444,6 +451,7 @@ function sectionBlocks(section: { theme: string; background: string; divider?: b
         heading: headings.length > 1 && headings[0].level > headings[1].level ? headings[1].text : heading,
         text: body.slice(0, 1000),
         image: picture ? image(picture.src, picture.alt) : null,
+        shape: picture?.shape || "square",
         layout: picture ? (pictureFirst(pieces) ? "split-left" : "split") : "left",
         height: "regular",
         buttons: buttons.slice(0, 2).map((piece, index) => ({ ...button(piece.label, piece.href), style: index === 0 ? ("primary" as const) : ("secondary" as const) })),
@@ -462,7 +470,7 @@ function sectionBlocks(section: { theme: string; background: string; divider?: b
     const heading = first.kind === "heading" ? first.text : "";
     const body = (first.kind === "heading" ? others : words).map((piece) => piece.text).join("\n\n");
     out.push({
-      block: { id: id("hero"), type: "hero", eyebrow: "", heading, text: body.slice(0, 1000), image: image(images[0].src, images[0].alt), layout: pictureFirst(pieces) ? "split-left" : "split", height: "regular", buttons: [], style },
+      block: { id: id("hero"), type: "hero", eyebrow: "", heading, text: body.slice(0, 1000), image: image(images[0].src, images[0].alt), shape: images[0].shape, layout: pictureFirst(pieces) ? "split-left" : "split", height: "regular", buttons: [], style },
       images: [images[0].src],
     });
     for (const piece of frames) out.push(frameBlock(piece.src, options.bookingSlug, "", style, id));
@@ -476,7 +484,7 @@ function sectionBlocks(section: { theme: string; background: string; divider?: b
   // then the pictures, then the frames, then any button as a call to action.
   const firstWords = pieces.findIndex((piece) => piece.kind === "heading" || piece.kind === "paragraph");
   const leading = images.filter((piece) => pieces.indexOf(piece) < firstWords);
-  const picture = (piece: Extract<Piece, { kind: "image" }>): Imported => ({ block: { id: id("image"), type: "image", image: image(piece.src, piece.alt), caption: "", size: words.length ? "inset" : "wide", style }, images: [piece.src] });
+  const picture = (piece: Extract<Piece, { kind: "image" }>): Imported => ({ block: { id: id("image"), type: "image", image: image(piece.src, piece.alt), shape: piece.shape, caption: "", size: words.length ? "inset" : "wide", style }, images: [piece.src] });
   for (const piece of leading) out.push(picture(piece));
   if (words.length) {
     const [first, ...others] = words;
@@ -609,7 +617,7 @@ export function blocksOfBody(body: string): Imported[] {
       paragraphs.push(piece.text);
     } else if (piece.kind === "image") {
       flush();
-      out.push({ block: { id: siteId("image"), type: "image", image: image(piece.src, piece.alt), caption: "", size: "wide" }, images: [piece.src] });
+      out.push({ block: { id: siteId("image"), type: "image", image: image(piece.src, piece.alt), shape: piece.shape, caption: "", size: "wide" }, images: [piece.src] });
     } else if (piece.kind === "frame") {
       flush();
       const youtube = siteYoutubeId(piece.src);
@@ -796,7 +804,7 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
     }
     if (/^blog/.test(typeName) && json.items) {
       page("page", collection.navigationTitle || collection.title || "", [
-        { block: { id: siteId("hero"), type: "hero", eyebrow: "", heading: collection.title || "Articles", text: textOf(collection.description || ""), image: null, layout: "left", height: "regular", buttons: [] }, images: [] },
+        { block: { id: siteId("hero"), type: "hero", eyebrow: "", heading: collection.title || "Articles", text: textOf(collection.description || ""), image: null, shape: "square", layout: "left", height: "regular", buttons: [] }, images: [] },
         { block: { id: siteId("articles"), type: "articles", heading: "", intro: "", limit: 24 }, images: [] },
       ]);
       continue;
@@ -805,7 +813,7 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
       const sections = sectionsOf(html);
       const lead = sections.length ? blocksOfSection(sections[0], { bookingSlug: input.bookingSlug, first: true, report, siteName }).filter((entry) => entry.block.type === "hero" || entry.block.type === "text") : [];
       page("page", collection.navigationTitle || collection.title || "", [
-        ...(lead.length ? lead.slice(0, 1) : [{ block: { id: siteId("hero"), type: "hero", eyebrow: "", heading: collection.title || "Videos", text: "", image: null, layout: "left", height: "regular", buttons: [] }, images: [] } as Imported]),
+        ...(lead.length ? lead.slice(0, 1) : [{ block: { id: siteId("hero"), type: "hero", eyebrow: "", heading: collection.title || "Videos", text: "", image: null, shape: "square", layout: "left", height: "regular", buttons: [] }, images: [] } as Imported]),
         { block: { id: siteId("videos"), type: "videos", heading: "", intro: "", limit: 24, layout: "grid" }, images: [] },
       ]);
       continue;
@@ -827,7 +835,10 @@ export async function importSquarespaceSite(input: ImportInput): Promise<Importe
       continue;
     }
     const instagram = header.social.find((entry) => entry.kind === "instagram")?.url || "";
-    const blocks = sections.flatMap((section, index) => blocksOfSection(section, { bookingSlug: input.bookingSlug, first: index === 0 && slug === HOME_PAGE_SLUG, report, siteName, instagram }));
+    // Squarespace draws a section's divider along its bottom edge: here it is the wave along the top of the section after it.
+    const blocks = sections.flatMap((section, index) =>
+      blocksOfSection({ ...section, divider: index > 0 && sections[index - 1].divider }, { bookingSlug: input.bookingSlug, first: index === 0 && slug === HOME_PAGE_SLUG, report, siteName, instagram }),
+    );
     const footer = sections[sections.length - 1];
     if (!footerText) footerText = textOf(footer.html).split("\n").find((line) => line && !line.includes("@")) || "";
     page("page", collection.navigationTitle || collection.title || "", blocks);

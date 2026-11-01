@@ -43,7 +43,7 @@ import {
 } from "./domains.mts";
 import { siteMediaPathFromUrl, siteMediaUrl, sweepUnusedSiteImages, uploadSiteImage } from "./media.mts";
 import { cleanReturnPath } from "../../public-shop.mts";
-import { accountIdForHostname, claimSiteDomain, listSitePages, markSiteFormMessageEmailed, readPublishedSite, readSite, saveSite, saveSiteFormMessage } from "./store.mts";
+import { accountIdForHostname, claimSiteDomain, listSitePages, markSiteFormMessageEmailed, publishSite, readPublishedSite, readSite, saveSite, saveSiteFormMessage, siteImageUrlsInUse } from "./store.mts";
 
 // --- Pages and their content ------------------------------------------------
 
@@ -205,6 +205,8 @@ const presetInput = {
 test("every block carries a section style, and a plain one changes nothing", () => {
   assert.deepEqual(cleanBlockStyle(undefined), { theme: "default", background: null, video: "", overlay: 30, height: "auto", width: "inherit", divider: "none" });
   assert.equal(cleanBlockStyle({ divider: "wave" }).divider, "wave");
+  const cut = cleanSitePageContent({ blocks: [{ type: "hero", shape: "rounded" }, { type: "image", shape: "oval" }, { type: "image" }] }).blocks;
+  assert.deepEqual(cut.map((block) => (block.type === "hero" || block.type === "image" ? block.shape : "")), ["rounded", "square", "square"], "a picture is cut to a shape it knows, else left as it is");
   assert.ok(!blockStyleIsPlain(cleanBlockStyle({ divider: "wave" })), "a wave is drawn, so the block is not plain");
   assert.ok(blockStyleIsPlain(cleanBlockStyle({})));
   const styled = cleanBlockStyle({
@@ -651,18 +653,22 @@ test("every site read and write names its business in the statement itself", asy
     const writes = issued.filter((statement) => /INSERT INTO|DELETE FROM|UPDATE site_pages/.test(statement.text));
     assert.match(writes[0].text, /INSERT INTO sites/);
     assert.equal(writes[0].values[0], "riverside");
-    // Rows that are going leave first, and rows that stay step off their
-    // addresses, so a replaced or reordered site never trips the unique address.
-    assert.match(writes[1].text, /DELETE FROM site_pages WHERE account_id = \$1 AND NOT \(id = ANY/);
+    // Rows that are going leave first (or, published, step off their address
+    // and lose their draft), and rows that stay step off their addresses, so
+    // a replaced or reordered site never trips the unique address.
+    assert.match(writes[1].text, /DELETE FROM site_pages WHERE account_id = \$1 AND NOT \(id = ANY\(\$2::text\[\]\)\) AND published_document IS NULL/);
     assert.equal(writes[1].values[0], "riverside");
-    assert.match(writes[2].text, /UPDATE site_pages SET slug = '~' \|\| id WHERE account_id = \$1 AND id = ANY/);
-    assert.deepEqual(writes[2].values, ["riverside", ["page-home"]]);
-    assert.match(writes[3].text, /INSERT INTO site_pages/);
-    assert.equal(writes[3].values[0], "page-home", "an existing page keeps its id");
-    assert.equal(writes[3].values[1], "riverside");
-    assert.match(String(writes[4].values[0]), /^page-/, "a new page gets an id");
-    assert.equal(writes[4].values[2], "about", "and a cleaned address");
+    assert.match(writes[2].text, /UPDATE site_pages SET document = NULL, slug = '~' \|\| id, updated_at = NOW\(\) WHERE account_id = \$1 AND NOT \(id = ANY/);
+    assert.equal(writes[2].values[0], "riverside");
+    assert.match(writes[3].text, /UPDATE site_pages SET slug = '~' \|\| id WHERE account_id = \$1 AND id = ANY/);
+    assert.deepEqual(writes[3].values, ["riverside", ["page-home"]]);
+    assert.match(writes[4].text, /INSERT INTO site_pages/);
+    assert.equal(writes[4].values[0], "page-home", "an existing page keeps its id");
+    assert.equal(writes[4].values[1], "riverside");
+    assert.match(String(writes[5].values[0]), /^page-/, "a new page gets an id");
+    assert.equal(writes[5].values[2], "about", "and a cleaned address");
     assert.ok(issued.some((statement) => statement.text === "COMMIT"));
+    assert.ok(!issued.some((statement) => statement.text.startsWith("SELECT updated_at FROM sites")), "no last-seen time, no check");
 
     await assert.rejects(() => saveSite("riverside", { settings: {}, pages: [{ slug: "about", title: "About" }] }), /home page cannot be removed/);
     await assert.rejects(
@@ -670,6 +676,43 @@ test("every site read and write names its business in the statement itself", asy
       /Two pages have the address/,
     );
     await assert.rejects(() => saveSite("", { settings: {}, pages: [] }), /accountId is required/);
+  } finally {
+    setDatabaseForTests(null);
+  }
+});
+
+test("a save or publish from a copy older than the saved site is refused; pages the draft dropped go at publish", async () => {
+  const savedAt = new Date("2026-11-01T02:10:39.737Z");
+  const issued = fakeDatabase((text) => {
+    if (text.startsWith("SELECT updated_at FROM sites")) return [{ updated_at: savedAt }];
+    if (text.startsWith("SELECT document, published_document, published_at, updated_at FROM sites")) {
+      return [{ document: { theme: {} }, published_document: null, published_at: null, updated_at: savedAt }];
+    }
+    if (text.startsWith("UPDATE sites SET published_document = document")) return [{ account_id: "riverside" }];
+    if (text.startsWith("SELECT document, published_document FROM site_pages")) {
+      return [
+        { document: { blocks: [{ type: "image", image: { url: "https://cdn.example/draft.jpg", alt: "" } }] }, published_document: null },
+        { document: null, published_document: { blocks: [{ type: "hero", image: { url: "https://cdn.example/still-shown.jpg", alt: "" } }] } },
+      ];
+    }
+    return [];
+  });
+  try {
+    const pages = [{ slug: "home", title: "Home", content: {} }];
+    await assert.rejects(() => saveSite("riverside", { settings: {}, pages }, "2026-11-01T01:00:00.000Z"), /changed since you opened it/);
+    assert.ok(issued.some((statement) => statement.text === "ROLLBACK"), "nothing is written");
+    assert.ok(!issued.some((statement) => statement.text.startsWith("INSERT INTO")));
+    await saveSite("riverside", { settings: {}, pages }, savedAt.toISOString());
+    assert.ok(issued.some((statement) => statement.text.startsWith("INSERT INTO sites")), "the same time goes through");
+
+    await assert.rejects(() => publishSite("riverside", "2026-11-01T01:00:00.000Z"), /changed since you opened it/);
+    assert.ok(!issued.some((statement) => statement.text.startsWith("DELETE FROM site_pages WHERE account_id = $1 AND document IS NULL")));
+    assert.equal(await publishSite("riverside", savedAt.toISOString()), true);
+    const gone = issued.findIndex((statement) => statement.text.startsWith("DELETE FROM site_pages WHERE account_id = $1 AND document IS NULL"));
+    const published = issued.findIndex((statement) => statement.text.startsWith("UPDATE site_pages SET published_document = document"));
+    assert.ok(gone >= 0 && gone < published, "a page the draft dropped goes before the rest is published");
+
+    assert.deepEqual(await siteImageUrlsInUse("riverside"), ["https://cdn.example/draft.jpg", "https://cdn.example/still-shown.jpg"], "a dropped page's published picture is still in use");
   } finally {
     setDatabaseForTests(null);
   }

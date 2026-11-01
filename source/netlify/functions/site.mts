@@ -8,7 +8,7 @@ import { readSandboxAccount } from "./_shared/sandbox.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { db, readSettingsMap } from "./_shared/settings-store.mts";
 import { cleanEmail, cleanString } from "./_shared/values.mts";
-import { HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageImageUrls, sitePageMeta } from "./_shared/site/document.mts";
+import { HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageMeta } from "./_shared/site/document.mts";
 import { bringPictures, importSquarespaceSite, replacePictureUrls } from "./_shared/site/import-squarespace.mts";
 import {
   attachDomainToSite,
@@ -34,6 +34,7 @@ import {
   readSiteDomain,
   saveSite,
   saveSiteFormMessage,
+  siteImageUrlsInUse,
   unpublishSite,
   updateSiteDomainStatus,
   type SiteDomainRecord,
@@ -83,6 +84,9 @@ async function purgePublicSite(accountId: string) {
     console.error("public_site_cache_purge_failed", accountId, error);
   }
 }
+
+/** When the browser last saw the site saved, sent with a save or publish so a stale copy cannot write over newer work. */
+const lastSeen = (body: Record<string, unknown>) => cleanString(body.updatedAt, "", 40) || null;
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
   try {
@@ -334,18 +338,13 @@ export default async function handler(req: Request) {
 
     if (action === "site" && req.method === "PUT") {
       const body = await readBody(req);
-      const saved = await saveSite(accountId, { settings: body.settings, pages: body.pages });
-      // Every page's draft and published copy keeps its pictures.
-      const keep = saved.pages.flatMap((page) => [
-        ...sitePageImageUrls(page.content),
-        ...(page.publishedContent ? sitePageImageUrls(page.publishedContent) : []),
-      ]);
-      await sweepUnusedSiteImages(accountId, keep);
+      const saved = await saveSite(accountId, { settings: body.settings, pages: body.pages }, lastSeen(body));
+      await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
       return json({ site: siteView(saved.site), pages: saved.pages.map(pageView) });
     }
 
     if (action === "publish" && req.method === "POST") {
-      if (!(await publishSite(accountId))) return json({ error: "not_found", message: "Save the site before publishing it." }, 404);
+      if (!(await publishSite(accountId, lastSeen(await readBody(req))))) return json({ error: "not_found", message: "Save the site before publishing it." }, 404);
       await purgePublicSite(accountId);
       const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
       return json({ site: siteView(site), pages: pages.map(pageView) });
@@ -375,7 +374,7 @@ export default async function handler(req: Request) {
         preset: cleanString(body.preset, "", 40) || current?.settings.theme.preset || "classic",
         bookingSlug: (await readAccountIdentity(accountId)).slug,
       });
-      const saved = await saveSite(accountId, { settings: imported.settings, pages: imported.pages });
+      const saved = await saveSite(accountId, { settings: imported.settings, pages: imported.pages }, lastSeen(body));
       return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), pictures: imported.pictures, report: imported.report });
     }
 
@@ -392,8 +391,7 @@ export default async function handler(req: Request) {
         settings: site.settings,
         pages: pages.map((page) => ({ ...page, content: replacePictureUrls(page.content, brought.moved) })),
       });
-      const keep = saved.pages.flatMap((page) => [...sitePageImageUrls(page.content), ...(page.publishedContent ? sitePageImageUrls(page.publishedContent) : [])]);
-      await sweepUnusedSiteImages(accountId, keep);
+      await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
       return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), moved: brought.moved, report: brought.report });
     }
 

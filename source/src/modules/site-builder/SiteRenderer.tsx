@@ -50,6 +50,7 @@ import {
   type SiteSocialKind,
   type SiteSocialLink,
   type SiteTheme,
+  type SitePictureShape,
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { FormBlock } from "./FormBlock";
 import { ShopBlock } from "./ShopBlock";
@@ -148,6 +149,11 @@ function Paragraphs({ text, className = "" }: { text: string; className?: string
       ))}
     </>
   );
+}
+
+/** The class that cuts a picture to its shape; none for a picture left as it is. */
+function pictureShapeClass(shape: SitePictureShape): string | undefined {
+  return shape === "square" ? undefined : `is-${shape}`;
 }
 
 function Heading({ level, text, className = "" }: { level: 1 | 2 | 3; text: string; className?: string }) {
@@ -500,7 +506,7 @@ function Block({
             </div>
             {block.image && block.layout !== "cover" ? (
               <div className="site-hero-media">
-                <img src={block.image.url} alt={block.image.alt} loading="eager" />
+                <img className={pictureShapeClass(block.shape)} src={block.image.url} alt={block.image.alt} loading="eager" />
               </div>
             ) : null}
           </div>
@@ -519,7 +525,7 @@ function Block({
     case "image":
       return (
         <figure className={`site-figure is-${block.size}`}>
-          {block.image ? <img src={block.image.url} alt={block.image.alt} loading="lazy" /> : <div className="site-placeholder" />}
+          {block.image ? <img className={pictureShapeClass(block.shape)} src={block.image.url} alt={block.image.alt} loading="lazy" /> : <div className="site-placeholder" />}
           {block.caption ? <figcaption>{block.caption}</figcaption> : null}
         </figure>
       );
