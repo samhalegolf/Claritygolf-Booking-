@@ -153,6 +153,11 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   const currentPage = draft?.pages.find((page) => page.slug === currentSlug) || draft?.pages.find((page) => page.slug === HOME_PAGE_SLUG) || draft?.pages[0] || null;
   const pageOptions = useMemo(() => (draft ? draft.pages.map((page) => ({ slug: page.slug, title: page.title })) : []), [draft]);
   const cards = useMemo(() => (draft ? cardsOf(draft.pages) : []), [draft]);
+  // The pages at the top, each with the pages inside it (articles under
+  // Articles, videos under the video library), so the list stays the menu.
+  // A hook, so it sits here with the others, above the early returns.
+  const pageTree = useMemo(() => (draft ? sitePageTree(draft.pages) : []), [draft]);
+  const currentGroup = currentPage ? pageTree.find((group) => group.page === currentPage || group.inside.includes(currentPage)) || null : null;
   const presetInput: SitePagePresetInput = {
     businessName: state?.business.name || "",
     coachName: state?.business.coachName || "",
@@ -498,11 +503,6 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       {busy === "publish" ? t("Publishing…") : t("Publish")}
     </button>
   );
-
-  // The pages at the top, each with the pages inside it (articles under
-  // Articles, videos under the video library), so the list stays the menu.
-  const pageTree = useMemo(() => (draft ? sitePageTree(draft.pages) : []), [draft]);
-  const currentGroup = currentPage ? pageTree.find((group) => group.page === currentPage || group.inside.includes(currentPage)) || null : null;
 
   const pageTab = (page: SitePage) => (
     <button
