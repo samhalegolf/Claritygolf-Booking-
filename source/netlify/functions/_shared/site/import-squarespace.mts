@@ -293,6 +293,13 @@ function pageLink(pathname: string): string {
  * each is a Logos block whatever it is called.
  */
 export function blocksOfSection(section: { theme: string; background: string; html: string }, options: { bookingSlug: string; first: boolean; report: string[]; siteName?: string; instagram?: string }): Imported[] {
+  const out = sectionBlocks(section, options);
+  // The section's backdrop rides on its first block's style, and is a picture to bring over like any other.
+  if (section.background && out.length) out[0].images = [...out[0].images, section.background];
+  return out;
+}
+
+function sectionBlocks(section: { theme: string; background: string; html: string }, options: { bookingSlug: string; first: boolean; report: string[]; siteName?: string; instagram?: string }): Imported[] {
   const pieces = piecesOf(section.html).filter((piece) => !(piece.kind === "image" && piece.src === section.background));
   const style: Partial<SiteBlockStyle> = { ...styleFor(section.theme), ...(section.background ? { background: image(section.background), overlay: 40 } : {}) };
   const headings = pieces.filter((piece) => piece.kind === "heading");

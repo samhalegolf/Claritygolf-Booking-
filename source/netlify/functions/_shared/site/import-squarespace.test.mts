@@ -33,6 +33,9 @@ test("the sections of a page come with their theme and backdrop, and the meta ta
   assert.equal(sections[0].theme, "black-bold");
   assert.equal(sections[0].background, "https://cdn.example/bg.jpg");
   assert.deepEqual(metaOf(html, "Riverside Golf"), { title: "Group Coaching", description: "Join us", image: "https://cdn.example/og.jpg" });
+  const [withBackdrop] = blocksOfSection(sections[0], { bookingSlug: "riverside", first: true, report: [] });
+  assert.equal(withBackdrop.block.style?.background?.url, "https://cdn.example/bg.jpg", "the backdrop rides on the first block");
+  assert.ok(withBackdrop.images.includes("https://cdn.example/bg.jpg"), "and is a picture to bring over");
   assert.equal(metaOf("<title>Riverside Golf</title>", "Riverside Golf").title, "", "the bare site name is no title of its own");
 });
 
