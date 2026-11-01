@@ -196,7 +196,7 @@ inert: a click lands on the block, not inside the frame.
 | Templates (a whole starting site) | `netlify/functions/_shared/site/templates.mts` |
 | Hostname rules, DNS check, Netlify attach | `netlify/functions/_shared/site/domains.mts` |
 | Image uploads to the `site-media` bucket | `netlify/functions/_shared/site/media.mts` |
-| Tables | `netlify/functions/_shared/site/store.mts`, migrations `20261031000300_create_site_pages`, `20261031000400_site_multiple_pages` and `20261031000500_site_form_messages` |
+| Tables | `netlify/functions/_shared/site/store.mts`, migrations `20261031000300_create_site_pages`, `20261031000400_site_multiple_pages`, `20261031000500_site_form_messages` and `20261101000100_site_video_pages` |
 | Routes | `netlify/functions/site.mts` |
 | Renderer (editor preview and public page share it) | `src/modules/site-builder/SiteRenderer.tsx`, `site.css` |
 | Editor | `src/modules/site-builder/SiteBuilderPanel.tsx`, `Inspectors.tsx`, `fields.tsx` |
