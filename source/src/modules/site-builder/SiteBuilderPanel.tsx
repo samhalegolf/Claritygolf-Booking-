@@ -37,7 +37,7 @@ import { SettingsGroup } from "../settings/SettingsLayout";
 import { BLOCK_CATALOG, blockCatalogEntry } from "./blockCatalog";
 import { DomainPanel } from "./DomainPanel";
 import { BlockInspector, FooterInspector, HeaderInspector, PageInspector, SiteInspector } from "./Inspectors";
-import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState, importSite } from "./siteApi";
+import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState, importPictures, importSite } from "./siteApi";
 import { SitePreviewFrame } from "./SitePreviewFrame";
 import { SiteRenderer, type PreviewLabels, type SiteSelection } from "./SiteRenderer";
 import { bookingPageUrl } from "./siteTheme";
@@ -220,14 +220,24 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     setImportReport([]);
     try {
       const result = await importSite(importUrl.trim(), importPreset);
-      const next = draftFromViews(result.site.settings, result.pages);
-      applySaved(result, next);
+      applySaved(result, draftFromViews(result.site.settings, result.pages));
       setImportReport(result.report);
       setCurrentSlug(HOME_PAGE_SLUG);
       setSelected("page");
+      onToast(result.report[0] || t("The site came over."));
+      // The pictures, a few at a time, each batch a short call of its own.
+      const pictures = result.pictures;
+      const report = [...result.report];
+      for (let index = 0; index < pictures.length; index += 6) {
+        setImportReport([...report, t("Bringing pictures over: {done} of {total}", { done: index, total: pictures.length })]);
+        const batch = await importPictures(pictures.slice(index, index + 6));
+        applySaved(batch, draftFromViews(batch.site.settings, batch.pages));
+        report.push(...batch.report);
+      }
+      if (pictures.length) report.push(t("{count} pictures are now in your own storage.", { count: pictures.length - report.filter((line) => line.startsWith("A picture stays")).length }));
+      setImportReport(report);
       setChoosingTemplate(false);
       onEditingChange(true);
-      onToast(result.report[0] || t("The site came over."));
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("The site could not be brought over."));
     } finally {

@@ -5123,5 +5123,7 @@
   "The site could not be brought over.": "No se pudo importar el sitio.",
   "Or bring over a site you already have": "O trae un sitio que ya tengas",
   "A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.": "Un sitio de Squarespace se importa con sus páginas, artículos, vídeos, textos e imágenes, en las mismas direcciones, con el aspecto que elijas arriba. Sustituye este borrador; no se publica nada hasta que pulses Publicar.",
-  "Bringing it over…": "Importando…"
+  "Bringing it over…": "Importando…",
+  "Bringing pictures over: {done} of {total}": "Trayendo imágenes: {done} de {total}",
+  "{count} pictures are now in your own storage.": "{count} imágenes están ahora en tu propio almacenamiento."
 }

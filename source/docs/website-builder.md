@@ -157,8 +157,11 @@ store as a Shop block, and a plain page's sections as blocks chosen by
 their shape (a hero, cards, a logo row, review screenshots, an Instagram
 grid, venues with hours and a booking frame each, a contact block, text
 and pictures). The business's own Clarity booking frames become Booking
-blocks; any other frame an Embed. Pictures are downloaded and uploaded
-into the site's bucket so the site outlives the old one. The old header's
+blocks; any other frame an Embed. The pages are read a few at a time so
+the call stays short; the pictures are then brought into the site's bucket
+in batches of six (`POST /api/site/import/pictures`), each a short call of
+its own, and swapped into every page, so the site outlives the old one.
+The old header's
 menu order, social links and button carry over. What could not be placed
 is reported, never invented, and the result replaces the draft without
 publishing anything.
@@ -193,7 +196,7 @@ inert: a click lands on the block, not inside the frame.
 | Templates (a whole starting site) | `netlify/functions/_shared/site/templates.mts` |
 | Hostname rules, DNS check, Netlify attach | `netlify/functions/_shared/site/domains.mts` |
 | Image uploads to the `site-media` bucket | `netlify/functions/_shared/site/media.mts` |
-| Tables | `netlify/functions/_shared/site/store.mts`, migrations `20261031000300_create_site_pages`, `20261031000400_site_multiple_pages` and `20261031000500_site_form_messages` |
+| Tables | `netlify/functions/_shared/site/store.mts`, migrations `20261031000300_create_site_pages`, `20261031000400_site_multiple_pages`, `20261031000500_site_form_messages` and `20261101000100_site_video_pages` |
 | Routes | `netlify/functions/site.mts` |
 | Renderer (editor preview and public page share it) | `src/modules/site-builder/SiteRenderer.tsx`, `site.css` |
 | Editor | `src/modules/site-builder/SiteBuilderPanel.tsx`, `Inspectors.tsx`, `fields.tsx` |
