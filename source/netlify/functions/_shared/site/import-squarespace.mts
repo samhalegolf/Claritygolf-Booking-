@@ -300,6 +300,8 @@ export function blocksOfSection(section: { theme: string; background: string; di
   const out = sectionBlocks(section, options);
   // The section's backdrop rides on its first block's style, and is a picture to bring over like any other.
   if (section.background && out.length) out[0].images = [...out[0].images, section.background];
+  // The wave along the section's top edge belongs to its first block only.
+  for (const entry of out.slice(1)) if (entry.block.style?.divider) entry.block.style = { ...entry.block.style, divider: "none" };
   return out;
 }
 
