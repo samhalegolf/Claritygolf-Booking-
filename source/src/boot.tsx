@@ -240,7 +240,7 @@ function Root() {
 
   // Home, Privacy, Terms and Support are Clarity Booking's own site, built
   // in Clarity Studio with the website builder. Until that site is first
-  // published, the hand-drawn pages stand in for it.
+  // published, or whenever it cannot be read, the hand-drawn pages stand in.
   if (publicPage) {
     return (
       <Suspense fallback={<Loading size="screen" label="Clarity Golf" />}>

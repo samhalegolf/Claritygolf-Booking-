@@ -11,7 +11,7 @@
 // Clarity Booking's own site (a house site) is drawn here too, at the root of
 // Clarity's hosts: `bookingHouse` swaps the addresses for its own (Home at /,
 // Privacy at /privacy...), and `fallback` is shown instead of "no page here"
-// while that site has never been published.
+// whenever that site cannot be drawn (never published, or the read failed).
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -55,7 +55,7 @@ export default function PublicSitePage({
   slug: string;
   /** Clarity Booking's own site at the root of Clarity's hosts: its addresses are bookingHousePagePath's. */
   bookingHouse?: boolean;
-  /** Shown instead of the "no page" screen when the site has never been published. */
+  /** Shown instead of the "no page" screen when the site cannot be drawn: never published, or not reachable. */
   fallback?: ReactNode;
 }) {
   const [current, setCurrent] = useState(slug);
@@ -152,7 +152,9 @@ export default function PublicSitePage({
     document.documentElement.style.background = site.settings.theme.colors.background;
   }, [site]);
 
-  if (error && !site && fallback && error.code === "not_published") return <>{fallback}</>;
+  // Clarity Booking's home and legal pages must always show (Google's verification reads them),
+  // so the stand-in covers any failure to load the site, not only "never published".
+  if (error && !site && fallback) return <>{fallback}</>;
   if (error && !site) {
     return (
       <div className="loading-screen">
