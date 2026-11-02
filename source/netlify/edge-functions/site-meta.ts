@@ -69,6 +69,13 @@ export default async function handler(request: Request, context: Context): Promi
   if (path === "/sitemap.xml" && !isClarityHost(url.hostname)) {
     return fetch(`${url.origin}/api/site/public/sitemap?host=${encodeURIComponent(url.hostname)}`, { headers: { accept: "application/xml" } });
   }
+  // ...and /robots.txt with a file that lets crawlers in, keeps them off the
+  // API and points them at that sitemap. Without it the SPA fallback answers
+  // with the app's HTML, which search engines read as an invalid robots file.
+  if (path === "/robots.txt" && !isClarityHost(url.hostname)) {
+    const body = `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${url.origin}/sitemap.xml\n`;
+    return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  }
   if (/\.[a-z0-9]{1,5}$/i.test(path)) return context.next();
   if (!(request.headers.get("accept") || "").includes("text/html")) return context.next();
 
