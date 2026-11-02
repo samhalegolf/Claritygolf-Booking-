@@ -1,0 +1,148 @@
+/* The editing controls drawn on the page in the editor's edit mode
+   (SiteRenderer's `editor` prop): "Add section" above and below each section,
+   its toolbar, and the words that can be typed over. Inlined into the
+   preview frame only (SitePreviewFrame); the public page never loads it.
+   The controls keep their own colours whatever the site's theme is, and
+   tokens.css is not in the frame, so the colours are written out here. */
+
+.is-editing .site-block,
+.is-editing .site-header,
+.is-editing .site-footer {
+  position: relative;
+}
+
+.is-editing .site-block:hover,
+.is-editing .site-block.is-selected,
+.is-editing .site-header:hover,
+.is-editing .site-footer:hover {
+  outline: 2px solid rgb(59 130 246);
+  outline-offset: -2px;
+}
+
+.site-edit-add,
+.site-edit-toolbar {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.is-editing .site-block:hover > .site-edit-add,
+.is-editing .site-block:hover > .site-edit-toolbar,
+.is-editing .site-block.is-selected > .site-edit-toolbar,
+.is-editing .site-header:hover > .site-edit-toolbar,
+.is-editing .site-footer:hover > .site-edit-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.site-edit-add {
+  position: absolute;
+  left: 50%;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(59 130 246);
+  color: rgb(255 255 255);
+  font: 600 12px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.site-edit-add.is-before {
+  top: 0;
+  transform: translate(-50%, -50%);
+}
+
+.site-edit-add.is-after {
+  bottom: 0;
+  transform: translate(-50%, 50%);
+}
+
+.site-edit-add.is-standalone {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.site-edit-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 31;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgb(17 24 39);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.site-edit-toolbar.is-part {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.site-edit-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(255 255 255);
+  font: 600 13px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.site-edit-tool:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.site-edit-empty {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 96px 24px;
+  text-align: center;
+  border: 2px dashed rgba(59, 130, 246, 0.5);
+  margin: 24px;
+  border-radius: 12px;
+}
+
+/* Words that can be typed over: a faint line on hover, a clear one while typing. */
+.site-inline-edit {
+  cursor: text;
+  border-radius: 3px;
+  outline: 1px dashed transparent;
+  outline-offset: 3px;
+}
+
+.site-inline-edit:hover {
+  outline-color: rgba(59, 130, 246, 0.6);
+}
+
+.site-inline-edit:focus {
+  outline: 2px solid rgb(59 130 246);
+}
+
+.site-inline-edit.is-multiline {
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .site-edit-tool.is-labelled span {
+    display: none;
+  }
+}

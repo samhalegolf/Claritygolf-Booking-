@@ -96,10 +96,11 @@ export async function fetchSiteState(): Promise<SiteState> {
 /**
  * The whole draft: the settings and every page, in menu order. `updatedAt` is
  * when the site was last seen saved; the server refuses the save if it has
- * been saved since, so a stale tab never writes over newer work.
+ * been saved since, so a stale tab never writes over newer work. `live` is
+ * the editor's Save: on a site that is already public, the changes go live.
  */
-export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta & { content: SitePageContent }>, updatedAt: string | null): Promise<SavedSite> {
-  return readJson(await editorCall("/site", jsonInit("PUT", { settings, pages, updatedAt })));
+export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta & { content: SitePageContent }>, updatedAt: string | null, live = false): Promise<SavedSite> {
+  return readJson(await editorCall("/site", jsonInit("PUT", { settings, pages, updatedAt, live })));
 }
 
 /** Bring a Squarespace site over. The report says what was found and what could not be; the pictures are brought next, in batches. */

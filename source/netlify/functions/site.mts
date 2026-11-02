@@ -52,7 +52,8 @@ import { SITE_TEMPLATES, houseSiteTemplate, type SiteTemplate } from "./_shared/
  * this is the business's public face):
  *
  *   GET    /api/site                   the draft site, its pages, domains, what to start from
- *   PUT    /api/site/site              save the whole draft       { settings, pages }
+ *   PUT    /api/site/site              save the whole draft       { settings, pages, live? }
+ *                                       live: a public site takes it at once
  *   POST   /api/site/publish           make the draft public, every page at once
  *   POST   /api/site/unpublish         take the site down (the drafts stay)
  *   POST   /api/site/media             store a picture           { type, dataBase64 }
@@ -338,10 +339,19 @@ async function checkDomain(accountId: string, id: string) {
 async function editorAction(accountId: string, action: string, req: Request, url: URL, templates: readonly SiteTemplate[], forBusiness: boolean): Promise<Response | null> {
   if (!action && req.method === "GET") return json(await coachState(accountId, templates, forBusiness));
 
+  // Save, the way Squarespace saves: with `live`, a site that is already
+  // public takes the changes at once. A site that has never been published
+  // only keeps them, until the first Publish makes it public.
   if (action === "site" && req.method === "PUT") {
     const body = await readBody(req);
     const saved = await saveSite(accountId, { settings: body.settings, pages: body.pages }, lastSeen(body));
     await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
+    if (body.live === true && saved.site.publishedSettings) {
+      await publishSite(accountId, saved.site.updatedAt);
+      await purgePublicSite(accountId);
+      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+      return json({ site: siteView(site), pages: pages.map(pageView) });
+    }
     return json({ site: siteView(saved.site), pages: saved.pages.map(pageView) });
   }
 

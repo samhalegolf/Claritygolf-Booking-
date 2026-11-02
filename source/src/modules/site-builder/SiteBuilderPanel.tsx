@@ -1,19 +1,27 @@
 // Settings › Website: build the business's public site.
 //
-// Two ways of looking at it. At rest the tab shows the site as it stands:
-// its pages across the top, the chosen one drawn full width, Edit top left.
-// Edit takes the whole settings pane: the settings sub-nav steps aside (the
-// app's sidebar stays), and the editor gets three columns: the pages and
-// the blocks on the chosen page (add, reorder, remove), the page itself
-// drawn live in a frame (click anything to select it, click a menu link to
-// move to that page), and the fields of whatever is selected. Done returns
-// to the resting view; an unsaved draft is kept and still shown there.
+// Laid out the way Squarespace works, because that is the workflow coaches
+// (and Clarity, for its own sites) already know:
 //
-// Save keeps a draft of the whole site that nobody else sees. Publish makes
-// every page public at once, at /<business>/site and on the business's own
-// domain.
-import { ArrowDown, ArrowUp, Check, Copy, Eye, FilePlus, Globe, Monitor, PanelBottom, PanelTop, Pencil, Plus, Smartphone, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+//   At rest     the site as it stands, in the Settings card: its pages across
+//               the top, the chosen one drawn full width, and Edit site.
+//   Pages       the editor takes the whole pane. Pages down the left (Main
+//               navigation, Not linked, each with its gear for page
+//               settings), the chosen page beside them, Edit at the top.
+//   Edit        the page fills the space and is edited where it stands:
+//               words are typed over on the page, every section has "Add
+//               section" above and below it and a toolbar (edit, move,
+//               duplicate, remove), and the header and footer each have an
+//               edit button. Add section opens the gallery of ready-made
+//               layouts; Edit section opens its Content and Design tabs; Site
+//               styles is the look of every page.
+//
+// Save works the way Squarespace's does: on a site that is already public
+// the changes go live at once. A site that has never been published is saved
+// privately until "Make site public". Exit with unsaved changes asks whether
+// to throw them away.
+import { ArrowDown, ArrowUp, Check, Eye, FilePlus, Globe, Monitor, MoreHorizontal, Paintbrush, PanelBottom, PanelTop, Pencil, Plus, Settings2, Smartphone, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   BUSINESS_ONLY_BLOCKS,
@@ -26,7 +34,6 @@ import {
   sitePageTree,
   uniquePageSlug,
   type SiteBlock,
-  type SiteBlockType,
   type SitePage,
   type SitePageCard,
   type SitePagePresetInput,
@@ -37,12 +44,14 @@ import { t } from "../../lib/i18n";
 import { ClarityPlayerPortal } from "../shared/ClarityIcons";
 import { Loading } from "../shared/Loading";
 import { SettingsGroup } from "../settings/SettingsLayout";
-import { BLOCK_CATALOG, blockCatalogEntry } from "./blockCatalog";
+import { blockCatalogEntry } from "./blockCatalog";
+import { setBlockField } from "./blockText";
 import { DomainPanel } from "./DomainPanel";
-import { BlockInspector, FooterInspector, HeaderInspector, PageInspector, SiteInspector } from "./Inspectors";
+import { BlockContentFields, FooterInspector, HeaderInspector, PageInspector, SectionDesignFields, SiteInspector } from "./Inspectors";
+import { SECTION_CATEGORIES, SECTION_LIBRARY, blockForChoice, type SectionChoice } from "./sectionLibrary";
 import { fetchSiteState, publishSite, saveSite, unpublishSite, type SavedSite, type SitePageView, type SiteState, type SiteView, importPictures, importSite } from "./siteApi";
 import { SitePreviewFrame } from "./SitePreviewFrame";
-import { SiteRenderer, type PreviewLabels, type SiteSelection } from "./SiteRenderer";
+import { SiteRenderer, type PreviewLabels, type SiteEditorHooks, type SiteSelection } from "./SiteRenderer";
 import { bookingPageUrl } from "./siteTheme";
 import "./site-builder.css";
 
@@ -51,36 +60,8 @@ const PHONE_WIDTH = "390px";
 /** The whole draft: what Save sends. */
 type Draft = { settings: SiteSettings; pages: SitePage[] };
 
-/** The first words of a block, for the outline. */
-function blockSnippet(block: SiteBlock): string {
-  switch (block.type) {
-    case "hero":
-    case "text":
-    case "gallery":
-    case "features":
-    case "pricing":
-    case "testimonials":
-    case "faq":
-    case "cta":
-    case "video":
-    case "booking":
-    case "shop":
-    case "articles":
-    case "contact":
-    case "cards":
-    case "logos":
-    case "embed":
-    case "venues":
-    case "form":
-    case "videos":
-    case "instagram":
-      return block.heading;
-    case "image":
-      return block.caption || block.image?.alt || "";
-    default:
-      return "";
-  }
-}
+/** Which side panel is open. "add" is the section gallery, on the left; the rest open on the right. */
+type Panel = null | "add" | "section" | "styles" | "header" | "footer" | "page";
 
 const sameDraft = (a: Draft | null, b: Draft | null) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -114,8 +95,14 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   const [device, setDevice] = useState<"desktop" | "phone">("desktop");
   const [busy, setBusy] = useState<"" | "save" | "publish" | "unpublish" | "import">("");
   const [choosingTemplate, setChoosingTemplate] = useState(false);
-  const [choosingPage, setChoosingPage] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // Inside the editor: the pages panel, or the page in edit mode.
+  const [mode, setMode] = useState<"pages" | "edit">("pages");
+  const [panel, setPanel] = useState<Panel>(null);
+  const [sectionTab, setSectionTab] = useState<"content" | "design">("content");
+  const [addAt, setAddAt] = useState(0);
+  const [addCategory, setAddCategory] = useState<string>(SECTION_CATEGORIES[0]);
+  const [pageMenuOpen, setPageMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +121,9 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   }, []);
 
   const dirty = Boolean(draft) && !sameDraft(draft, saved);
+  // What Save sends is the draft as it is when Save runs, including words typed on the page a moment before.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   // Leaving with unsaved pages is the one thing this editor refuses to do quietly.
   useEffect(() => {
@@ -147,7 +137,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
 
   // One of Clarity's own sites has no booking page and no shop to offer.
   const bookingHref = state?.forBusiness ? bookingPageUrl(state.business.slug) : "";
-  const catalog = useMemo(() => BLOCK_CATALOG.filter((entry) => state?.forBusiness !== false || !BUSINESS_ONLY_BLOCKS.includes(entry.type)), [state?.forBusiness]);
+  const gallery = useMemo(() => SECTION_LIBRARY.filter((choice) => state?.forBusiness !== false || !BUSINESS_ONLY_BLOCKS.includes(choice.type)), [state?.forBusiness]);
+  const galleryCategories = useMemo(() => SECTION_CATEGORIES.filter((category) => gallery.some((choice) => choice.category === category)), [gallery]);
   const business = useMemo(
     () => ({ slug: state?.business.slug || "", name: state?.business.name || "", logo: brandLogo, showLogo: brandShowLogo }),
     [state?.business.slug, state?.business.name, brandLogo, brandShowLogo],
@@ -184,14 +175,20 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
 
   /** The site as last seen saved, so the server can tell a stale tab from the latest work. */
   const lastSeen = state?.site?.updatedAt || null;
+  const isPublic = Boolean(state?.site?.isPublished);
+  // A whole new site (a template, an import) is saved without going live; Save puts it live.
+  const notLive = isPublic && Boolean(state?.site && state.site.updatedAt > (state.site.publishedAt || ""));
+  const canSave = dirty || notLive;
 
+  /** Save, Squarespace's way: on a public site the changes go live at once. */
   async function save(): Promise<SiteView | null> {
-    if (!draft) return null;
+    const sending = draftRef.current;
+    if (!sending) return null;
     setBusy("save");
-    const sending = draft;
     try {
-      const result = await saveSite(sending.settings, sending.pages, lastSeen);
+      const result = await saveSite(sending.settings, sending.pages, lastSeen, true);
       applySaved(result, sending);
+      onToast(result.site.isPublished ? t("Saved. Your changes are live.") : t("Saved. Make the site public when it is ready."));
       return result.site;
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not save the page."));
@@ -201,12 +198,13 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     }
   }
 
+  /** The first time: make the site public. After that, Save keeps it up to date. */
   async function publish() {
     const site = dirty ? await save() : state?.site;
     if (!site) return;
     setBusy("publish");
     try {
-      applySaved(await publishSite(site.updatedAt), draft);
+      applySaved(await publishSite(site.updatedAt), draftRef.current);
       onToast(t("Published. Your site is live."));
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not publish the page."));
@@ -216,15 +214,46 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   }
 
   async function unpublish() {
-    if (!window.confirm(t("Take the site down? Visitors see nothing until you publish again. Your drafts are kept."))) return;
+    if (!window.confirm(t("Take the site offline? Visitors see nothing until you make it public again. Your pages are kept."))) return;
     setBusy("unpublish");
     try {
-      applySaved(await unpublishSite(), draft);
+      applySaved(await unpublishSite(), draftRef.current);
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("Could not take the page down."));
     } finally {
       setBusy("");
     }
+  }
+
+  /** Into the editor, on the pages panel or straight into edit mode. */
+  function openEditor(next: "pages" | "edit") {
+    setMode(next);
+    setPanel(null);
+    onEditingChange(true);
+  }
+
+  /** Unsaved changes are thrown away only when the coach says so, as Squarespace asks on Exit. */
+  function confirmDiscard(): boolean {
+    if (!dirty) return true;
+    if (!window.confirm(t("Discard your unsaved changes?"))) return false;
+    setDraft(saved);
+    return true;
+  }
+
+  /** Exit edit mode, back to the pages panel. */
+  function exitEdit() {
+    if (!confirmDiscard()) return;
+    setMode("pages");
+    setPanel(null);
+    setSelected("page");
+  }
+
+  /** Close the editor, back to the Settings card. */
+  function closeEditor() {
+    if (!confirmDiscard()) return;
+    setPanel(null);
+    setMode("pages");
+    onEditingChange(false);
   }
 
   const [importUrl, setImportUrl] = useState("");
@@ -255,7 +284,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       if (pictures.length) report.push(t("{count} pictures are now in your own storage.", { count: pictures.length - report.filter((line) => line.startsWith("A picture stays")).length }));
       setImportReport(report);
       setChoosingTemplate(false);
-      onEditingChange(true);
+      openEditor("pages");
     } catch (error) {
       onToast(error instanceof Error ? error.message : t("The site could not be brought over."));
     } finally {
@@ -275,7 +304,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     setSelected("page");
     setChoosingTemplate(false);
     // A fresh site is for editing, not admiring.
-    onEditingChange(true);
+    openEditor("edit");
     setBusy("save");
     try {
       applySaved(await saveSite(next.settings, next.pages, lastSeen), next);
@@ -288,8 +317,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
 
   const update = (next: Draft) => setDraft(next);
   const updatePage = (slug: string, next: SitePage) => draft && update({ ...draft, pages: draft.pages.map((page) => (page.slug === slug ? next : page)) });
-  const updateBlock = (id: string, next: SiteBlock) =>
-    currentPage && updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks: currentPage.content.blocks.map((block) => (block.id === id ? next : block)) } });
+  const setBlocks = (blocks: SiteBlock[]) => currentPage && updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
+  const updateBlock = (id: string, next: SiteBlock) => currentPage && setBlocks(currentPage.content.blocks.map((block) => (block.id === id ? next : block)));
   const selectedBlock = currentPage && typeof selected === "object" ? currentPage.content.blocks.find((block) => block.id === selected.block) || null : null;
 
   function addPage(presetId: string) {
@@ -305,8 +334,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     update({ ...draft, pages: [...draft.pages, page] });
     setCurrentSlug(slug);
     setSelected("page");
-    setChoosingPage(false);
-    onEditingChange(true);
+    setPageMenuOpen(false);
+    setPanel("page");
   }
 
   function renamePage(page: SitePage, next: SitePage) {
@@ -321,6 +350,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     update({ ...draft, pages: draft.pages.filter((candidate) => candidate.slug !== page.slug) });
     setCurrentSlug(HOME_PAGE_SLUG);
     setSelected("page");
+    setPanel(null);
   }
 
   /** The pages beside a page: those inside the same page, or at the top with it. Home stays first at the top: it is the page the domain lands on. */
@@ -344,16 +374,15 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     update({ ...draft, pages: pages.map((candidate, order) => ({ ...candidate, sortOrder: order })) });
   }
 
-  function addBlock(type: SiteBlockType) {
+  /** A section from the gallery, put where its "Add section" was pressed. */
+  function insertSection(choice: SectionChoice) {
     if (!currentPage) return;
-    const block = newSiteBlock(type);
+    const block = blockForChoice(choice);
     const blocks = [...currentPage.content.blocks];
-    // After the selected block, or at the end.
-    const index = selectedBlock ? blocks.findIndex((candidate) => candidate.id === selectedBlock.id) + 1 : blocks.length;
-    blocks.splice(index, 0, block);
-    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
+    blocks.splice(Math.min(addAt, blocks.length), 0, block);
+    setBlocks(blocks);
     setSelected({ block: block.id });
-    setAddMenuOpen(false);
+    setPanel(null);
   }
 
   function moveBlock(id: string, delta: number) {
@@ -364,7 +393,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     if (index < 0 || target < 0 || target >= blocks.length) return;
     const [block] = blocks.splice(index, 1);
     blocks.splice(target, 0, block);
-    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
+    setBlocks(blocks);
   }
 
   function duplicateBlock(id: string) {
@@ -374,14 +403,18 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     if (index < 0) return;
     const copy = { ...structuredClone(blocks[index]), id: newSiteBlock("divider").id };
     blocks.splice(index + 1, 0, copy);
-    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks } });
+    setBlocks(blocks);
     setSelected({ block: copy.id });
   }
 
   function removeBlock(id: string) {
     if (!currentPage) return;
-    updatePage(currentPage.slug, { ...currentPage, content: { ...currentPage.content, blocks: currentPage.content.blocks.filter((block) => block.id !== id) } });
-    if (typeof selected === "object" && selected.block === id) setSelected("page");
+    if (!window.confirm(t("Remove this section?"))) return;
+    setBlocks(currentPage.content.blocks.filter((block) => block.id !== id));
+    if (typeof selected === "object" && selected.block === id) {
+      setSelected("page");
+      if (panel === "section") setPanel(null);
+    }
   }
 
   const previewLabels = useMemo<PreviewLabels>(
@@ -393,6 +426,45 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     [],
   );
   const previewPath = useCallback((slug: string) => `#${slug}`, []);
+
+  // What the page does when it is edited where it stands (edit mode only).
+  const editorHooks: SiteEditorHooks = {
+    editText: (blockId, path, value) => {
+      const block = currentPage?.content.blocks.find((candidate) => candidate.id === blockId);
+      if (block) updateBlock(blockId, setBlockField(block, path, value));
+    },
+    addSection: (index) => {
+      setAddAt(index);
+      setPanel("add");
+    },
+    editSection: (blockId) => {
+      setSelected({ block: blockId });
+      setSectionTab("content");
+      setPanel("section");
+    },
+    moveSection: moveBlock,
+    duplicateSection: duplicateBlock,
+    removeSection: removeBlock,
+    editHeader: () => {
+      setSelected("header");
+      setPanel("header");
+    },
+    editFooter: () => {
+      setSelected("footer");
+      setPanel("footer");
+    },
+    labels: {
+      addSection: t("Add section"),
+      editSection: t("Edit section"),
+      moveUp: t("Move up"),
+      moveDown: t("Move down"),
+      duplicate: t("Duplicate"),
+      remove: t("Remove"),
+      editHeader: t("Edit site header"),
+      editFooter: t("Edit footer"),
+      emptyPage: t("This page is empty. Add a section to start."),
+    },
+  };
 
   if (loadError) {
     return (
@@ -440,7 +512,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       </div>
       <div className="site-import">
         <h4 className="site-inspector-subtitle">{t("Or bring over a site you already have")}</h4>
-        <p className="settings-note">{t("A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces this draft; nothing is published until you press Publish.")}</p>
+        <p className="settings-note">{t("A Squarespace site comes over with its pages, articles, videos, words and pictures, at the same addresses, in the look you pick above. It replaces what is in the editor; visitors see none of it until you press Save.")}</p>
         <div className="site-import-row">
           <input value={importUrl} placeholder="https://www.yoursite.com" maxLength={300} onChange={(event) => setImportUrl(event.target.value)} />
           <select value={importPreset} onChange={(event) => setImportPreset(event.target.value)} aria-label={t("Look")}>
@@ -470,41 +542,79 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     </div>
   );
 
-  const pageChooser = (
-    <div className="site-templates">
-      <p className="settings-note">{t("What kind of page? Each comes filled in for your business; change anything afterwards.")}</p>
-      <div className="site-template-grid">
-        {state.presets.map((preset) => (
-          <button type="button" className="site-template is-plain" key={preset.id} onClick={() => addPage(preset.id)}>
-            <strong>{preset.label}</strong>
-            <span>{preset.summary}</span>
-          </button>
-        ))}
-      </div>
-      <button className="outline-button" type="button" onClick={() => setChoosingPage(false)}>
-        {t("Cancel")}
-      </button>
-    </div>
-  );
-
   const status = (
     <div className="site-builder-status">
-      <strong>{state.site?.isPublished ? t("Published") : t("Not published")}</strong>
-      <span>{dirty ? t("Unsaved changes") : state.site?.isPublished && state.site.updatedAt > (state.site.publishedAt || "") ? t("Saved draft is newer than the published page") : t("Saved")}</span>
+      <strong>{isPublic ? t("Live") : t("Not public yet")}</strong>
+      <span>{dirty ? t("Unsaved changes") : notLive ? t("Changes not live yet") : isPublic ? t("Everything is saved and live") : t("Saved")}</span>
     </div>
   );
 
   const saveButton = (
-    <button className="outline-button" type="button" onClick={() => void save()} disabled={busy !== "" || !dirty}>
+    <button className="primary-button" type="button" onClick={() => void save()} disabled={busy !== "" || !canSave}>
+      <Check size={16} />
       {busy === "save" ? t("Saving...") : t("Save")}
     </button>
   );
 
-  const publishButton = (
-    <button className="primary-button" type="button" onClick={() => void publish()} disabled={busy !== ""}>
+  const makePublicButton = !isPublic ? (
+    <button className={mode === "edit" && editing ? "outline-button" : "primary-button"} type="button" onClick={() => void publish()} disabled={busy !== ""}>
       <Eye size={16} />
-      {busy === "publish" ? t("Publishing…") : t("Publish")}
+      {busy === "publish" ? t("Publishing…") : t("Make site public")}
     </button>
+  ) : null;
+
+  const devices = (
+    <div className="site-builder-devices" role="group" aria-label={t("Preview size")}>
+      <button type="button" className={`icon-button${device === "desktop" ? " is-active" : ""}`} aria-label={t("Desktop")} onClick={() => setDevice("desktop")}>
+        <Monitor size={16} />
+      </button>
+      <button type="button" className={`icon-button${device === "phone" ? " is-active" : ""}`} aria-label={t("Phone")} onClick={() => setDevice("phone")}>
+        <Smartphone size={16} />
+      </button>
+    </div>
+  );
+
+  /** The rarely needed: start again, take the site offline. */
+  const moreMenu = (
+    <div className="site-sq-more">
+      <button type="button" className="icon-button" aria-label={t("More")} aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)}>
+        <MoreHorizontal size={18} />
+      </button>
+      {moreOpen ? (
+        <div className="site-add-menu site-sq-more-menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy !== ""}
+            onClick={() => {
+              setMoreOpen(false);
+              setChoosingTemplate(true);
+            }}
+          >
+            <span>
+              <strong>{t("Start again")}</strong>
+              <em>{t("Pick a template or bring a site over. It replaces this one.")}</em>
+            </span>
+          </button>
+          {isPublic ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busy !== ""}
+              onClick={() => {
+                setMoreOpen(false);
+                void unpublish();
+              }}
+            >
+              <span>
+                <strong>{busy === "unpublish" ? t("Taking down…") : t("Take the site offline")}</strong>
+                <em>{t("Visitors see nothing until you make it public again.")}</em>
+              </span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 
   const pageTab = (page: SitePage) => (
@@ -523,10 +633,10 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     </button>
   );
 
-  /** One page in the outline: its title, a note (what kind it is, or how many pages it holds), and its move buttons. */
+  /** One page in the pages panel: its name, a note, its gear (page settings), and its move buttons. */
   const pageRow = (page: SitePage, note: string) => {
     const { siblings, at, first } = siblingsOf(page);
-    const kind = !page.inNav ? (page.kind === "article" ? t("Article") : page.kind === "video" ? t("Video") : t("Not in the menu")) : "";
+    const kind = page.kind === "article" ? t("Article") : page.kind === "video" ? t("Video") : "";
     return (
       <div key={page.slug} className={`site-outline-row${page.slug === currentPage?.slug ? " is-current" : ""}`}>
         <button
@@ -535,6 +645,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
           onClick={() => {
             setCurrentSlug(page.slug);
             setSelected("page");
+            if (panel === "page") setPanel(null);
           }}
         >
           <span>
@@ -542,17 +653,42 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
             {note || kind ? <em>{[kind, note].filter(Boolean).join(" · ")}</em> : null}
           </span>
         </button>
-        {page.slug !== HOME_PAGE_SLUG ? (
-          <span className="site-outline-actions">
-            <button type="button" className="icon-button" aria-label={t("Move up")} disabled={at <= first} onClick={() => movePage(page.slug, -1)}>
-              <ArrowUp size={14} />
-            </button>
-            <button type="button" className="icon-button" aria-label={t("Move down")} disabled={at >= siblings.length - 1} onClick={() => movePage(page.slug, 1)}>
-              <ArrowDown size={14} />
-            </button>
-          </span>
-        ) : null}
+        <span className="site-outline-actions">
+          {page.slug !== HOME_PAGE_SLUG ? (
+            <>
+              <button type="button" className="icon-button" aria-label={t("Move up")} disabled={at <= first} onClick={() => movePage(page.slug, -1)}>
+                <ArrowUp size={14} />
+              </button>
+              <button type="button" className="icon-button" aria-label={t("Move down")} disabled={at >= siblings.length - 1} onClick={() => movePage(page.slug, 1)}>
+                <ArrowDown size={14} />
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={t("Page settings")}
+            onClick={() => {
+              setCurrentSlug(page.slug);
+              setSelected("page");
+              setPanel("page");
+            }}
+          >
+            <Settings2 size={14} />
+          </button>
+        </span>
       </div>
+    );
+  };
+
+  /** A group of pages in the panel: the page, and the pages inside it while it is the one open. */
+  const pageGroup = (group: (typeof pageTree)[number]) => {
+    const open = group === currentGroup && group.inside.length > 0;
+    return (
+      <li key={group.page.slug}>
+        {pageRow(group.page, open ? "" : group.inside.length ? t("{count} inside", { count: group.inside.length }) : "")}
+        {open ? <ol className="site-outline-list is-inside">{group.inside.map((page) => pageRow(page, ""))}</ol> : null}
+      </li>
     );
   };
 
@@ -560,10 +696,6 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     <>
       <div className="site-pages-strip" role="tablist" aria-label={t("Pages")}>
         {pageTree.map((group) => pageTab(group.page))}
-        <button type="button" className="site-page-tab is-add" onClick={() => setChoosingPage(true)}>
-          <FilePlus size={15} />
-          {t("Add page")}
-        </button>
       </div>
       {currentGroup && currentGroup.inside.length ? (
         <div className="site-pages-strip is-inside" role="tablist" aria-label={t("Inside {page}", { page: currentGroup.page.title || currentGroup.page.slug })}>
@@ -574,6 +706,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     </>
   ) : null;
 
+  const inEdit = editing && mode === "edit";
+
   const preview = currentPage ? (
     <SiteRenderer
       settings={draft!.settings}
@@ -583,171 +717,198 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       mode="preview"
       pagePath={previewPath}
       onNavigate={(slug) => {
-        if (draft?.pages.some((page) => page.slug === slug)) setCurrentSlug(slug);
+        if (draft?.pages.some((page) => page.slug === slug)) {
+          setCurrentSlug(slug);
+          setSelected("page");
+          if (panel === "section") setPanel(null);
+        }
       }}
-      selected={editing ? selected : undefined}
-      onSelect={editing ? setSelected : undefined}
+      selected={inEdit ? selected : undefined}
+      onSelect={inEdit ? setSelected : undefined}
       previewLabels={previewLabels}
+      editor={inEdit ? editorHooks : undefined}
     />
   ) : null;
 
-  // --- Editing: the whole pane -------------------------------------------------
+  // --- The editor: the whole pane ----------------------------------------------
 
   if (editing && draft && currentPage && !choosingTemplate) {
+    const panelTitle =
+      panel === "section" && selectedBlock
+        ? blockCatalogEntry(selectedBlock.type).label
+        : panel === "styles"
+          ? t("Site styles")
+          : panel === "header"
+            ? t("Site header")
+            : panel === "footer"
+              ? t("Footer")
+              : panel === "page"
+                ? t("Page settings: {page}", { page: currentPage.title || currentPage.slug })
+                : "";
+    const rightPanel = panel && panel !== "add" && (panel !== "section" || selectedBlock);
+
     return (
-      <article className="data-card settings-section settings-website site-editor-full">
-        <div className="site-builder">
-          <div className="site-builder-toolbar">
-            <button className="outline-button" type="button" onClick={() => onEditingChange(false)}>
-              <Check size={16} />
-              {t("Done")}
-            </button>
-            {status}
-            <div className="site-builder-devices" role="group" aria-label={t("Preview size")}>
-              <button type="button" className={`icon-button${device === "desktop" ? " is-active" : ""}`} aria-label={t("Desktop")} onClick={() => setDevice("desktop")}>
-                <Monitor size={16} />
+      <article className={`data-card settings-section settings-website site-editor-full site-sq is-${mode}`}>
+        <div className="site-sq-bar">
+          {mode === "edit" ? (
+            <>
+              <button className="outline-button" type="button" onClick={exitEdit}>
+                {t("Exit")}
               </button>
-              <button type="button" className={`icon-button${device === "phone" ? " is-active" : ""}`} aria-label={t("Phone")} onClick={() => setDevice("phone")}>
-                <Smartphone size={16} />
-              </button>
-            </div>
-            <div className="site-inline-actions">
-              <button className="outline-button" type="button" onClick={() => setChoosingTemplate(true)} disabled={busy !== ""}>
-                {t("Start again")}
-              </button>
-              {state.site?.isPublished ? (
-                <button className="outline-button" type="button" onClick={() => void unpublish()} disabled={busy !== ""}>
-                  {busy === "unpublish" ? t("Taking down…") : t("Take down")}
-                </button>
-              ) : null}
               {saveButton}
-              {publishButton}
-            </div>
+            </>
+          ) : (
+            <>
+              <button className="icon-button" type="button" aria-label={t("Close the editor")} onClick={closeEditor}>
+                <X size={18} />
+              </button>
+              <button className="primary-button" type="button" onClick={() => setMode("edit")}>
+                <Pencil size={16} />
+                {t("Edit")}
+              </button>
+              {canSave ? saveButton : null}
+            </>
+          )}
+          {status}
+          <div className="site-inline-actions">
+            {devices}
+            {mode === "edit" ? (
+              <button className={`outline-button${panel === "styles" ? " is-active" : ""}`} type="button" onClick={() => setPanel(panel === "styles" ? null : "styles")}>
+                <Paintbrush size={16} />
+                {t("Site styles")}
+              </button>
+            ) : null}
+            {makePublicButton}
+            {moreMenu}
+          </div>
+        </div>
+
+        <div className="site-sq-body">
+          {mode === "pages" ? (
+            <aside className="site-sq-side site-outline" aria-label={t("Pages")}>
+              <div className="site-sq-panel-head">
+                <h3>{t("Pages")}</h3>
+                <button type="button" className="icon-button" aria-label={t("Add page")} aria-expanded={pageMenuOpen} onClick={() => setPageMenuOpen((open) => !open)}>
+                  <Plus size={18} />
+                </button>
+              </div>
+              {pageMenuOpen ? (
+                <div className="site-add-menu" role="menu">
+                  {state.presets.map((preset) => (
+                    <button type="button" role="menuitem" key={preset.id} onClick={() => addPage(preset.id)}>
+                      <FilePlus size={16} />
+                      <span>
+                        <strong>{preset.label}</strong>
+                        <em>{preset.summary}</em>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <h4 className="site-outline-title">{t("Main navigation")}</h4>
+              <ol className="site-outline-list">{pageTree.filter((group) => group.page.inNav).map(pageGroup)}</ol>
+              <h4 className="site-outline-title">{t("Not linked")}</h4>
+              {pageTree.some((group) => !group.page.inNav) ? (
+                <ol className="site-outline-list">{pageTree.filter((group) => !group.page.inNav).map(pageGroup)}</ol>
+              ) : (
+                <p className="site-field-help">{t("Pages that are not in the menu, reached only by a link.")}</p>
+              )}
+              <h4 className="site-outline-title">{t("Site")}</h4>
+              <button type="button" className={`site-outline-row is-fixed${panel === "styles" ? " is-selected" : ""}`} onClick={() => setPanel("styles")}>
+                <Paintbrush size={15} />
+                <span>{t("Site styles")}</span>
+              </button>
+              <button type="button" className={`site-outline-row is-fixed${panel === "header" ? " is-selected" : ""}`} onClick={() => setPanel("header")}>
+                <PanelTop size={15} />
+                <span>{t("Site header")}</span>
+              </button>
+              <button type="button" className={`site-outline-row is-fixed${panel === "footer" ? " is-selected" : ""}`} onClick={() => setPanel("footer")}>
+                <PanelBottom size={15} />
+                <span>{t("Footer")}</span>
+              </button>
+            </aside>
+          ) : null}
+
+          {panel === "add" ? (
+            <aside className="site-sq-side site-sq-gallery" aria-label={t("Add section")}>
+              <div className="site-sq-panel-head">
+                <h3>{t("Add section")}</h3>
+                <button type="button" className="icon-button" aria-label={t("Close")} onClick={() => setPanel(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="site-sq-gallery-body">
+                <nav className="site-sq-categories" aria-label={t("Kinds of section")}>
+                  {galleryCategories.map((category) => (
+                    <button type="button" key={category} className={category === addCategory ? "is-active" : ""} onClick={() => setAddCategory(category)}>
+                      {category}
+                    </button>
+                  ))}
+                </nav>
+                <div className="site-sq-choices">
+                  {gallery
+                    .filter((choice) => choice.category === (galleryCategories.includes(addCategory as (typeof SECTION_CATEGORIES)[number]) ? addCategory : galleryCategories[0]))
+                    .map((choice) => (
+                      <button type="button" className="site-sq-choice" key={choice.id} onClick={() => insertSection(choice)}>
+                        <span className="site-sketch" aria-hidden="true">
+                          {choice.sketch}
+                        </span>
+                        <span>{choice.label}</span>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </aside>
+          ) : null}
+
+          <div className={`site-preview is-${device}`}>
+            <SitePreviewFrame fontsUrl={fontsUrl} width={device === "phone" ? PHONE_WIDTH : "100%"} title={t("Preview")}>
+              {preview}
+            </SitePreviewFrame>
           </div>
 
-          {choosingPage ? (
-            pageChooser
-          ) : (
-            <div className="site-builder-grid">
-              <aside className="site-outline" aria-label={t("Pages and blocks")}>
-                <h4 className="site-outline-title">{t("Pages")}</h4>
-                <ol className="site-outline-list">
-                  {pageTree.map((group) => {
-                    // The pages inside a page are listed only under the one being edited; the rest show how many they hold.
-                    const open = group === currentGroup && group.inside.length > 0;
-                    return (
-                      <li key={group.page.slug}>
-                        {pageRow(group.page, open ? "" : group.inside.length ? t("{count} inside", { count: group.inside.length }) : "")}
-                        {open ? <ol className="site-outline-list is-inside">{group.inside.map((page) => pageRow(page, ""))}</ol> : null}
-                      </li>
-                    );
-                  })}
-                </ol>
-                <button type="button" className="outline-button" onClick={() => setChoosingPage(true)}>
-                  <FilePlus size={16} />
-                  {t("Add page")}
+          {rightPanel ? (
+            <aside className="site-sq-side site-sq-panel site-inspector" aria-label={panelTitle}>
+              <div className="site-sq-panel-head">
+                <h3>{panelTitle}</h3>
+                <button type="button" className="icon-button" aria-label={t("Close")} onClick={() => setPanel(null)}>
+                  <X size={18} />
                 </button>
-
-                <h4 className="site-outline-title">{t("Site")}</h4>
-                <button type="button" className={`site-outline-row is-fixed${selected === "site" ? " is-selected" : ""}`} onClick={() => setSelected("site")}>
-                  <Globe size={15} />
-                  <span>{t("Look")}</span>
-                </button>
-                <button type="button" className={`site-outline-row is-fixed${selected === "header" ? " is-selected" : ""}`} onClick={() => setSelected("header")}>
-                  <PanelTop size={15} />
-                  <span>{t("Header")}</span>
-                </button>
-                <button type="button" className={`site-outline-row is-fixed${selected === "footer" ? " is-selected" : ""}`} onClick={() => setSelected("footer")}>
-                  <PanelBottom size={15} />
-                  <span>{t("Footer")}</span>
-                </button>
-
-                <h4 className="site-outline-title">{currentPage.title || currentPage.slug}</h4>
-                <button type="button" className={`site-outline-row is-fixed${selected === "page" ? " is-selected" : ""}`} onClick={() => setSelected("page")}>
-                  <Pencil size={15} />
-                  <span>{t("This page")}</span>
-                </button>
-                <ol className="site-outline-list">
-                  {currentPage.content.blocks.map((block, index) => {
-                    const entry = blockCatalogEntry(block.type);
-                    const isSelected = typeof selected === "object" && selected.block === block.id;
-                    return (
-                      <li key={block.id} className={`site-outline-row${isSelected ? " is-selected" : ""}`}>
-                        <button type="button" className="site-outline-main" onClick={() => setSelected({ block: block.id })}>
-                          <entry.Icon size={15} />
-                          <span>
-                            <strong>{entry.label}</strong>
-                            {blockSnippet(block) ? <em>{blockSnippet(block)}</em> : null}
-                          </span>
-                        </button>
-                        <span className="site-outline-actions">
-                          <button type="button" className="icon-button" aria-label={t("Move up")} disabled={index === 0} onClick={() => moveBlock(block.id, -1)}>
-                            <ArrowUp size={14} />
-                          </button>
-                          <button type="button" className="icon-button" aria-label={t("Move down")} disabled={index === currentPage.content.blocks.length - 1} onClick={() => moveBlock(block.id, 1)}>
-                            <ArrowDown size={14} />
-                          </button>
-                          <button type="button" className="icon-button" aria-label={t("Duplicate")} onClick={() => duplicateBlock(block.id)}>
-                            <Copy size={14} />
-                          </button>
-                          <button type="button" className="icon-button" aria-label={t("Remove")} onClick={() => removeBlock(block.id)}>
-                            <Trash2 size={14} />
-                          </button>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-                <div className="site-add">
-                  <button type="button" className="outline-button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((open) => !open)}>
-                    <Plus size={16} />
-                    {t("Add a block")}
-                  </button>
-                  {addMenuOpen ? (
-                    <div className="site-add-menu" role="menu">
-                      {catalog.map((entry) => (
-                        <button type="button" role="menuitem" key={entry.type} onClick={() => addBlock(entry.type)}>
-                          <entry.Icon size={16} />
-                          <span>
-                            <strong>{entry.label}</strong>
-                            <em>{entry.hint}</em>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </aside>
-
-              <div className={`site-preview is-${device}`}>
-                <SitePreviewFrame fontsUrl={fontsUrl} width={device === "phone" ? PHONE_WIDTH : "100%"} title={t("Preview")}>
-                  {preview}
-                </SitePreviewFrame>
               </div>
-
-              <aside className="site-inspector">
-                {selected === "site" ? <SiteInspector settings={draft.settings} onChange={(settings) => update({ ...draft, settings })} /> : null}
-                {selected === "header" ? (
-                  <HeaderInspector header={draft.settings.header} onChange={(header) => update({ ...draft, settings: { ...draft.settings, header } })} pages={pageOptions} bookingHref={bookingHref} />
-                ) : null}
-                {selected === "footer" ? (
-                  <FooterInspector footer={draft.settings.footer} onChange={(footer) => update({ ...draft, settings: { ...draft.settings, footer } })} pages={pageOptions} bookingHref={bookingHref} />
-                ) : null}
-                {selected === "page" ? (
-                  <PageInspector page={currentPage} pages={pageOptions.filter((page) => page.slug !== currentPage.slug)} onChange={(next) => renamePage(currentPage, next)} onDelete={() => deletePage(currentPage)} onError={onToast} />
-                ) : null}
-                {selectedBlock ? (
-                  <>
-                    <h3 className="site-inspector-title">{blockCatalogEntry(selectedBlock.type).label}</h3>
-                    <p className="site-field-help">
-                      {t("Link to this block with")} <code>#{selectedBlock.id}</code>
-                    </p>
-                    <BlockInspector block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} pages={pageOptions} bookingHref={bookingHref} onError={onToast} />
-                  </>
-                ) : null}
-              </aside>
-            </div>
-          )}
+              {panel === "section" && selectedBlock ? (
+                <>
+                  <div className="site-sq-tabs" role="tablist">
+                    <button type="button" role="tab" aria-selected={sectionTab === "content"} className={sectionTab === "content" ? "is-active" : ""} onClick={() => setSectionTab("content")}>
+                      {t("Content")}
+                    </button>
+                    <button type="button" role="tab" aria-selected={sectionTab === "design"} className={sectionTab === "design" ? "is-active" : ""} onClick={() => setSectionTab("design")}>
+                      {t("Design")}
+                    </button>
+                  </div>
+                  {sectionTab === "content" ? (
+                    <>
+                      <BlockContentFields block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} pages={pageOptions} bookingHref={bookingHref} onError={onToast} />
+                      <p className="site-field-help">
+                        {t("Link to this section with")} <code>#{selectedBlock.id}</code>
+                      </p>
+                    </>
+                  ) : (
+                    <SectionDesignFields style={selectedBlock.style} onChange={(style) => updateBlock(selectedBlock.id, { ...selectedBlock, style })} onError={onToast} />
+                  )}
+                </>
+              ) : null}
+              {panel === "styles" ? <SiteInspector settings={draft.settings} onChange={(settings) => update({ ...draft, settings })} /> : null}
+              {panel === "header" ? (
+                <HeaderInspector header={draft.settings.header} onChange={(header) => update({ ...draft, settings: { ...draft.settings, header } })} pages={pageOptions} bookingHref={bookingHref} />
+              ) : null}
+              {panel === "footer" ? (
+                <FooterInspector footer={draft.settings.footer} onChange={(footer) => update({ ...draft, settings: { ...draft.settings, footer } })} pages={pageOptions} bookingHref={bookingHref} />
+              ) : null}
+              {panel === "page" ? (
+                <PageInspector page={currentPage} pages={pageOptions.filter((page) => page.slug !== currentPage.slug)} onChange={(next) => renamePage(currentPage, next)} onDelete={() => deletePage(currentPage)} onError={onToast} />
+              ) : null}
+            </aside>
+          ) : null}
         </div>
       </article>
     );
@@ -765,20 +926,15 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
         </p>
         {!draft || choosingTemplate ? (
           templateChooser
-        ) : choosingPage ? (
-          pageChooser
         ) : (
           <div className="site-builder">
             <div className="site-builder-toolbar">
-              <button className="primary-button" type="button" onClick={() => onEditingChange(true)}>
+              <button className="primary-button" type="button" onClick={() => openEditor("pages")}>
                 <Pencil size={16} />
-                {t("Edit")}
+                {t("Edit site")}
               </button>
               {status}
-              <div className="site-inline-actions">
-                {dirty ? saveButton : null}
-                {publishButton}
-              </div>
+              <div className="site-inline-actions">{makePublicButton}</div>
             </div>
             {pageStrip}
             <div className="site-preview is-desktop is-resting">
@@ -791,7 +947,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       </SettingsGroup>
 
       <SettingsGroup id="website-address" icon={ClarityPlayerPortal} section="website" title={t("Where the page lives")}>
-        <DomainPanel state={state} isPublished={Boolean(state.site?.isPublished)} onDomainsChange={(domains) => setState({ ...state, domains })} />
+        <DomainPanel state={state} isPublished={isPublic} onDomainsChange={(domains) => setState({ ...state, domains })} />
       </SettingsGroup>
     </>
   );

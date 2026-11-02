@@ -5,14 +5,24 @@
 // click on a page link switches the editor to that page, and the heavy
 // embeds (booking widget, map, framed pages) are stood in for by a labelled
 // box so the preview stays light and never books anything.
+//
+// In the editor's edit mode (the `editor` prop) the page is also where it is
+// edited, the way Squarespace works: words are typed over where they stand
+// (EditableText; each field names itself with a path such as "heading" or
+// "items.<item id>.title"), and every section carries "Add section" above
+// and below it and a toolbar to edit, move, duplicate or remove it. None of
+// that is drawn without the prop, so the public page is unchanged.
 
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   Award,
   Calendar,
   ChartLine,
   Clock,
+  Copy,
   Facebook,
   Flag,
   GraduationCap,
@@ -22,12 +32,15 @@ import {
   Linkedin,
   Mail,
   MapPin,
+  Pencil,
   Phone,
+  Plus,
   Shield,
   ShoppingBag,
   Star,
   Sun,
   Target,
+  Trash2,
   Trophy,
   Users,
   Video,
@@ -63,6 +76,82 @@ export type SiteSelection = "site" | "header" | "footer" | "page" | { block: str
 
 export type PreviewLabels = { noArticles: string; noVideos: string; noPage: string };
 
+/** What the editor does when the page is edited in place. Present only in edit mode. */
+export type SiteEditorHooks = {
+  /** A field typed over on the page. `path` is "heading", or "items.<item id>.title" for a field of one item. */
+  editText: (blockId: string, path: string, value: string) => void;
+  /** Open the section gallery to put a new section at this position on the page. */
+  addSection: (index: number) => void;
+  editSection: (blockId: string) => void;
+  moveSection: (blockId: string, delta: number) => void;
+  duplicateSection: (blockId: string) => void;
+  removeSection: (blockId: string) => void;
+  editHeader: () => void;
+  editFooter: () => void;
+  /** The words on the editing controls, in the editor's language. */
+  labels: {
+    addSection: string;
+    editSection: string;
+    moveUp: string;
+    moveDown: string;
+    duplicate: string;
+    remove: string;
+    editHeader: string;
+    editFooter: string;
+    emptyPage: string;
+  };
+};
+
+/** The field-writer for the block being drawn, while the page is being edited in place. */
+const InlineEdit = createContext<((path: string, value: string) => void) | null>(null);
+
+/**
+ * Words the editor can type over. Plain text in, plain text out: a single
+ * line ends at Enter, a multi-line field keeps its blank lines as paragraph
+ * breaks. Written back on leaving the field, so typing never redraws the page
+ * under the caret; Escape puts the words back as they were.
+ */
+function EditableText({ as: Tag, value, className = "", multiline = false, onCommit }: { as: "h1" | "h2" | "h3" | "p" | "div" | "span" | "strong" | "figcaption"; value: string; className?: string; multiline?: boolean; onCommit: (next: string) => void }) {
+  return (
+    <Tag
+      // A new value from the side panel draws afresh; typing here does not, until the field is left.
+      key={value}
+      className={`${className} site-inline-edit${multiline ? " is-multiline" : ""}`.trim()}
+      contentEditable="plaintext-only"
+      suppressContentEditableWarning
+      spellCheck
+      onBlur={(event) => {
+        const raw = event.currentTarget.innerText.replace(/\u00a0/g, " ");
+        const next = multiline ? raw.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim() : raw.replace(/\s*\n\s*/g, " ").trim();
+        if (next !== value) onCommit(next);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.currentTarget.innerText = value;
+          event.currentTarget.blur();
+        } else if (event.key === "Enter" && !multiline) {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+    >
+      {value}
+    </Tag>
+  );
+}
+
+/** A line of words that is typed over in edit mode, and drawn as it is otherwise. Nothing when empty. */
+function Text({ as, value, field, className, multiline }: { as: "p" | "span" | "strong" | "figcaption"; value: string; field?: string; className?: string; multiline?: boolean }) {
+  const edit = useContext(InlineEdit);
+  if (!value) return null;
+  if (edit && field) return <EditableText as={as} value={value} className={className} multiline={multiline} onCommit={(next) => edit(field, next)} />;
+  const Tag = as;
+  return <Tag className={className}>{value}</Tag>;
+}
+
+/** The path of one item's field: "items.<id>.<field>". By id, not position, so a filtered list still writes to the right item. */
+const itemField = (id: string, field: string) => `items.${id}.${field}`;
+
 export type SiteRendererProps = {
   settings: SiteSettings;
   page: SitePage;
@@ -85,6 +174,8 @@ export type SiteRendererProps = {
   missingPage?: boolean;
   /** Public only: the next page is on its way. */
   busy?: boolean;
+  /** Preview only, in edit mode: the page is edited where it stands. */
+  editor?: SiteEditorHooks;
 };
 
 const FEATURE_ICONS: Record<SiteFeatureIcon, typeof Flag> = {
@@ -132,7 +223,9 @@ export function formatSiteDate(date: string): string {
 }
 
 /** Paragraphs from text: blank lines separate them, single newlines break. */
-function Paragraphs({ text, className = "" }: { text: string; className?: string }) {
+function Paragraphs({ text, className = "", field }: { text: string; className?: string; field?: string }) {
+  const edit = useContext(InlineEdit);
+  if (edit && field && text.trim()) return <EditableText as="div" value={text} className={className} multiline onCommit={(next) => edit(field, next)} />;
   const paragraphs = text.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
   if (!paragraphs.length) return null;
   return (
@@ -156,9 +249,11 @@ function pictureShapeClass(shape: SitePictureShape): string | undefined {
   return shape === "square" ? undefined : `is-${shape}`;
 }
 
-function Heading({ level, text, className = "" }: { level: 1 | 2 | 3; text: string; className?: string }) {
+function Heading({ level, text, className = "", field }: { level: 1 | 2 | 3; text: string; className?: string; field?: string }) {
+  const edit = useContext(InlineEdit);
   if (!text) return null;
   const Tag = `h${level}` as const;
+  if (edit && field) return <EditableText as={Tag} value={text} className={`site-heading ${className}`.trim()} onCommit={(next) => edit(field, next)} />;
   return <Tag className={`site-heading ${className}`.trim()}>{text}</Tag>;
 }
 
@@ -287,6 +382,7 @@ export function SiteRenderer({
   returnQuery,
   missingPage,
   busy,
+  editor,
 }: SiteRendererProps) {
   const preview = mode === "preview";
   const linkProps = makeLinkProps(pagePath, onNavigate);
@@ -304,7 +400,7 @@ export function SiteRenderer({
     return vars["--site-bg"] || theme.colors.background;
   };
 
-  const frame = (target: SiteSelection, className: string, children: ReactNode, id?: string, style?: SiteBlockStyle, above?: SiteBlockStyle | null) => {
+  const frame = (target: SiteSelection, className: string, children: ReactNode, id?: string, style?: SiteBlockStyle, above?: SiteBlockStyle | null, chrome?: ReactNode) => {
     const plain = !style || blockStyleIsPlain(style);
     const backdrop = style && (style.background || style.video);
     const divider = style?.divider === "wave";
@@ -329,9 +425,50 @@ export function SiteRenderer({
           </div>
         ) : null}
         {backdrop ? <div className="site-block-inner">{children}</div> : children}
+        {chrome}
       </div>
     );
   };
+
+  /** An editing control drawn on the page: it acts, and the click goes no further. */
+  const control = (label: string, onPress: () => void, content: ReactNode, className = "site-edit-tool") => (
+    <button
+      type="button"
+      className={className}
+      aria-label={label}
+      title={label}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onPress();
+      }}
+    >
+      {content}
+    </button>
+  );
+
+  /** "Add section" above and below a section, and its toolbar, as Squarespace draws them. */
+  const sectionChrome = (block: SiteBlock, index: number, count: number) => {
+    if (!editor) return null;
+    const { labels } = editor;
+    return (
+      <>
+        {control(labels.addSection, () => editor.addSection(index), <><Plus size={14} /> {labels.addSection}</>, "site-edit-add is-before")}
+        {control(labels.addSection, () => editor.addSection(index + 1), <><Plus size={14} /> {labels.addSection}</>, "site-edit-add is-after")}
+        <div className="site-edit-toolbar">
+          {control(labels.editSection, () => editor.editSection(block.id), <><Pencil size={14} /> <span>{labels.editSection}</span></>, "site-edit-tool is-labelled")}
+          {index > 0 ? control(labels.moveUp, () => editor.moveSection(block.id, -1), <ArrowUp size={15} />) : null}
+          {index < count - 1 ? control(labels.moveDown, () => editor.moveSection(block.id, 1), <ArrowDown size={15} />) : null}
+          {control(labels.duplicate, () => editor.duplicateSection(block.id), <Copy size={15} />)}
+          {control(labels.remove, () => editor.removeSection(block.id), <Trash2 size={15} />)}
+        </div>
+      </>
+    );
+  };
+
+  /** The one button on the header or footer in edit mode: they are site-wide, edited in a panel of their own. */
+  const partChrome = (label: string, onPress: () => void) =>
+    editor ? <div className="site-edit-toolbar is-part">{control(label, onPress, <><Pencil size={14} /> <span>{label}</span></>, "site-edit-tool is-labelled")}</div> : null;
 
   const Button = ({ button, className = "" }: { button: SiteButton | null; className?: string }) => {
     if (!button) return null;
@@ -352,7 +489,7 @@ export function SiteRenderer({
 
   return (
     <div
-      className={`${siteThemeClassName(theme)} ${preview ? "is-preview" : ""}${busy ? " is-busy" : ""}${header.transparent ? " has-transparent-header" : ""}`}
+      className={`${siteThemeClassName(theme)} ${preview ? "is-preview" : ""}${editor ? " is-editing" : ""}${busy ? " is-busy" : ""}${header.transparent ? " has-transparent-header" : ""}`}
       style={siteThemeStyle(theme)}
       // In the preview every link is inert: the coach is editing, not browsing.
       onClickCapture={preview ? (event) => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); } : undefined}
@@ -389,6 +526,9 @@ export function SiteRenderer({
           <Button button={header.button} className="site-header-button" />
         </div>,
         "top",
+        undefined,
+        null,
+        editor ? partChrome(editor.labels.editHeader, editor.editHeader) : null,
       )}
 
       <main className="site-main">
@@ -410,6 +550,7 @@ export function SiteRenderer({
               frame(
                 { block: block.id },
                 `site-block site-block-${block.type}`,
+                <InlineEdit.Provider key={block.id} value={editor ? (path, value) => editor.editText(block.id, path, value) : null}>
                 <Block
                   block={block}
                   page={page}
@@ -422,14 +563,22 @@ export function SiteRenderer({
                   Button={Button}
                   returnPath={returnPath}
                   returnQuery={returnQuery}
-                />,
+                />
+                </InlineEdit.Provider>,
                 block.id,
                 block.style,
                 // The first block sits under the header, which is the page's own colour.
                 index > 0 ? page.content.blocks[index - 1].style : null,
+                sectionChrome(block, index, page.content.blocks.length),
               ),
             )
           : null}
+        {!missingPage && editor && !page.content.blocks.length ? (
+          <div className="site-edit-empty">
+            <p>{editor.labels.emptyPage}</p>
+            {control(editor.labels.addSection, () => editor.addSection(0), <><Plus size={16} /> {editor.labels.addSection}</>, "site-edit-add is-standalone")}
+          </div>
+        ) : null}
       </main>
 
       {frame(
@@ -455,6 +604,10 @@ export function SiteRenderer({
             </p>
           ) : null}
         </div>,
+        undefined,
+        undefined,
+        null,
+        editor ? partChrome(editor.labels.editFooter, editor.editFooter) : null,
       )}
     </div>
   );
@@ -487,8 +640,8 @@ function Block({
   const sectionHead = (heading: string, intro: string) =>
     heading || intro ? (
       <div className="site-section-head">
-        <Heading level={2} text={heading} />
-        <Paragraphs text={intro} className="site-intro" />
+        <Heading level={2} text={heading} field="heading" />
+        <Paragraphs text={intro} className="site-intro" field="intro" />
       </div>
     ) : null;
 
@@ -502,9 +655,9 @@ function Block({
         >
           <div className="site-container site-hero-inner">
             <div className="site-hero-copy">
-              {block.eyebrow ? <p className="site-eyebrow">{block.eyebrow}</p> : null}
-              <Heading level={1} text={block.heading} className="site-hero-heading" />
-              <Paragraphs text={block.text} className="site-lede" />
+              <Text as="p" className="site-eyebrow" value={block.eyebrow} field="eyebrow" />
+              <Heading level={1} text={block.heading} className="site-hero-heading" field="heading" />
+              <Paragraphs text={block.text} className="site-lede" field="text" />
               {block.buttons.length ? (
                 <div className="site-buttons">
                   {block.buttons.map((button, index) => (
@@ -525,9 +678,9 @@ function Block({
     case "text":
       return (
         <section className={`site-container site-text is-${block.align} is-columns-${block.columns}`}>
-          <Heading level={2} text={block.heading} />
+          <Heading level={2} text={block.heading} field="heading" />
           <div className="site-text-body">
-            <Paragraphs text={block.body} />
+            <Paragraphs text={block.body} field="body" />
           </div>
         </section>
       );
@@ -535,13 +688,13 @@ function Block({
       return (
         <figure className={`site-figure is-${block.size}`}>
           {block.image ? <img className={pictureShapeClass(block.shape)} src={block.image.url} alt={block.image.alt} loading="lazy" /> : <div className="site-placeholder" />}
-          {block.caption ? <figcaption>{block.caption}</figcaption> : null}
+          <Text as="figcaption" value={block.caption} field="caption" />
         </figure>
       );
     case "gallery":
       return (
         <section className="site-container site-gallery">
-          <Heading level={2} text={block.heading} />
+          <Heading level={2} text={block.heading} field="heading" />
           <div className="site-gallery-grid" style={{ "--site-columns": block.columns } as CSSProperties}>
             {block.images.length ? (
               block.images.map((image, index) => (
@@ -573,8 +726,8 @@ function Block({
                   <span className="site-feature-icon">
                     <Icon size={22} />
                   </span>
-                  <Heading level={3} text={item.title} />
-                  <Paragraphs text={item.text} />
+                  <Heading level={3} text={item.title} field={itemField(item.id, "title")} />
+                  <Paragraphs text={item.text} field={itemField(item.id, "text")} />
                 </div>
               );
             })}
@@ -590,8 +743,8 @@ function Block({
               <div className="site-card" key={item.id}>
                 {item.image ? <img src={item.image.url} alt={item.image.alt} loading="lazy" /> : <div className="site-placeholder" />}
                 <div className="site-card-body">
-                  <Heading level={3} text={item.title} />
-                  <Paragraphs text={item.text} />
+                  <Heading level={3} text={item.title} field={itemField(item.id, "title")} />
+                  <Paragraphs text={item.text} field={itemField(item.id, "text")} />
                   <Button button={item.button} />
                 </div>
               </div>
@@ -631,9 +784,9 @@ function Block({
           <div className="site-price-grid">
             {block.items.map((item) => (
               <div className={`site-price${item.highlighted ? " is-highlighted" : ""}`} key={item.id}>
-                <Heading level={3} text={item.name} />
-                {item.price ? <p className="site-price-amount">{item.price}</p> : null}
-                {item.detail ? <p className="site-price-detail">{item.detail}</p> : null}
+                <Heading level={3} text={item.name} field={itemField(item.id, "name")} />
+                <Text as="p" className="site-price-amount" value={item.price} field={itemField(item.id, "price")} />
+                <Text as="p" className="site-price-detail" value={item.detail} field={itemField(item.id, "detail")} />
                 {item.features ? (
                   <ul className="site-price-features">
                     {item.features
@@ -661,11 +814,11 @@ function Block({
               .map((item) => (
                 <blockquote className={`site-testimonial${item.image && !item.quote && !item.name ? " has-image-only" : ""}`} key={item.id}>
                   {item.image ? <img src={item.image.url} alt={item.image.alt || item.name} loading="lazy" /> : null}
-                  {item.quote ? <p>{item.quote}</p> : null}
+                  <Text as="p" value={item.quote} field={itemField(item.id, "quote")} multiline />
                   {item.name || item.role ? (
                     <footer>
-                      <strong>{item.name}</strong>
-                      {item.role ? <span>{item.role}</span> : null}
+                      <Text as="strong" value={item.name} field={itemField(item.id, "name")} />
+                      <Text as="span" value={item.role} field={itemField(item.id, "role")} />
                     </footer>
                   ) : null}
                 </blockquote>
@@ -689,7 +842,7 @@ function Block({
                 <details className="site-faq-item" key={item.id}>
                   <summary>{item.question}</summary>
                   <div className="site-faq-answer">
-                    <Paragraphs text={item.answer} />
+                    <Paragraphs text={item.answer} field={itemField(item.id, "answer")} />
                   </div>
                 </details>
               ))}
@@ -701,8 +854,8 @@ function Block({
         <section className={`site-cta is-${block.tone}`}>
           <div className="site-container site-cta-inner">
             <div>
-              <Heading level={2} text={block.heading} />
-              <Paragraphs text={block.text} className="site-intro" />
+              <Heading level={2} text={block.heading} field="heading" />
+              <Paragraphs text={block.text} className="site-intro" field="text" />
             </div>
             <Button button={block.button} />
           </div>
@@ -711,9 +864,9 @@ function Block({
     case "video":
       return (
         <section className="site-container site-video">
-          <Heading level={2} text={block.heading} />
+          <Heading level={2} text={block.heading} field="heading" />
           <YouTubeFrame videoId={block.youtubeId} title={block.heading} preview={preview} />
-          {block.caption ? <p className="site-caption">{block.caption}</p> : null}
+          <Text as="p" className="site-caption" value={block.caption} field="caption" />
         </section>
       );
     case "embed":
@@ -846,7 +999,7 @@ function Block({
       return (
         <section className="site-container site-instagram">
           <div className="site-instagram-head">
-            <Heading level={2} text={block.heading} />
+            <Heading level={2} text={block.heading} field="heading" />
             {profile ? (
               <a className="site-instagram-handle" href={profile} target="_blank" rel="noreferrer">
                 <Instagram size={18} /> @{block.handle}
@@ -884,8 +1037,8 @@ function Block({
       return (
         <section className="site-container site-contact">
           <div className="site-contact-copy">
-            <Heading level={2} text={block.heading} />
-            <Paragraphs text={block.text} className="site-intro" />
+            <Heading level={2} text={block.heading} field="heading" />
+            <Paragraphs text={block.text} className="site-intro" field="text" />
             <ul className="site-contact-list">
               {block.email ? (
                 <li>

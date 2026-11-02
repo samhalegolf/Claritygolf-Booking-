@@ -23,16 +23,29 @@ own look, and every "Book" button can point at the site's own Book page.
    address (`/about`), a description for search engines, and a "Show in the
    menu" switch. The header menu is built from the pages in order; the home
    page stays first and cannot be removed.
-3. **Edit.** At rest the tab shows the pages across the top and the chosen
-   one drawn full width. Edit takes the whole pane: pages and the blocks on
-   the chosen page (add, reorder, duplicate, remove), a live preview you
-   click to select things (click a menu link to move to that page), and the
-   fields of whatever is selected. "Look" (colours, fonts, shapes), Header
-   and Footer are site-wide. Buttons and links can point at a page of the
-   site, the Clarity booking page, or any address.
-4. **Save and publish.** Save keeps a draft of the whole site nobody else
-   sees. Publish makes every page public at once. Take down removes it all
-   and keeps the drafts.
+3. **Edit, the Squarespace way.** The editor is laid out like Squarespace,
+   because that is the workflow coaches already know. "Edit site" opens the
+   Pages panel: Main navigation and Not linked, each page with a gear for
+   its settings (name, address, search and sharing, kind), "+" to add a
+   page, and Site styles, Site header and Footer. The chosen page is drawn
+   beside it. **Edit** puts the page itself in edit mode: words are typed
+   over where they stand (headings, paragraphs, item titles, quotes,
+   captions); every section has **Add section** above and below it and a
+   toolbar to edit, move, duplicate or remove it; the header and footer each
+   have an edit button. Add section opens a gallery of ready-made layouts
+   by category (`sectionLibrary.tsx`), each one of the blocks below with a
+   few settings chosen. Edit section opens its **Content** and **Design**
+   tabs; Design is the section style. **Site styles** is the look of every
+   page. Buttons and links can point at a page of the site, the Clarity
+   booking page, or any address.
+4. **Save goes live.** As on Squarespace, Save on a site that is already
+   public puts the changes live at once (`PUT /api/site/site` with
+   `live: true` saves, then publishes). A site that has never been public is
+   saved privately until **Make site public**. A whole new site (a template,
+   an import) is saved without going live, and the bar says "Changes not
+   live yet" until Save. Exit with unsaved changes asks whether to discard
+   them. "Take the site offline" (in the ... menu) removes it all and keeps
+   the pages.
 5. **Where the site lives.** Home is at `https://claritygolf.app/<business>/site`
    and every other page under it (`…/site/about`). On the coach's own
    domain, home is `/` and pages are `/about`. To use their own domain the
@@ -138,8 +151,8 @@ pricing block. The id is shown above a block's fields in the editor.
 
 ### Section style
 
-Every block carries a section style, edited under "Section: colours,
-backdrop and size" at the bottom of its inspector. Colours: same as the
+Every block carries a section style, edited on the Design tab of its
+Edit section panel. Colours: same as the
 page, a light panel (the theme's surface colour), white, dark (the text
 colour as background, white text) or accent (the primary colour). A
 picture or a muted, looping video can sit behind the block, darkened by a
@@ -281,6 +294,8 @@ inert: a click lands on the block, not inside the frame.
 | Routes | `netlify/functions/site.mts` |
 | Renderer (editor preview and public page share it) | `src/modules/site-builder/SiteRenderer.tsx`, `site.css` |
 | Editor | `src/modules/site-builder/SiteBuilderPanel.tsx`, `Inspectors.tsx`, `fields.tsx` |
+| Section gallery (Add section) | `src/modules/site-builder/sectionLibrary.tsx` |
+| Editing on the page: typed-over words, section toolbars | `SiteRenderer.tsx` (`editor` prop, `EditableText`), `blockText.ts`, `site-edit.css` (preview frame only) |
 | Shop block and the visitor's cart | `src/modules/site-builder/ShopBlock.tsx`, `siteCart.ts` |
 | The shelf, carts and orders (shared with the shop page) | `netlify/functions/_shared/online-shop.mts`, routes in `billing-api.mts`, migration `20261031000600_online_store` |
 | Contact form block | `src/modules/site-builder/FormBlock.tsx` |
