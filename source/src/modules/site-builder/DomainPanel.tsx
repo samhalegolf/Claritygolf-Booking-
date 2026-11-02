@@ -81,7 +81,7 @@ export function DomainPanel({
           ) : null}
         </div>
       </div>
-      {!isPublished ? <p className="field-help">{t("Publish the page and this address starts working.")}</p> : null}
+      {!isPublished ? <p className="field-help">{t("Make the site public and this address starts working.")}</p> : null}
 
       <h4 className="site-inspector-subtitle">{t("Your own domain")}</h4>
       {!state.customDomainsConfigured ? (

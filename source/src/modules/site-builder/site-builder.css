@@ -59,13 +59,6 @@
   gap: 8px;
 }
 
-.site-builder-grid {
-  display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 320px;
-  gap: 14px;
-  min-height: 70vh;
-}
-
 /* --- Outline --------------------------------------------------------------- */
 
 .site-outline {
@@ -153,11 +146,6 @@
   height: 26px;
   min-height: 0;
   color: inherit;
-}
-
-.site-add {
-  position: relative;
-  margin: 4px 0 6px;
 }
 
 .site-add-menu {
@@ -576,10 +564,6 @@
 /* --- Small screens ------------------------------------------------------------ */
 
 @media (max-width: 1180px) {
-  .site-builder-grid {
-    grid-template-columns: 1fr;
-  }
-
   .site-outline {
     grid-template-columns: 1fr;
   }
@@ -701,4 +685,362 @@
 
 .site-shop-items code {
   color: var(--c-muted);
+}
+
+/* The builder opened from Clarity Studio (StudioSitesPage): one of Clarity's
+   own sites at a time, picked from a row above the ordinary builder. */
+.studio-sites {
+  display: grid;
+  gap: var(--c-space-4);
+  padding: var(--c-space-6);
+  min-height: 100vh;
+  align-content: start;
+}
+
+.studio-sites-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-3);
+}
+
+.studio-sites-picker a {
+  display: grid;
+  gap: 2px;
+  padding: var(--c-space-3) var(--c-space-5);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+.studio-sites-picker a[aria-current="page"] {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.studio-sites-picker small {
+  opacity: 0.7;
+}
+
+.studio-sites-note {
+  margin: 0;
+}
+
+/* --- The editor, laid out like Squarespace (SiteBuilderPanel) -----------------
+   A bar across the top (Exit and Save, or Close and Edit), then the side
+   panel(s) and the page. The pages panel shows outside edit mode; the
+   section gallery opens on the left and the section, styles, header, footer
+   and page settings panels on the right. */
+
+.site-sq {
+  display: grid;
+  gap: 12px;
+}
+
+.site-sq-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.site-sq-bar .site-inline-actions {
+  margin-left: auto;
+}
+
+.site-sq-body {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 76vh;
+}
+
+.site-sq-body > .site-preview {
+  flex: 1 1 auto;
+}
+
+.site-sq .site-preview-frame {
+  height: calc(76vh - 28px);
+}
+
+.site-sq-side {
+  position: relative;
+  flex: 0 0 280px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  max-height: 76vh;
+  overflow: auto;
+  padding: 4px 6px 4px 2px;
+}
+
+.site-sq-panel {
+  flex-basis: 340px;
+  gap: 12px;
+}
+
+.site-sq-gallery {
+  flex-basis: 520px;
+}
+
+.site-sq-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.site-sq-panel-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.site-sq-side .site-add-menu {
+  position: static;
+  width: auto;
+  max-height: none;
+  box-shadow: none;
+}
+
+.site-sq-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border-soft);
+}
+
+.site-sq-tabs button {
+  flex: 1;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.site-sq-tabs button.is-active {
+  background: var(--c-surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+}
+
+.site-section-design {
+  display: grid;
+  gap: 12px;
+}
+
+.site-sq-more {
+  position: relative;
+}
+
+.site-sq-more-menu {
+  left: auto;
+  right: 0;
+}
+
+.site-sq-bar .outline-button.is-active {
+  border-color: currentColor;
+}
+
+/* The section gallery: kinds of section down the left, their layouts beside. */
+.site-sq-gallery-body {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.site-sq-categories {
+  display: grid;
+  gap: 2px;
+}
+
+.site-sq-categories button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-sq-categories button:hover {
+  background: var(--c-surface-soft);
+}
+
+.site-sq-categories button.is-active {
+  background: var(--c-surface-soft);
+  font-weight: 700;
+}
+
+.site-sq-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.site-sq-choice {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-sq-choice:hover {
+  border-color: currentColor;
+}
+
+/* A layout's sketch: heading bars (h), lines (l), pictures (i), buttons (b)
+   and form fields (f), in rows (r) and columns (c). */
+.site-sketch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 10;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--c-surface-soft);
+  overflow: hidden;
+}
+
+.site-sketch .c {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.site-sketch .c.is-centre {
+  align-items: center;
+}
+
+.site-sketch .r {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.site-sketch i {
+  display: block;
+  border-radius: 2px;
+  background: var(--c-border);
+}
+
+.site-sketch .h {
+  width: 70%;
+  height: 7px;
+  background: var(--c-muted);
+}
+
+.site-sketch .l {
+  width: 100%;
+  height: 3px;
+}
+
+.site-sketch .l.is-short {
+  width: 60%;
+}
+
+.site-sketch .i {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: var(--c-active);
+}
+
+.site-sketch .i.is-tall {
+  aspect-ratio: 1 / 1;
+}
+
+.site-sketch .b {
+  width: 30%;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--c-info-text);
+}
+
+.site-sketch .f {
+  width: 100%;
+  height: 7px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+}
+
+.site-sketch .f.is-tall {
+  height: 24px;
+}
+
+.site-sketch-cover,
+.site-sketch-band {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--c-pencil);
+}
+
+.site-sketch-band {
+  height: auto;
+  background: var(--c-info-text);
+}
+
+.site-sketch-cover .h,
+.site-sketch-band .h {
+  background: var(--c-surface);
+}
+
+.site-sketch-band .b {
+  background: var(--c-surface);
+}
+
+.site-sketch-gap {
+  display: block;
+  height: 30px;
+  width: 60%;
+  border: 1px dashed var(--c-border);
+}
+
+.site-sketch-play {
+  display: block;
+  width: 70%;
+}
+
+@media (max-width: 1180px) {
+  .site-sq-body {
+    flex-direction: column;
+  }
+
+  .site-sq-side {
+    flex-basis: auto;
+    max-height: none;
+  }
+
+  .site-sq-gallery-body {
+    grid-template-columns: 1fr;
+  }
+
+  .site-sq-categories {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }

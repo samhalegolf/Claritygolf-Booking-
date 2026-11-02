@@ -7,8 +7,13 @@
 // with. Moving between pages fetches the next one and swaps it in without
 // a reload; the address bar follows, and Back works. No session, no app
 // stylesheet.
+//
+// Clarity Booking's own site (a house site) is drawn here too, at the root of
+// Clarity's hosts: `bookingHouse` swaps the addresses for its own (Home at /,
+// Privacy at /privacy...), and `fallback` is shown instead of "no page here"
+// whenever that site cannot be drawn (never published, or the read failed).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { HOME_PAGE_SLUG, googleFontsUrl } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
@@ -17,7 +22,7 @@ import { Loading } from "../shared/Loading";
 import { fetchPublicSite, type PublicSite } from "./siteApi";
 import { SiteRenderer } from "./SiteRenderer";
 import { sitePageMeta } from "./siteTheme";
-import { customDomainPagePath, publicSitePath } from "./siteTheme";
+import { bookingHousePagePath, bookingHouseRootSlug, customDomainPagePath, publicSitePath } from "./siteTheme";
 import "./site.css";
 
 const FONT_LINK_ID = "site-fonts";
@@ -38,24 +43,39 @@ function setMeta(name: string, content: string) {
   tag.content = content;
 }
 
-export default function PublicSitePage({ business, host, slug }: { business?: string; host?: string; slug: string }) {
+export default function PublicSitePage({
+  business,
+  host,
+  slug,
+  bookingHouse = false,
+  fallback,
+}: {
+  business?: string;
+  host?: string;
+  slug: string;
+  /** Clarity Booking's own site at the root of Clarity's hosts: its addresses are bookingHousePagePath's. */
+  bookingHouse?: boolean;
+  /** Shown instead of the "no page" screen when the site cannot be drawn: never published, or not reachable. */
+  fallback?: ReactNode;
+}) {
   const [current, setCurrent] = useState(slug);
   const [site, setSite] = useState<PublicSite | null>(null);
-  const [error, setError] = useState<{ status: number; message: string } | null>(null);
+  const [error, setError] = useState<{ status: number; message: string; code: string } | null>(null);
   const [loading, setLoading] = useState(true);
   // The query the page was opened with: a shop order on its way back carries its id here.
   const returnQuery = useRef(new URLSearchParams(window.location.search));
 
   const pagePath = useCallback(
-    (pageSlug: string) => (host ? customDomainPagePath(pageSlug) : publicSitePath(business || site?.business.slug || "", pageSlug)),
-    [host, business, site?.business.slug],
+    (pageSlug: string) =>
+      bookingHouse ? bookingHousePagePath(pageSlug) : host ? customDomainPagePath(pageSlug) : publicSitePath(business || site?.business.slug || "", pageSlug),
+    [bookingHouse, host, business, site?.business.slug],
   );
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     if (!current) {
-      setError({ status: 404, message: "" });
+      setError({ status: 404, message: "", code: "" });
       setLoading(false);
       return;
     }
@@ -65,7 +85,7 @@ export default function PublicSitePage({ business, host, slug }: { business?: st
         setSite(next);
         setError(null);
       })
-      .catch((cause: Error & { status?: number }) => !cancelled && setError({ status: cause.status || 0, message: cause.message }))
+      .catch((cause: Error & { status?: number; code?: string }) => !cancelled && setError({ status: cause.status || 0, message: cause.message, code: cause.code || "" }))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -75,12 +95,16 @@ export default function PublicSitePage({ business, host, slug }: { business?: st
   // Back and Forward: the address decides the page, the same way the first load did.
   useEffect(() => {
     const onPop = () => {
-      const next = host ? customDomainPageSlug() : publicSiteRoute()?.slug || HOME_PAGE_SLUG;
+      const next = bookingHouse
+        ? bookingHouseRootSlug(window.location.pathname) || publicSiteRoute()?.slug || HOME_PAGE_SLUG
+        : host
+          ? customDomainPageSlug()
+          : publicSiteRoute()?.slug || HOME_PAGE_SLUG;
       setCurrent(next);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [host]);
+  }, [host, bookingHouse]);
 
   const navigate = useCallback(
     (pageSlug: string) => {
@@ -128,6 +152,9 @@ export default function PublicSitePage({ business, host, slug }: { business?: st
     document.documentElement.style.background = site.settings.theme.colors.background;
   }, [site]);
 
+  // Clarity Booking's home and legal pages must always show (Google's verification reads them),
+  // so the stand-in covers any failure to load the site, not only "never published".
+  if (error && !site && fallback) return <>{fallback}</>;
   if (error && !site) {
     return (
       <div className="loading-screen">

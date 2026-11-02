@@ -10,6 +10,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import siteCss from "./site.css?inline";
+// The on-page editing controls. Inert unless the page is drawn in edit mode.
+import siteEditCss from "./site-edit.css?inline";
 
 const FRAME_DOCUMENT = `<!doctype html>
 <html>
@@ -17,6 +19,7 @@ const FRAME_DOCUMENT = `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>${siteCss}</style>
+<style>${siteEditCss}</style>
 </head>
 <body style="margin:0"><div id="site"></div></body>
 </html>`;

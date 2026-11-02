@@ -46,7 +46,6 @@ export function SiteInspector({ settings, onChange }: { settings: SiteSettings; 
   const setColor = (key: keyof SiteTheme["colors"], value: string) => setTheme({ colors: { ...theme.colors, [key]: value } });
   return (
     <>
-      <h3 className="site-inspector-title">{t("Look")}</h3>
       <p className="site-field-help">{t("Colours, fonts and shapes apply to every page of the site.")}</p>
       <div className="site-presets" role="group" aria-label={t("Colour presets")}>
         {SITE_THEME_PRESETS.map((preset) => (
@@ -143,7 +142,6 @@ export function PageInspector({
   const slugTaken = pages.some((other) => other.slug === page.slug);
   return (
     <>
-      <h3 className="site-inspector-title">{t("This page")}</h3>
       <TextInput label={t("Name in the menu")} value={page.title} maxLength={120} onChange={(title) => onChange({ ...page, title })} />
       <TextInput
         label={t("Address")}
@@ -209,7 +207,6 @@ export function PageInspector({
 export function HeaderInspector({ header, onChange, pages, bookingHref }: { header: SiteHeader; onChange: (next: SiteHeader) => void; pages: PageOption[]; bookingHref: string }) {
   return (
     <>
-      <h3 className="site-inspector-title">{t("Header")}</h3>
       <ToggleInput label={t("Show your logo")} checked={header.showLogo} onChange={(showLogo) => onChange({ ...header, showLogo })} />
       <ToggleInput label={t("Show your business name")} checked={header.showName} onChange={(showName) => onChange({ ...header, showName })} />
       <ToggleInput label={t("Stays at the top while scrolling")} checked={header.sticky} onChange={(sticky) => onChange({ ...header, sticky })} />
@@ -240,7 +237,6 @@ export function HeaderInspector({ header, onChange, pages, bookingHref }: { head
 export function FooterInspector({ footer, onChange, pages, bookingHref }: { footer: SiteFooter; onChange: (next: SiteFooter) => void; pages: PageOption[]; bookingHref: string }) {
   return (
     <>
-      <h3 className="site-inspector-title">{t("Footer")}</h3>
       <TextInput label={t("Footer text")} value={footer.text} maxLength={300} onChange={(text) => onChange({ ...footer, text })} />
       <h4 className="site-inspector-subtitle">{t("Links")}</h4>
       <LinkList links={footer.links} onChange={(links) => onChange({ ...footer, links })} pages={pages} bookingHref={bookingHref} />
@@ -275,14 +271,11 @@ function SocialList({ links, onChange }: { links: SiteSocialLink[]; onChange: (n
  * it, how tall it is and how wide its content runs. The same fields on every
  * block, folded shut so the block's own fields come first.
  */
-function SectionStyleFields({ style, onChange, onError }: { style: SiteBlockStyle; onChange: (next: SiteBlockStyle) => void; onError: (message: string) => void }) {
+/** A section's Design tab: its colours, what is behind it, its height and width, and its top edge. */
+export function SectionDesignFields({ style, onChange, onError }: { style: SiteBlockStyle; onChange: (next: SiteBlockStyle) => void; onError: (message: string) => void }) {
   const set = (patch: Partial<SiteBlockStyle>) => onChange({ ...style, ...patch });
   return (
-    <details className="site-list-item site-section-style">
-      <summary>
-        <span>{t("Section: colours, backdrop and size")}</span>
-      </summary>
-      <div className="site-list-item-body">
+    <div className="site-section-design">
         <SelectInput
           label={t("Colours")}
           value={style.theme}
@@ -329,8 +322,7 @@ function SectionStyleFields({ style, onChange, onError }: { style: SiteBlockStyl
             { value: "wave", label: t("A wave, in the button colour") },
           ]}
         />
-      </div>
-    </details>
+    </div>
   );
 }
 
@@ -430,15 +422,6 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
   );
 }
 
-export function BlockInspector({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
-  return (
-    <>
-      <BlockFields block={block} onChange={onChange} pages={pages} bookingHref={bookingHref} onError={onError} />
-      <SectionStyleFields style={block.style} onChange={(style) => onChange({ ...block, style })} onError={onError} />
-    </>
-  );
-}
-
 function PictureShapeInput({ value, onChange }: { value: SitePictureShape; onChange: (shape: SitePictureShape) => void }) {
   return (
     <SelectInput
@@ -454,7 +437,8 @@ function PictureShapeInput({ value, onChange }: { value: SitePictureShape; onCha
   );
 }
 
-function BlockFields({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
+/** A section's Content tab: its words, pictures, buttons and lists. */
+export function BlockContentFields({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
   const set = <B extends SiteBlock>(patch: Partial<B>) => onChange({ ...block, ...patch } as SiteBlock);
   switch (block.type) {
     case "hero":

@@ -157,7 +157,8 @@ export function LinkInput({
   bookingHref: string;
 }) {
   const pageSlug = pageSlugFromHref(value);
-  const kind = pageSlug && pages.some((page) => page.slug === pageSlug) ? value : value === bookingHref ? "booking" : "custom";
+  // A site with no booking page (one of Clarity's own) has no booking option.
+  const kind = pageSlug && pages.some((page) => page.slug === pageSlug) ? value : bookingHref && value === bookingHref ? "booking" : "custom";
   return (
     <>
       <Field label={label}>
@@ -166,7 +167,7 @@ export function LinkInput({
           onChange={(event) => {
             const next = event.target.value;
             if (next === "booking") onChange(bookingHref);
-            else if (next === "custom") onChange(pageSlug || value === bookingHref ? "" : value);
+            else if (next === "custom") onChange(pageSlug || (bookingHref && value === bookingHref) ? "" : value);
             else onChange(next);
           }}
         >
@@ -175,7 +176,7 @@ export function LinkInput({
               {page.title || page.slug}
             </option>
           ))}
-          <option value="booking">{t("Clarity booking page")}</option>
+          {bookingHref ? <option value="booking">{t("Clarity booking page")}</option> : null}
           <option value="custom">{t("A web address, email, phone or #block")}</option>
         </select>
       </Field>
@@ -268,7 +269,7 @@ export function ButtonInput({
 }) {
   if (!value) {
     return (
-      <button className="outline-button" type="button" onClick={() => onChange({ label: t("Book a lesson"), href: bookingHref, style: "primary" })}>
+      <button className="outline-button" type="button" onClick={() => onChange({ label: bookingHref ? t("Book a lesson") : t("Find out more"), href: bookingHref, style: "primary" })}>
         <Plus size={16} />
         {label}
       </button>

@@ -5,7 +5,7 @@
 // The same object drives the editor's preview and the public page.
 
 import type { CSSProperties } from "react";
-import { HOME_PAGE_SLUG, googleFontsUrl, siteFont, type SiteBlockStyle, type SiteBookingScreen, type SiteTheme } from "../../../netlify/functions/_shared/site/document.mts";
+import { BOOKING_HOUSE_ROOT_PAGES, BOOKING_HOUSE_SITE, HOME_PAGE_SLUG, googleFontsUrl, siteFont, type SiteBlockStyle, type SiteBookingScreen, type SiteTheme } from "../../../netlify/functions/_shared/site/document.mts";
 import { BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE, PUBLIC_BOOKING_HOST } from "../shared/bookingHandoff";
 import { publicBookingPath } from "../public-booking/bookingScreen";
 
@@ -169,4 +169,22 @@ export function publicSitePath(businessSlug: string, pageSlug = HOME_PAGE_SLUG):
 /** Where a page lives on the business's own domain: the root, or one segment. */
 export function customDomainPagePath(pageSlug: string): string {
   return pageSlug === HOME_PAGE_SLUG ? "/" : `/${pageSlug}`;
+}
+
+/**
+ * Where a page of Clarity Booking's own site lives on Clarity's hosts: Home,
+ * Privacy, Terms and Support at the root, every other page under
+ * /clarity-booking/site/ like any site's.
+ */
+export function bookingHousePagePath(pageSlug: string): string {
+  if (pageSlug === HOME_PAGE_SLUG || BOOKING_HOUSE_ROOT_PAGES.includes(pageSlug)) return customDomainPagePath(pageSlug);
+  return publicSitePath(BOOKING_HOUSE_SITE, pageSlug);
+}
+
+/** The page of Clarity Booking's own site a root path shows, or "" for a path that is not one of its root pages. */
+export function bookingHouseRootSlug(pathname: string): string {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (path === "/") return HOME_PAGE_SLUG;
+  const slug = path.slice(1);
+  return BOOKING_HOUSE_ROOT_PAGES.includes(slug) ? slug : "";
 }

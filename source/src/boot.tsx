@@ -11,7 +11,7 @@ import { fetchSession, guestSession, type Session } from "./modules/auth/session
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { isTerminalPath } from "./modules/clarity-terminal/terminalApi";
 import { customDomainPageSlug, publicShopBusiness, publicSiteRoute } from "./modules/public-booking/bookingScreen";
-import { isClarityHost } from "../netlify/functions/_shared/site/document.mts";
+import { BOOKING_HOUSE_SITE, isClarityHost } from "../netlify/functions/_shared/site/document.mts";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { prefetchCalendarState } from "./modules/workspace/calendarStatePrefetch";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
@@ -52,6 +52,8 @@ const PaymentReturnPage = lazy(() => import("./modules/public-site/PaymentReturn
 // /<business>/site on Clarity's hosts, and at every path of a domain a
 // business has pointed here. It never loads the app stylesheet.
 const PublicSitePage = lazy(() => import("./modules/site-builder/PublicSitePage"));
+// The website builder, opened inside Clarity Studio for Clarity's own sites.
+const StudioSitesPage = lazy(() => import("./modules/site-builder/StudioSitesPage"));
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
@@ -118,6 +120,9 @@ function inStaffApp() {
 const homeSkipsToWorkspace = publicPath === "/" && !authLinkAtRoot && (lastVisitorWasCoach() || inStaffApp());
 // Where a customer's phone lands after paying a counter QR. Public: the
 // customer is a stranger, and a login screen there reads as "it failed".
+// Clarity Studio frames this to edit Clarity's own websites with the same
+// builder coaches use. It signs in with a Studio pass, never a session.
+const studioSites = !customDomainHost && publicPath === "/studio-sites";
 const paymentReturn: "paid" | "cancelled" | null =
   publicPath === "/pos-paid" ? "paid" : publicPath === "/pos-cancelled" ? "cancelled" : null;
 const publicPage: PublicPage | null =
@@ -136,7 +141,7 @@ const publicPage: PublicPage | null =
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
 const willCheckSession =
-  !publicSite && !publicPage && !paymentReturn && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
+  !publicSite && !publicPage && !studioSites && !paymentReturn && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
 if (willCheckSession && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
@@ -179,7 +184,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicSite || publicPage || paymentReturn || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
+    if (publicSite || publicPage || studioSites || paymentReturn || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -217,6 +222,14 @@ function Root() {
     );
   }
 
+  if (studioSites) {
+    return (
+      <Suspense fallback={<Loading size="screen" label="Clarity Studio" />}>
+        <StudioSitesPage />
+      </Suspense>
+    );
+  }
+
   if (paymentReturn) {
     return (
       <Suspense fallback={<Loading size="screen" label="" />}>
@@ -225,10 +238,13 @@ function Root() {
     );
   }
 
+  // Home, Privacy, Terms and Support are Clarity Booking's own site, built
+  // in Clarity Studio with the website builder. Until that site is first
+  // published, or whenever it cannot be read, the hand-drawn pages stand in.
   if (publicPage) {
     return (
       <Suspense fallback={<Loading size="screen" label="Clarity Golf" />}>
-        <PublicSite page={publicPage} />
+        <PublicSitePage business={BOOKING_HOUSE_SITE} slug={publicPage} bookingHouse fallback={<PublicSite page={publicPage} />} />
       </Suspense>
     );
   }
