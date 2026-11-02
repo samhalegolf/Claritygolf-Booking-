@@ -1,6 +1,9 @@
 // The client half of Settings › Website, the public page's reads, and the
-// shop block's calls. Every coach call goes to /api/site with the coach's own
-// session; the public and shop calls carry no session at all.
+// shop block's calls. Every editing call goes to the editor's target: by
+// default /api/site with the coach's own session, or, when the builder is
+// opened from Clarity Studio for one of Clarity's own sites, /api/studio-sites
+// with a Studio pass (see setSiteEditorTarget). The builder itself does not
+// know which; the public and shop calls carry no session at all.
 
 import { apiFetch } from "../auth/apiFetch";
 import { t } from "../../lib/i18n";
@@ -27,6 +30,8 @@ export type SitePageView = SitePageMeta & { content: SitePageContent; isPublishe
 
 export type SiteState = {
   business: { slug: string; name: string; coachName: string; venueName: string; email: string };
+  /** False for one of Clarity's own sites: it has no booking page and no shop, so the editor offers neither. */
+  forBusiness: boolean;
   site: SiteView | null;
   pages: SitePageView[];
   domains: SiteDomainView[];
@@ -62,8 +67,30 @@ const jsonInit = (method: string, body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
+/** Where editing calls go, and how they prove who is asking. */
+export type SiteEditorTarget = {
+  /** "/api/site" or "/api/studio-sites". */
+  base: string;
+  /** Added to every call: "site=<id>" for a Studio target. */
+  query: string;
+  send: (input: string, init?: RequestInit) => Promise<Response>;
+};
+
+const COACH_TARGET: SiteEditorTarget = { base: "/api/site", query: "", send: (input, init) => apiFetch(input, init) };
+let editorTarget: SiteEditorTarget = COACH_TARGET;
+
+/** Point the editor somewhere other than the signed-in coach's own site. Studio's host page does this once, before the editor mounts. */
+export function setSiteEditorTarget(target: SiteEditorTarget | null) {
+  editorTarget = target || COACH_TARGET;
+}
+
+function editorCall(path: string, init?: RequestInit): Promise<Response> {
+  const query = editorTarget.query ? `${path.includes("?") ? "&" : "?"}${editorTarget.query}` : "";
+  return editorTarget.send(`${editorTarget.base}${path}${query}`, init);
+}
+
 export async function fetchSiteState(): Promise<SiteState> {
-  return readJson(await apiFetch("/api/site"));
+  return readJson(await editorCall(""));
 }
 
 /**
@@ -72,41 +99,41 @@ export async function fetchSiteState(): Promise<SiteState> {
  * been saved since, so a stale tab never writes over newer work.
  */
 export async function saveSite(settings: SiteSettings, pages: Array<SitePageMeta & { content: SitePageContent }>, updatedAt: string | null): Promise<SavedSite> {
-  return readJson(await apiFetch("/api/site/site", jsonInit("PUT", { settings, pages, updatedAt })));
+  return readJson(await editorCall("/site", jsonInit("PUT", { settings, pages, updatedAt })));
 }
 
 /** Bring a Squarespace site over. The report says what was found and what could not be; the pictures are brought next, in batches. */
 export async function importSite(url: string, preset: string, updatedAt: string | null): Promise<SavedSite & { pictures: string[]; report: string[] }> {
-  return readJson(await apiFetch("/api/site/import", jsonInit("POST", { url, preset, updatedAt })));
+  return readJson(await editorCall("/import", jsonInit("POST", { url, preset, updatedAt })));
 }
 
 /** One batch of an imported site's pictures, into the bucket and into every page of the draft. */
 export async function importPictures(urls: string[]): Promise<SavedSite & { moved: Record<string, string>; report: string[] }> {
-  return readJson(await apiFetch("/api/site/import/pictures", jsonInit("POST", { urls })));
+  return readJson(await editorCall("/import/pictures", jsonInit("POST", { urls })));
 }
 
 export async function publishSite(updatedAt: string | null): Promise<SavedSite> {
-  return readJson(await apiFetch("/api/site/publish", jsonInit("POST", { updatedAt })));
+  return readJson(await editorCall("/publish", jsonInit("POST", { updatedAt })));
 }
 
 export async function unpublishSite(): Promise<SavedSite> {
-  return readJson(await apiFetch("/api/site/unpublish", jsonInit("POST")));
+  return readJson(await editorCall("/unpublish", jsonInit("POST")));
 }
 
 export async function uploadSiteImage(type: string, dataBase64: string): Promise<string> {
-  return (await readJson<{ url: string }>(await apiFetch("/api/site/media", jsonInit("POST", { type, dataBase64 })))).url;
+  return (await readJson<{ url: string }>(await editorCall("/media", jsonInit("POST", { type, dataBase64 })))).url;
 }
 
 export async function addSiteDomain(hostname: string): Promise<SiteDomainView> {
-  return (await readJson<{ domain: SiteDomainView }>(await apiFetch("/api/site/domains", jsonInit("POST", { hostname })))).domain;
+  return (await readJson<{ domain: SiteDomainView }>(await editorCall("/domains", jsonInit("POST", { hostname })))).domain;
 }
 
 export async function checkSiteDomain(id: string): Promise<SiteDomainView> {
-  return (await readJson<{ domain: SiteDomainView }>(await apiFetch("/api/site/domains/check", jsonInit("POST", { id })))).domain;
+  return (await readJson<{ domain: SiteDomainView }>(await editorCall("/domains/check", jsonInit("POST", { id })))).domain;
 }
 
 export async function removeSiteDomain(id: string): Promise<void> {
-  await readJson(await apiFetch(`/api/site/domains?id=${encodeURIComponent(id)}`, { method: "DELETE" }));
+  await readJson(await editorCall(`/domains?id=${encodeURIComponent(id)}`, { method: "DELETE" }));
 }
 
 /** The stranger's read. No session, cached at the CDN. */

@@ -668,12 +668,34 @@ export type SiteSettings = {
   footer: SiteFooter;
 };
 
+/**
+ * What only a business's site can carry: blocks and page presets that draw
+ * its booking page or its shop. One of Clarity's own sites (a house site) has
+ * neither, so its editor does not offer them.
+ */
+export const BUSINESS_ONLY_BLOCKS: readonly string[] = ["booking", "venues", "shop"];
+export const BUSINESS_ONLY_PRESETS: readonly string[] = ["venues", "lessons", "book", "shop"];
+
+/**
+ * Clarity Booking's own site (a house site, see site/house.mts). Its Home,
+ * Privacy, Terms and Support pages answer at the root of Clarity's own hosts
+ * (claritygolf.app/, /privacy, /terms, /support); its other pages live at
+ * /clarity-booking/site/<page> like any site's.
+ */
+export const BOOKING_HOUSE_SITE = "clarity-booking";
+export const BOOKING_HOUSE_ROOT_PAGES: readonly string[] = ["privacy", "terms", "support"];
+
 /** The root page. Cannot be renamed or removed: it is what the domain lands on. */
 export const HOME_PAGE_SLUG = "home";
 
 /**
  * Slugs a page may not take: paths Clarity's own hosts and the functions
  * answer at, and the booking screens, so a page can never shadow them.
+ *
+ * privacy, terms and support are not here. On Clarity's own hosts a site's
+ * pages live under /<business>/site/, where they shadow nothing, and on a
+ * business's own domain the site answers every path. A site needs those
+ * three pages more than most (Clarity's own sites are made of little else).
  */
 export const RESERVED_PAGE_SLUGS = [
   "api",
@@ -683,9 +705,6 @@ export const RESERVED_PAGE_SLUGS = [
   "admin",
   "login",
   "terminal",
-  "privacy",
-  "terms",
-  "support",
   "pos-paid",
   "pos-cancelled",
   "group-lessons",

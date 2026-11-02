@@ -5169,5 +5169,7 @@
   "Until any of it is spent, the voucher pays for one of these at whatever it costs on the day. If that is less than the voucher is worth, the rest goes to the client's account credit. It can also be spent like money on anything else.": "まだ一部も使われていない間は、このバウチャーでこれらのいずれかを当日の価格で支払えます。当日の価格がバウチャーの額より低い場合、差額はクライアントのクレジット残高に入ります。ほかのものにも金額として使用できます。",
   "Spent at the till like a voucher: search their name.": "レジでバウチャーと同じように使用できます。名前で検索してください。",
   "1 hour lesson": "1時間レッスン",
-  "Drag each field to where it goes on your artwork. Each voucher sold gets its own card, attached to this email as a PDF. What it's for prints only on vouchers for a lesson or product, and the value only where the voucher shows it.": "各項目をデザイン上の配置したい位置にドラッグしてください。販売されたバウチャーごとに専用のカードが作成され、このメールにPDFで添付されます。用途はレッスンまたは商品のバウチャーにのみ印刷され、金額はバウチャーで表示する設定の場合にのみ印刷されます。"
+  "Drag each field to where it goes on your artwork. Each voucher sold gets its own card, attached to this email as a PDF. What it's for prints only on vouchers for a lesson or product, and the value only where the voucher shows it.": "各項目をデザイン上の配置したい位置にドラッグしてください。販売されたバウチャーごとに専用のカードが作成され、このメールにPDFで添付されます。用途はレッスンまたは商品のバウチャーにのみ印刷され、金額はバウチャーで表示する設定の場合にのみ印刷されます。",
+  "One of Clarity's own websites, built with the same builder coaches use. Build it here, publish it, and point its domain at it below.": "Clarity 自身のウェブサイトの一つです。コーチと同じウェブサイトビルダーで作られています。ここで作成して公開し、下でドメインをこちらに向けてください。",
+  "Find out more": "詳しく見る"
 }

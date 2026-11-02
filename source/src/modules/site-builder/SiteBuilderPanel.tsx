@@ -16,6 +16,7 @@ import { ArrowDown, ArrowUp, Check, Copy, Eye, FilePlus, Globe, Monitor, PanelBo
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  BUSINESS_ONLY_BLOCKS,
   HOME_PAGE_SLUG,
   SITE_PAGE_PRESETS,
   googleFontsUrl,
@@ -31,7 +32,7 @@ import {
   type SitePagePresetInput,
   type SiteSettings,
 } from "../../../netlify/functions/_shared/site/document.mts";
-import { SITE_TEMPLATES } from "../../../netlify/functions/_shared/site/templates.mts";
+import { findSiteTemplate } from "../../../netlify/functions/_shared/site/templates.mts";
 import { t } from "../../lib/i18n";
 import { ClarityPlayerPortal } from "../shared/ClarityIcons";
 import { Loading } from "../shared/Loading";
@@ -144,7 +145,9 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const bookingHref = state ? bookingPageUrl(state.business.slug) : "";
+  // One of Clarity's own sites has no booking page and no shop to offer.
+  const bookingHref = state?.forBusiness ? bookingPageUrl(state.business.slug) : "";
+  const catalog = useMemo(() => BLOCK_CATALOG.filter((entry) => state?.forBusiness !== false || !BUSINESS_ONLY_BLOCKS.includes(entry.type)), [state?.forBusiness]);
   const business = useMemo(
     () => ({ slug: state?.business.slug || "", name: state?.business.name || "", logo: brandLogo, showLogo: brandShowLogo }),
     [state?.business.slug, state?.business.name, brandLogo, brandShowLogo],
@@ -262,7 +265,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
 
   async function startFromTemplate(templateId: string) {
     if (!state) return;
-    const template = SITE_TEMPLATES.find((candidate) => candidate.id === templateId);
+    const template = findSiteTemplate(templateId);
     if (!template) return;
     if (draft && !window.confirm(t("Replace the whole site with this template? Every page you have made is lost."))) return;
     const built = template.build(presetInput);
@@ -414,7 +417,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       <p className="settings-note">{t("Pick a starting point. Everything on it can be changed, and pages and blocks can be added or removed afterwards.")}</p>
       <div className="site-template-grid">
         {state.templates.map((template) => {
-          const preset = SITE_TEMPLATES.find((candidate) => candidate.id === template.id)?.build(presetInput).settings.theme;
+          const preset = findSiteTemplate(template.id)?.build(presetInput).settings.theme;
           return (
             <button
               type="button"
@@ -702,7 +705,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
                   </button>
                   {addMenuOpen ? (
                     <div className="site-add-menu" role="menu">
-                      {BLOCK_CATALOG.map((entry) => (
+                      {catalog.map((entry) => (
                         <button type="button" role="menuitem" key={entry.type} onClick={() => addBlock(entry.type)}>
                           <entry.Icon size={16} />
                           <span>
@@ -755,7 +758,11 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   return (
     <>
       <SettingsGroup id="website" icon={Globe} section="website" title={t("Website")} className="site-builder-card">
-        <p className="settings-note">{t("A public website for your business, with your booking page and shop built in. Build it here, publish it, and point your own domain at it below.")}</p>
+        <p className="settings-note">
+          {state.forBusiness
+            ? t("A public website for your business, with your booking page and shop built in. Build it here, publish it, and point your own domain at it below.")
+            : t("One of Clarity's own websites, built with the same builder coaches use. Build it here, publish it, and point its domain at it below.")}
+        </p>
         {!draft || choosingTemplate ? (
           templateChooser
         ) : choosingPage ? (

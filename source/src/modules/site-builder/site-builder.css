@@ -702,3 +702,43 @@
 .site-shop-items code {
   color: var(--c-muted);
 }
+
+/* The builder opened from Clarity Studio (StudioSitesPage): one of Clarity's
+   own sites at a time, picked from a row above the ordinary builder. */
+.studio-sites {
+  display: grid;
+  gap: var(--c-space-4);
+  padding: var(--c-space-6);
+  min-height: 100vh;
+  align-content: start;
+}
+
+.studio-sites-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-3);
+}
+
+.studio-sites-picker a {
+  display: grid;
+  gap: 2px;
+  padding: var(--c-space-3) var(--c-space-5);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+.studio-sites-picker a[aria-current="page"] {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.studio-sites-picker small {
+  opacity: 0.7;
+}
+
+.studio-sites-note {
+  margin: 0;
+}

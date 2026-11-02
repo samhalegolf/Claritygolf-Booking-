@@ -8,7 +8,7 @@ import { readSandboxAccount } from "./_shared/sandbox.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { db, readSettingsMap } from "./_shared/settings-store.mts";
 import { cleanEmail, cleanString } from "./_shared/values.mts";
-import { HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageMeta } from "./_shared/site/document.mts";
+import { BUSINESS_ONLY_PRESETS, HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageMeta } from "./_shared/site/document.mts";
 import { bringPictures, importSquarespaceSite, replacePictureUrls } from "./_shared/site/import-squarespace.mts";
 import {
   attachDomainToSite,
@@ -41,7 +41,9 @@ import {
   type SitePageRecord,
   type SiteRecord,
 } from "./_shared/site/store.mts";
-import { SITE_TEMPLATES } from "./_shared/site/templates.mts";
+import { HOUSE_SITE_ROLES, listHouseAccounts, readHouseAccount, requireStudioAdmin, type HouseAccount } from "./_shared/site/house.mts";
+import { HOUSE_SITE_TEMPLATES } from "./_shared/site/house-templates.mts";
+import { SITE_TEMPLATES, houseSiteTemplate, type SiteTemplate } from "./_shared/site/templates.mts";
 
 /**
  * Settings › Website, and the public site it publishes.
@@ -57,6 +59,17 @@ import { SITE_TEMPLATES } from "./_shared/site/templates.mts";
  *   POST   /api/site/domains           claim a hostname          { hostname }
  *   POST   /api/site/domains/check     look the DNS records up, attach when right   { id }
  *   DELETE /api/site/domains?id=       release a hostname
+ *
+ * Clarity's own sites (house sites, _shared/site/house.mts) are edited from
+ * Clarity Studio through the same routes under /api/studio-sites, with a
+ * Studio pass instead of a coach's session and the site named by ?site=:
+ *
+ *   GET    /api/studio-sites                   every house site
+ *   GET    /api/studio-sites?site=<id>         that site's draft, as GET /api/site
+ *   ...    /api/studio-sites/<action>?site=    every coach action above, unchanged
+ *
+ * One set of actions answers both, so the builder is the same builder
+ * wherever it is opened.
  *
  * And the strangers' routes. The read is cached at the CDN and purged on
  * publish; the form is never cached:
@@ -134,7 +147,7 @@ function pageView(page: SitePageRecord) {
   };
 }
 
-async function coachState(accountId: string) {
+async function coachState(accountId: string, templates: readonly SiteTemplate[], forBusiness: boolean) {
   const [site, pages, domains, settings, identity] = await Promise.all([
     readSite(accountId),
     listSitePages(accountId),
@@ -161,8 +174,10 @@ async function coachState(accountId: string) {
     domains: domains.map(domainView),
     dns: { cnameTarget: cnameTarget(), apexIp: NETLIFY_APEX_IPS[0] },
     customDomainsConfigured: customDomainsConfigured(),
-    templates: SITE_TEMPLATES.map((template) => ({ id: template.id, label: template.label, summary: template.summary, preset: template.preset })),
-    presets: SITE_PAGE_PRESETS.map((preset) => ({ id: preset.id, label: preset.label, summary: preset.summary })),
+    templates: templates.map((template) => ({ id: template.id, label: template.label, summary: template.summary, preset: template.preset })),
+    presets: SITE_PAGE_PRESETS.filter((preset) => forBusiness || !BUSINESS_ONLY_PRESETS.includes(preset.id)).map((preset) => ({ id: preset.id, label: preset.label, summary: preset.summary })),
+    // False for one of Clarity's own sites: no booking page, no shop.
+    forBusiness,
   };
 }
 
@@ -177,7 +192,10 @@ async function resolvePublicBusiness(req: Request, business: string, hostParam: 
     .replace(/:\d+$/, "");
   if (business) {
     const account = await resolvePublicAccount(business);
-    return account ? { accountId: account.id, slug: account.slug || business, businessName: account.businessName } : null;
+    if (account) return { accountId: account.id, slug: account.slug || business, businessName: account.businessName };
+    // One of Clarity's own sites: no booking page, but a site like any other.
+    const house = await readHouseAccount(business);
+    return house ? { accountId: house.id, slug: house.slug, businessName: house.name } : null;
   }
   if (!host) return null;
   const accountId = await accountIdForHostname(host);
@@ -311,124 +329,169 @@ async function checkDomain(accountId: string, id: string) {
   return active;
 }
 
+
+/**
+ * Every editing action, for one site. The coach's routes and Studio's both
+ * end here; they differ only in who is asking and which account they may
+ * name. Null for an action this does not know.
+ */
+async function editorAction(accountId: string, action: string, req: Request, url: URL, templates: readonly SiteTemplate[], forBusiness: boolean): Promise<Response | null> {
+  if (!action && req.method === "GET") return json(await coachState(accountId, templates, forBusiness));
+
+  if (action === "site" && req.method === "PUT") {
+    const body = await readBody(req);
+    const saved = await saveSite(accountId, { settings: body.settings, pages: body.pages }, lastSeen(body));
+    await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
+    return json({ site: siteView(saved.site), pages: saved.pages.map(pageView) });
+  }
+
+  if (action === "publish" && req.method === "POST") {
+    if (!(await publishSite(accountId, lastSeen(await readBody(req))))) return json({ error: "not_found", message: "Save the site before publishing it." }, 404);
+    await purgePublicSite(accountId);
+    const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+    return json({ site: siteView(site), pages: pages.map(pageView) });
+  }
+
+  if (action === "unpublish" && req.method === "POST") {
+    if (!(await unpublishSite(accountId))) return json({ error: "not_found", message: "There is no site to take down." }, 404);
+    await purgePublicSite(accountId);
+    const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+    return json({ site: siteView(site), pages: pages.map(pageView) });
+  }
+
+  if (action === "media" && req.method === "POST") {
+    const body = await readBody(req);
+    const uploaded = await uploadSiteImage(accountId, { type: body.type, dataBase64: body.dataBase64 });
+    return json({ url: uploaded.url, bytes: uploaded.bytes }, 201);
+  }
+
+  // Bring a site over from Squarespace: its pages, articles, videos and
+  // words, at the same addresses. The result replaces the draft; nothing is
+  // published until the coach presses Publish.
+  if (action === "import" && req.method === "POST") {
+    const body = await readBody(req);
+    const current = await readSite(accountId);
+    const imported = await importSquarespaceSite({
+      url: cleanString(body.url, "", 300),
+      preset: cleanString(body.preset, "", 40) || current?.settings.theme.preset || "classic",
+      bookingSlug: (await readAccountIdentity(accountId)).slug,
+    });
+    const saved = await saveSite(accountId, { settings: imported.settings, pages: imported.pages }, lastSeen(body));
+    return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), pictures: imported.pictures, report: imported.report });
+  }
+
+  // One batch of an imported site's pictures, brought into the bucket and
+  // swapped into every page of the draft. The browser calls this until the
+  // list the import returned is done, so no call runs long.
+  if (action === "import/pictures" && req.method === "POST") {
+    const body = await readBody(req);
+    const urls = (Array.isArray(body.urls) ? body.urls : []).map((url) => cleanString(url, "", 600)).filter(Boolean).slice(0, 8);
+    const brought = await bringPictures(urls, async (type, dataBase64) => (await uploadSiteImage(accountId, { type, dataBase64 })).url);
+    const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
+    if (!site) return json({ error: "not_found", message: "Save the site before bringing its pictures over." }, 404);
+    const saved = await saveSite(accountId, {
+      settings: site.settings,
+      pages: pages.map((page) => ({ ...page, content: replacePictureUrls(page.content, brought.moved) })),
+    });
+    await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
+    return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), moved: brought.moved, report: brought.report });
+  }
+
+  if (action === "domains" && req.method === "POST") {
+    if (await readSandboxAccount(accountId)) {
+      return json({ error: "sandbox", message: "A sandbox cannot have its own domain. Switch to your live business to add one." }, 400);
+    }
+    const body = await readBody(req);
+    const hostname = cleanHostname(body.hostname);
+    const domain = await claimSiteDomain(accountId, hostname);
+    return json({ domain: domainView(domain) }, 201);
+  }
+
+  if (action === "domains/check" && req.method === "POST") {
+    const body = await readBody(req);
+    const domain = await checkDomain(accountId, cleanString(body.id, "", 80));
+    if (!domain) return json({ error: "not_found", message: "That domain is no longer listed. Refresh and try again." }, 404);
+    return json({ domain: domainView(domain) });
+  }
+
+  if (action === "domains" && req.method === "DELETE") {
+    const id = cleanString(url.searchParams.get("id"), "", 80);
+    const domain = await readSiteDomain(accountId, id);
+    if (!domain) return json({ error: "not_found", message: "That domain is no longer listed. Refresh and try again." }, 404);
+    if (domain.status === "active") {
+      try {
+        await detachDomainFromSite(domain.hostname);
+      } catch (error) {
+        console.error("site_domain:detach_failed", domain.hostname, error);
+      }
+    }
+    await deleteSiteDomain(accountId, id);
+    await purgePublicSite(accountId);
+    return json({ ok: true });
+  }
+  return null;
+}
+
+/**
+ * A house site starts from its own template. The coaches' templates are not
+ * offered: every one of them is built around a booking page it does not have.
+ */
+function houseTemplates(house: HouseAccount): readonly SiteTemplate[] {
+  const own = houseSiteTemplate(HOUSE_SITE_ROLES[house.id]?.template || "");
+  return own ? [own] : HOUSE_SITE_TEMPLATES;
+}
+
+async function houseSitesView() {
+  const houses = await listHouseAccounts();
+  return Promise.all(
+    houses.map(async (house) => {
+      const [site, domains] = await Promise.all([readSite(house.id), listSiteDomains(house.id)]);
+      return {
+        id: house.id,
+        slug: house.slug,
+        name: house.name,
+        note: HOUSE_SITE_ROLES[house.id]?.note || "",
+        started: Boolean(site),
+        isPublished: Boolean(site?.publishedSettings),
+        publishedAt: site?.publishedAt || null,
+        domains: domains.filter((domain) => domain.status === "active").map((domain) => domain.hostname),
+      };
+    }),
+  );
+}
+
 export default async function handler(req: Request) {
   const url = new URL(req.url);
-  const action = url.pathname.replace(/^\/api\/site\/?/, "").replace(/\/$/, "");
+  const studio = /^\/api\/studio-sites(\/|$)/.test(url.pathname);
+  const action = url.pathname.replace(/^\/api\/(site|studio-sites)\/?/, "").replace(/\/$/, "");
   try {
-    if (action === "public") {
+    if (!studio && action === "public") {
       if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       return await handlePublic(req);
     }
-    if (action === "public/form") {
+    if (!studio && action === "public/form") {
       if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       return await handlePublicForm(req);
     }
-    if (action === "public/sitemap") {
+    if (!studio && action === "public/sitemap") {
       if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       return await handleSitemap(req);
+    }
+
+    if (studio) {
+      requireStudioAdmin(req);
+      const siteParam = cleanString(url.searchParams.get("site"), "", 80);
+      if (!action && !siteParam && req.method === "GET") return json({ sites: await houseSitesView() });
+      const house = await readHouseAccount(siteParam);
+      if (!house) return json({ error: "not_found", message: "That is not one of Clarity's sites." }, 404);
+      return (await editorAction(house.id, action, req, url, houseTemplates(house), false)) || json({ error: "not_found" }, 404);
     }
 
     const actor = await requireCoachActor(req);
     if (!actor.isAdmin) {
       return json({ error: "forbidden", message: "Only the business owner or an admin can edit the website." }, 403);
     }
-    const accountId = actor.accountId;
-
-    if (!action && req.method === "GET") return json(await coachState(accountId));
-
-    if (action === "site" && req.method === "PUT") {
-      const body = await readBody(req);
-      const saved = await saveSite(accountId, { settings: body.settings, pages: body.pages }, lastSeen(body));
-      await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
-      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView) });
-    }
-
-    if (action === "publish" && req.method === "POST") {
-      if (!(await publishSite(accountId, lastSeen(await readBody(req))))) return json({ error: "not_found", message: "Save the site before publishing it." }, 404);
-      await purgePublicSite(accountId);
-      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
-      return json({ site: siteView(site), pages: pages.map(pageView) });
-    }
-
-    if (action === "unpublish" && req.method === "POST") {
-      if (!(await unpublishSite(accountId))) return json({ error: "not_found", message: "There is no site to take down." }, 404);
-      await purgePublicSite(accountId);
-      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
-      return json({ site: siteView(site), pages: pages.map(pageView) });
-    }
-
-    if (action === "media" && req.method === "POST") {
-      const body = await readBody(req);
-      const uploaded = await uploadSiteImage(accountId, { type: body.type, dataBase64: body.dataBase64 });
-      return json({ url: uploaded.url, bytes: uploaded.bytes }, 201);
-    }
-
-    // Bring a site over from Squarespace: its pages, articles, videos and
-    // words, at the same addresses. The result replaces the draft; nothing is
-    // published until the coach presses Publish.
-    if (action === "import" && req.method === "POST") {
-      const body = await readBody(req);
-      const current = await readSite(accountId);
-      const imported = await importSquarespaceSite({
-        url: cleanString(body.url, "", 300),
-        preset: cleanString(body.preset, "", 40) || current?.settings.theme.preset || "classic",
-        bookingSlug: (await readAccountIdentity(accountId)).slug,
-      });
-      const saved = await saveSite(accountId, { settings: imported.settings, pages: imported.pages }, lastSeen(body));
-      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), pictures: imported.pictures, report: imported.report });
-    }
-
-    // One batch of an imported site's pictures, brought into the bucket and
-    // swapped into every page of the draft. The browser calls this until the
-    // list the import returned is done, so no call runs long.
-    if (action === "import/pictures" && req.method === "POST") {
-      const body = await readBody(req);
-      const urls = (Array.isArray(body.urls) ? body.urls : []).map((url) => cleanString(url, "", 600)).filter(Boolean).slice(0, 8);
-      const brought = await bringPictures(urls, async (type, dataBase64) => (await uploadSiteImage(accountId, { type, dataBase64 })).url);
-      const [site, pages] = await Promise.all([readSite(accountId), listSitePages(accountId)]);
-      if (!site) return json({ error: "not_found", message: "Save the site before bringing its pictures over." }, 404);
-      const saved = await saveSite(accountId, {
-        settings: site.settings,
-        pages: pages.map((page) => ({ ...page, content: replacePictureUrls(page.content, brought.moved) })),
-      });
-      await sweepUnusedSiteImages(accountId, await siteImageUrlsInUse(accountId));
-      return json({ site: siteView(saved.site), pages: saved.pages.map(pageView), moved: brought.moved, report: brought.report });
-    }
-
-    if (action === "domains" && req.method === "POST") {
-      if (await readSandboxAccount(accountId)) {
-        return json({ error: "sandbox", message: "A sandbox cannot have its own domain. Switch to your live business to add one." }, 400);
-      }
-      const body = await readBody(req);
-      const hostname = cleanHostname(body.hostname);
-      const domain = await claimSiteDomain(accountId, hostname);
-      return json({ domain: domainView(domain) }, 201);
-    }
-
-    if (action === "domains/check" && req.method === "POST") {
-      const body = await readBody(req);
-      const domain = await checkDomain(accountId, cleanString(body.id, "", 80));
-      if (!domain) return json({ error: "not_found", message: "That domain is no longer listed. Refresh and try again." }, 404);
-      return json({ domain: domainView(domain) });
-    }
-
-    if (action === "domains" && req.method === "DELETE") {
-      const id = cleanString(url.searchParams.get("id"), "", 80);
-      const domain = await readSiteDomain(accountId, id);
-      if (!domain) return json({ error: "not_found", message: "That domain is no longer listed. Refresh and try again." }, 404);
-      if (domain.status === "active") {
-        try {
-          await detachDomainFromSite(domain.hostname);
-        } catch (error) {
-          console.error("site_domain:detach_failed", domain.hostname, error);
-        }
-      }
-      await deleteSiteDomain(accountId, id);
-      await purgePublicSite(accountId);
-      return json({ ok: true });
-    }
-
-    return json({ error: "not_found" }, 404);
+    return (await editorAction(actor.accountId, action, req, url, SITE_TEMPLATES, true)) || json({ error: "not_found" }, 404);
   } catch (error) {
     const status = Number((error as { status?: unknown })?.status);
     const httpStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
@@ -444,5 +507,5 @@ export default async function handler(req: Request) {
 }
 
 export const config: Config = {
-  path: ["/api/site", "/api/site/*"],
+  path: ["/api/site", "/api/site/*", "/api/studio-sites", "/api/studio-sites/*"],
 };

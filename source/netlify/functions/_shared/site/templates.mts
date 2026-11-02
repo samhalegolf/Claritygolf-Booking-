@@ -25,6 +25,7 @@ import {
   type SitePagePresetInput,
   type SiteSettings,
 } from "./document.mts";
+import { HOUSE_SITE_TEMPLATES } from "./house-templates.mts";
 
 export type SiteTemplateInput = SitePagePresetInput;
 
@@ -414,4 +415,14 @@ export const SITE_TEMPLATES: readonly SiteTemplate[] = [
 
 export function siteTemplate(id: string): SiteTemplate | null {
   return SITE_TEMPLATES.find((template) => template.id === id) || null;
+}
+
+/** One of Clarity's own sites' starting templates (house-templates.mts), by id, or null. */
+export function houseSiteTemplate(id: string): SiteTemplate | null {
+  return HOUSE_SITE_TEMPLATES.find((template) => template.id === id) || null;
+}
+
+/** Any template by id: a coach's, or one of Clarity's own. The editor builds whichever the chooser offered. */
+export function findSiteTemplate(id: string): SiteTemplate | null {
+  return SITE_TEMPLATES.find((template) => template.id === id) || houseSiteTemplate(id);
 }

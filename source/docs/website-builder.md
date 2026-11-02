@@ -182,6 +182,43 @@ Articles, Videos, Shop (with the bag icon in the header) and Contact
 preset (orange on white, Manrope and Poppins). A "Book a lesson (venues)"
 page preset adds the venues page to any site.
 
+## Clarity's own sites (house sites)
+
+There is one website builder, and Clarity's own public sites are built with
+it too: a change to the builder reaches every coach's site and Clarity's at
+once. Each Clarity site is an account of kind `house` (migration
+`20261102000200_house_sites`):
+
+| Site | What it is | Where it is served |
+| --- | --- | --- |
+| `clarity-caddy` | The Clarity Caddy site: home, How it works, and the privacy, terms, support and account deletion pages the app stores link to. Replaces the `clarity-golf-landing` and `getclaritycaddy` repos and Caddy's static legal pages. | Its own domain, attached under "Where the page lives" like any coach's; meanwhile `claritygolf.app/clarity-caddy/site`. |
+| `clarity-booking` | The Clarity Golf Booking site. | Home at `claritygolf.app/`, and Privacy, Terms and Support at `/privacy`, `/terms`, `/support`. Any other page at `claritygolf.app/clarity-booking/site/<page>`. Until it is first published, the hand-drawn `public-site/PublicSite.tsx` stands in. |
+
+A house account is not a business. Nobody holds a membership on it, it has
+no booking page (public account resolution answers only for `live` and
+`sandbox`), and the jobs that walk every business read `kind = 'live'`. Its
+editor offers no Booking, Venues or Shop blocks and none of the presets built
+on them, the link picker has no "Clarity booking page", and the template
+chooser offers only the site's own starting template
+(`_shared/site/house-templates.mts`, written from the pages it replaced).
+
+**Edited from Clarity Studio.** Studio's Marketing › Websites page (Caddy
+repo, `scripts/studio/marketing/websites-page.js`) frames
+`claritygolf.app/studio-sites` (`StudioSitesPage.tsx`), which picks a house
+site and mounts the ordinary `SiteBuilderPanel` pointed at
+`/api/studio-sites` (`setSiteEditorTarget` in `siteApi.ts`). The routes are
+the coach's routes, run by the same `editorAction` in `site.mts`; only who is
+asking differs. There is no Booking session in the frame: it asks Studio for
+a Studio pass, which Caddy's `functions/studio-site-pass.mjs` signs once the
+admin's own login is proved, with the service secret both deploys already
+hold (`CLARITY_SERVICE_SECRET`). Booking checks the signature, audience and
+expiry (`_shared/site/house.mts`) and the pass reaches house sites only. The
+two repositories share no code, so both test the same fixed pass
+(`house.test.mts` here, `dev/studio-site-pass.test.js` there).
+
+Caddy reads `CLARITY_BOOKING_URL` (default `https://claritygolf.app`) to know
+where to frame.
+
 ## Bringing a site over from Squarespace
 
 Under the template chooser, "Or bring over a site you already have"
@@ -252,6 +289,9 @@ inert: a click lands on the block, not inside the frame.
 | Public page | `src/modules/site-builder/PublicSitePage.tsx`, routed from `src/boot.tsx` |
 | Meta tags for crawlers, sitemap on a custom domain | `netlify/edge-functions/site-meta.ts` |
 | Squarespace import | `netlify/functions/_shared/site/import-squarespace.mts` |
+| Clarity's own sites: house accounts, the Studio pass | `netlify/functions/_shared/site/house.mts` |
+| Clarity's own sites' starting content | `netlify/functions/_shared/site/house-templates.mts` |
+| The builder inside Clarity Studio | `src/modules/site-builder/StudioSitesPage.tsx`, routed from `src/boot.tsx` at `/studio-sites` |
 
 `sites` holds the parts every page shares (theme, header, footer), one row
 per business; `site_pages` holds one row per page (address, title, kind,
@@ -266,7 +306,9 @@ cleans every write with `cleanSiteSettings` and `cleanSitePageContent`:
 unknown block types are dropped, every link is http(s), mailto, tel, an
 in-page anchor or a page of the site (`page:<slug>`), every picture is
 https, every list is capped, and a page's address can never be one of the
-paths Clarity itself answers at. The same functions are imported by the
+paths Clarity itself answers at (privacy, terms and support are allowed: on
+Clarity's hosts a page lives under `/<business>/site/`, and on a business's
+own domain the site answers every path). The same functions are imported by the
 browser, so the editor cannot build something the server would refuse.
 
 The preview is an iframe with only `site.css` and the chosen fonts inside,
