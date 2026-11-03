@@ -2356,6 +2356,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // Empty for every other route in, so Settings still opens with nothing
   // expanded (see SettingsGroups).
   const [requestedSettingsGroup, setRequestedSettingsGroup] = useState("");
+  // Which Templates tab opens first: the gift voucher one when a voucher's
+  // "Edit the standard gift card and email" link brought the coach here.
+  const [templatesStartOnGift, setTemplatesStartOnGift] = useState(false);
+  useEffect(() => {
+    if (settingsTab !== "notifications") setTemplatesStartOnGift(false);
+  }, [settingsTab]);
   // A section of the workspace opened over the coach profile rather than
   // navigated to. Null when Settings or Billing is being used as a page.
   //
@@ -9003,6 +9009,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             imageUrl: values.imageUrl.trim(),
             downloadUrl: values.downloadUrl.trim(),
             variants: values.variants,
+            giftCardDesign: values.isVoucher ? values.giftCardDesign : null,
+            giftEmail: values.isVoucher ? values.giftEmail : null,
             lowStockThreshold: Math.max(0, Number(values.lowStockThreshold) || 0),
             // Ignored by the backend on an update - stock only moves through an
             // adjustment or a sale.
@@ -9046,6 +9054,19 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           sku: product.sku || "",
           trackStock: product.trackStock !== false,
           isVoucher: product.isVoucher === true,
+          // The whole product goes back: the save replaces every field, and
+          // leaving these off used to wipe a voucher's setup, its place on the
+          // website store, its picture and its options on Retire or Restore.
+          voucherItemId: product.voucherItemId || "",
+          voucherShowsValue: product.voucherShowsValue !== false,
+          voucherExpiryMonths: product.voucherExpiryMonths || 0,
+          sellOnline: product.sellOnline === true,
+          fulfilment: product.fulfilment || "collect",
+          imageUrl: product.imageUrl || "",
+          downloadUrl: product.downloadUrl || "",
+          variants: product.variants || [],
+          giftCardDesign: product.giftCardDesign || null,
+          giftEmail: product.giftEmail || null,
           lowStockThreshold: product.lowStockThreshold || 0,
           active,
         }),
@@ -11771,6 +11792,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         packageCoversServiceId: draft.coversAllServices ? undefined : draft.coversServiceIds[0],
         passExpiryMonths: draft.expiryMonths,
         crossRedeemable: draft.crossRedeemable,
+        sellOnline: draft.sellOnline,
         active: draft.active,
         archived: false,
         locationIds: existing?.locationIds || [],
@@ -11811,6 +11833,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         description: draft.description,
         price: draft.price,
         bundleItems: draft.items,
+        sellOnline: draft.sellOnline,
         coversAllServices: false,
         coversServiceIds: [],
         packageCoversServiceId: undefined,
@@ -15964,6 +15987,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           onEditLessonTypes={() =>
             openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)
           }
+          onOpenGiftTemplates={() => {
+            setTemplatesStartOnGift(true);
+            openProfileTarget({ kind: "settings", tab: "notifications", group: "message-templates" }, t("Templates"));
+          }}
         />
       </Suspense>
     )}
@@ -18076,6 +18103,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       onMapLinkLabelChange={(label) =>
                         updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
                       }
+                      initialVariant={templatesStartOnGift ? "giftVoucher" : "booked"}
                       giftCardDesign={messageTemplatesDraft.giftCardDesign}
                       onGiftCardDesignChange={(design) =>
                         updateNotificationBlockDraft(messageTemplatesEditor, "giftCardDesign", design)

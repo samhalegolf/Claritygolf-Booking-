@@ -48,7 +48,6 @@ import {
   findPlayerShopItem,
   playerShopItems,
 } from "./_shared/player-shop.mts";
-import { ONLINE_SHOP_SETTING, onlineShopSwitchedOn } from "./_shared/online-shop.mts";
 import {
   createCardCheckout,
   enrolMembership,
@@ -3004,18 +3003,38 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
   };
 }
 
+/** A pass or bundle, or a voucher or product, ticked to show on the website store. */
+async function anythingOnWebsiteStore(accountId: string, settingsMap: Record<string, unknown>) {
+  let services: unknown = [];
+  try {
+    services = JSON.parse(String(settingsMap.servicesJson ?? "[]"));
+  } catch {
+    services = [];
+  }
+  const passOnSale = Array.isArray(services) && services.some((service) =>
+    service?.lessonFormat === "package" && service?.sellOnline === true && service?.active !== false && service?.archived !== true,
+  );
+  if (passOnSale) return true;
+  const rows = (await db().sql`
+    SELECT 1 FROM billing_products_services
+    WHERE account_id = ${accountId} AND sell_online = true AND active IS NOT FALSE
+    LIMIT 1
+  `) as unknown[];
+  return rows.length > 0;
+}
+
 export async function readPublicCatalogState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   return {
     syncKey,
     updatedAt,
     ...stateFromSettings(settingsMap, accountId),
-    // Whether the booking page links to the shop. Only the switch and the card
-    // route: the shop page itself says "closed" if there is nothing to sell,
-    // which is not worth a products read on every booking page load.
+    // Whether the booking page links to the shop: cards can be taken and
+    // something is ticked to show on the website store. The shop page itself
+    // has the last word on whether each item is sellable.
     shopLinked:
-      onlineShopSwitchedOn(settingsMap[ONLINE_SHOP_SETTING]) &&
-      stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]).features.portal,
+      stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]).features.portal &&
+      (await anythingOnWebsiteStore(accountId, settingsMap)),
     // Whether the confirmation screen can offer "Pay now". Any connected Stripe
     // will do: the booker pays an invoice's pay link, which every route takes.
     onlinePayments: stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]).configured,

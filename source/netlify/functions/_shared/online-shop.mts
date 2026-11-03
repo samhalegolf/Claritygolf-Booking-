@@ -12,12 +12,12 @@
  *
  * WHAT IS FOR SALE
  *
- * Nothing new is catalogued for it. Packages are the ones the player portal
- * already sells (player-shop.mts decides which are sellable at all); gift
- * vouchers are the products ticked as vouchers under Billing; goods are the
- * products ticked "sell online" there, posted, collected or downloaded. The
- * coach turns the shop on with one switch, and it sells what the business
- * already sells. An order is a cart: several lines, one payment.
+ * Nothing new is catalogued for it. Each thing the business sells says for
+ * itself whether it is on the website: a pass or bundle by its `sellOnline`
+ * (and player-shop.mts deciding it is sellable at all), a gift voucher or a
+ * product by its sell_online column under Billing. There is no shop-wide
+ * switch: the shop is open whenever something is ticked and cards can be
+ * taken. An order is a cart: several lines, one payment.
  *
  * This module is the part with no I/O: what is on the shelf, and whether an
  * order form is complete. billing-api.mts does the reading and writing.
@@ -25,8 +25,6 @@
 
 import { playerShopItems } from "./player-shop.mts";
 
-/** The switch, in `settings`. "true" when the coach has opened the shop. */
-export const ONLINE_SHOP_SETTING = "onlineShopEnabled";
 /** The flat fee charged on an order with something to post, in major units. "" or 0: posted free. */
 export const ONLINE_SHOP_SHIPPING_SETTING = "onlineShopShippingFee";
 
@@ -36,16 +34,23 @@ export const ONLINE_SHOP_SHIPPING_SETTING = "onlineShopShippingFee";
  */
 export const LESSON_ITEM_PREFIX = "lesson:";
 
-export function onlineShopSwitchedOn(value: unknown) {
-  return String(value ?? "").trim() === "true";
+/** Whether a pass or bundle in servicesJson is ticked to show on the website store. */
+function onWebsite(services: unknown[], serviceId: string) {
+  return services.some((service) => {
+    const entry = (service || {}) as Record<string, unknown>;
+    return text(entry.id, 120) === serviceId && entry.sellOnline === true;
+  });
 }
 
 /** How a product reaches its buyer. Packages and vouchers are delivered by email and have none. */
 export type OnlineFulfilment = "collect" | "ship" | "download";
 export const ONLINE_FULFILMENTS: readonly OnlineFulfilment[] = ["collect", "ship", "download"];
 
-/** One choice of a product: a size, a colour, a pack. A null price is the product's own. */
-export type OnlineVariant = { id: string; name: string; price: number | null };
+/**
+ * One choice of a product or voucher: a size, a pack, a $50 or $100 voucher.
+ * A null price is the item's own; a blank description says nothing extra.
+ */
+export type OnlineVariant = { id: string; name: string; price: number | null; description: string };
 
 export type OnlineShopItem = {
   /** The till's catalog id: a product id, or LESSON_ITEM_PREFIX + service id. */
@@ -84,7 +89,12 @@ export function cleanVariants(value: unknown): OnlineVariant[] {
       const name = text(raw.name, 80);
       const price = raw.price === null || raw.price === undefined || raw.price === "" ? null : Number(raw.price);
       const id = text(raw.id, 40).replace(/[^A-Za-z0-9_-]/g, "") || `v${index + 1}`;
-      return { id, name, price: price !== null && Number.isFinite(price) && price >= 0 ? round2(price) : null };
+      return {
+        id,
+        name,
+        price: price !== null && Number.isFinite(price) && price >= 0 ? round2(price) : null,
+        description: text(raw.description, 300),
+      };
     })
     .filter((variant) => variant.name && !seen.has(variant.id) && seen.add(variant.id));
 }
@@ -99,7 +109,11 @@ export function cleanFulfilment(value: unknown): OnlineFulfilment {
  * `services` is servicesJson; `products` are billing_products_services rows.
  * An archived package is left off as well as an inactive one: the till will not
  * ring up an archived lesson type, so a buyer would get as far as paying and be
- * refused. A product is on the shelf when the coach ticked "sell online" on it;
+ * refused. A pass or bundle is on the shelf when the coach ticked it to show on
+ * the website; so is a voucher or product, by its sell_online. A bundle still
+ * reads the whole list, so a pass inside it need not be on the shelf itself.
+ * A voucher with options ($50, $100, $200) is one card on the shelf; every
+ * option shares the voucher's gift card and email.
  * one that counts stock and has none is listed as sold out, not hidden, so a
  * page does not lose a card the moment the last one goes.
  */
@@ -109,7 +123,7 @@ export function onlineShopItems(services: unknown, products: unknown, currency: 
     : [];
   const money = text(currency, 10) || "NZD";
   const packages = playerShopItems(listed, currency)
-    .filter((item) => item.kind === "package")
+    .filter((item) => item.kind === "package" && onWebsite(listed, item.serviceId))
     .map((item) => ({
       id: `${LESSON_ITEM_PREFIX}${item.serviceId}`,
       kind: "package" as const,
@@ -125,36 +139,45 @@ export function onlineShopItems(services: unknown, products: unknown, currency: 
       stock: null,
     }));
   const rows = (Array.isArray(products) ? products : []).map((row) => (row || {}) as Record<string, unknown>).filter((row) => row.active !== false);
+  const priced = (row: Record<string, unknown>) => {
+    const variants = cleanVariants(row.variants);
+    const own = round2(Number(row.default_price) || 0);
+    const prices = variants.map((variant) => variant.price ?? own);
+    return { variants, price: prices.length ? Math.min(...prices) : own };
+  };
   const vouchers = rows
-    .filter((row) => row.is_voucher === true && Number(row.default_price) > 0)
-    .map((row) => ({
-      id: text(row.id, 160),
-      kind: "voucher" as const,
-      name: text(row.name, 180) || "Gift voucher",
-      description: text(row.description, 300),
-      price: round2(Number(row.default_price)),
-      currency: money,
-      credits: 0,
-      includes: [] as string[],
-      image: text(row.image_url, 600),
-      fulfilment: "" as const,
-      variants: [],
-      stock: null,
-    }))
-    .filter((item) => item.id)
+    .filter((row) => row.is_voucher === true && row.sell_online === true)
+    .map((row) => {
+      const { variants, price } = priced(row);
+      const card = (row.gift_card_design || {}) as Record<string, unknown>;
+      return {
+        id: text(row.id, 160),
+        kind: "voucher" as const,
+        name: text(row.name, 180) || "Gift voucher",
+        description: text(row.description, 300),
+        price,
+        currency: money,
+        credits: 0,
+        includes: [] as string[],
+        // Its own shop picture, or else its own gift card's artwork.
+        image: text(row.image_url, 600) || text(card.imageUrl, 600),
+        fulfilment: "" as const,
+        variants,
+        stock: null,
+      };
+    })
+    .filter((item) => item.id && item.price > 0)
     .sort((a, b) => a.price - b.price || a.name.localeCompare(b.name));
   const goods = rows
     .filter((row) => row.is_voucher !== true && row.sell_online === true)
     .map((row) => {
-      const variants = cleanVariants(row.variants);
-      const own = round2(Number(row.default_price) || 0);
-      const prices = variants.map((variant) => variant.price ?? own);
+      const { variants, price } = priced(row);
       return {
         id: text(row.id, 160),
         kind: "product" as const,
         name: text(row.name, 180),
         description: text(row.description, 600),
-        price: prices.length ? Math.min(...prices) : own,
+        price,
         currency: money,
         credits: 0,
         includes: [] as string[],
@@ -309,7 +332,7 @@ export function packageOffersForLesson(services: unknown, currency: string, less
   if (!lesson || text(lesson.lessonFormat, 40) === "package") return [];
   const lessonPrice = text(lesson.priceMode, 40) === "free" ? 0 : Number(lesson.price) || 0;
   return playerShopItems(listed, currency)
-    .filter((item) => item.kind === "package" && item.credits > 0)
+    .filter((item) => item.kind === "package" && item.credits > 0 && onWebsite(listed, item.serviceId))
     .filter((item) => item.coversAllServices || item.coversServiceIds.includes(lessonServiceId))
     .map((item) => {
       const source = listed.find((service) => text(service?.id, 120) === item.serviceId);

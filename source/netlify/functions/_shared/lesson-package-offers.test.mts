@@ -11,10 +11,10 @@ import { packageOffersForLesson } from "./online-shop.mts";
 
 const hour = { id: "hour", name: "1 Hour Lesson", lessonFormat: "private", price: 160, active: true };
 const half = { id: "half", name: "30min Lesson", lessonFormat: "private", price: 90, active: true };
-const five = { id: "five", name: "5 × 1 Hour", lessonFormat: "package", price: 700, active: true, packageAllowance: 5, coversServiceIds: ["hour"], passExpiryMonths: 12 };
-const ten = { id: "ten", name: "10 × 1 Hour", lessonFormat: "package", price: 1300, active: true, packageAllowance: 10, coversServiceIds: ["hour"] };
-const dear = { id: "dear", name: "3 × 1 Hour", lessonFormat: "package", price: 500, active: true, packageAllowance: 3, coversServiceIds: ["hour"] };
-const off = { id: "off", name: "Old pack", lessonFormat: "package", price: 400, active: false, packageAllowance: 5, coversServiceIds: ["hour"] };
+const five = { id: "five", name: "5 × 1 Hour", lessonFormat: "package", sellOnline: true, price: 700, active: true, packageAllowance: 5, coversServiceIds: ["hour"], passExpiryMonths: 12 };
+const ten = { id: "ten", name: "10 × 1 Hour", lessonFormat: "package", sellOnline: true, price: 1300, active: true, packageAllowance: 10, coversServiceIds: ["hour"] };
+const dear = { id: "dear", name: "3 × 1 Hour", lessonFormat: "package", sellOnline: true, price: 500, active: true, packageAllowance: 3, coversServiceIds: ["hour"] };
+const off = { id: "off", name: "Old pack", lessonFormat: "package", sellOnline: true, price: 400, active: false, packageAllowance: 5, coversServiceIds: ["hour"] };
 
 test("every package that covers the lesson is offered, cheapest first, with its saving", () => {
   const offers = packageOffersForLesson([hour, half, five, ten, off], "NZD", "hour");
@@ -30,4 +30,8 @@ test("a package that covers something else is not offered", () => {
 
 test("a package dearer than buying the lessons one by one claims no saving", () => {
   assert.equal(packageOffersForLesson([hour, dear], "NZD", "hour")[0].saving, 0);
+});
+
+test("a package not ticked for the website store is not offered while booking either", () => {
+  assert.deepEqual(packageOffersForLesson([hour, { ...five, sellOnline: undefined }], "NZD", "hour"), []);
 });

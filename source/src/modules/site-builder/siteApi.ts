@@ -157,7 +157,7 @@ export async function sendSiteForm(input: { business: string; page: string; name
 // The same four calls the shop page makes (public-shop.mts), from a page of
 // the site. The business is always named: the shop takes money.
 
-export type ShopVariant = { id: string; name: string; price: number | null };
+export type ShopVariant = { id: string; name: string; price: number | null; description: string };
 
 export type ShopItem = {
   id: string;
@@ -219,13 +219,13 @@ export async function cancelShopOrder(business: string, orderId: string): Promis
   await shopCall(business, "/cancel", { orderId });
 }
 
-/** The coach's switch and shipping fee: Settings › Website edits the shop from the shop block. */
-export type CoachShop = { enabled: boolean; open: boolean; blocker: string; items: ShopItem[]; shippingFee: number };
+/** Whether the shop can sell, and its shipping fee: Settings › Website edits the fee from the shop block. */
+export type CoachShop = { open: boolean; blocker: string; items: ShopItem[]; shippingFee: number };
 
 export async function fetchCoachShop(): Promise<CoachShop> {
   return readJson(await apiFetch("/api/billing/online-shop"));
 }
 
-export async function updateCoachShop(patch: { enabled?: boolean; shippingFee?: number }): Promise<CoachShop> {
+export async function updateCoachShop(patch: { shippingFee: number }): Promise<CoachShop> {
   return readJson(await apiFetch("/api/billing/online-shop", jsonInit("PUT", patch)));
 }

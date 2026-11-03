@@ -134,6 +134,8 @@ export type MessageTemplatesPanelProps = {
   renderPreview: (template: string) => string;
   onChange: (templates: NotificationTemplates) => void;
   onMapLinkLabelChange: (label: string) => void;
+  /** The tab that opens first. */
+  initialVariant?: NotificationVariantId;
   /** The card the gift voucher email attaches. Edited on that tab. */
   giftCardDesign: GiftCardDesign;
   onGiftCardDesignChange: (design: GiftCardDesign) => void;
@@ -150,10 +152,11 @@ export function MessageTemplatesPanel({
   renderPreview,
   onChange,
   onMapLinkLabelChange,
+  initialVariant = "booked",
   giftCardDesign,
   onGiftCardDesignChange,
 }: MessageTemplatesPanelProps) {
-  const [variant, setVariant] = useState<NotificationVariantId>("booked");
+  const [variant, setVariant] = useState<NotificationVariantId>(initialVariant);
   const [channel, setChannel] = useState<"email" | "text">("email");
   const [narrow, setNarrow] = useState(false);
   // Which field is open, and the uncommitted text in it. One at a time: the
@@ -435,7 +438,7 @@ export function MessageTemplatesPanel({
 
         <p className="mt-note">
           {giftVoucher
-            ? t("The codes, the receipt and the gift card are filled in per order. What you write is saved against {label} only.", { label: activeScreen.label })
+            ? t("This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers. The codes, the receipt and the gift card are filled in per order.")
             : isText
             ? t("Links and merge fields are filled in per lesson. What you write is saved against {label} only.", { label: activeScreen.label })
             : t("The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against {label} only.", { label: activeScreen.label })}

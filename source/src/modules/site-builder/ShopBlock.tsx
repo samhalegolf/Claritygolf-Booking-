@@ -252,6 +252,7 @@ export function ShopBlock({
                       </select>
                     </label>
                   ) : null}
+                  {chosen?.description ? <p className="site-shop-variant-detail">{chosen.description}</p> : null}
                   <span className="site-shop-price">{money(price, entry.currency || currency)}</span>
                   {soldOut ? (
                     <span className="site-shop-soldout">{t("Sold out")}</span>

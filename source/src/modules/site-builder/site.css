@@ -1589,6 +1589,12 @@ h3.site-heading {
   font-size: 0.95rem;
 }
 
+.site-shop-variant-detail {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
 .site-shop-variant select {
   min-height: 42px;
   padding: 8px 10px;

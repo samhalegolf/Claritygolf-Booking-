@@ -31,7 +31,7 @@ type ShopItem = {
   credits: number;
   includes: string[];
   fulfilment: "collect" | "ship" | "download" | "";
-  variants: Array<{ id: string; name: string; price: number | null }>;
+  variants: Array<{ id: string; name: string; price: number | null; description: string }>;
   stock: number | null;
 };
 
@@ -293,6 +293,7 @@ export default function PublicShop() {
                         ))}
                       </select>
                     ) : null}
+                    {variant?.description ? <p className="shop-fine-print">{variant.description}</p> : null}
                     <input autoComplete="name" className="w-name" onChange={set("name")} placeholder={t("Your name *")} value={details.name} />
                     <input autoComplete="email" className="w-email" onChange={set("email")} placeholder={t("Email *")} type="email" value={details.email} />
                     {gift ? (

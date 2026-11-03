@@ -14,13 +14,11 @@ import type { ChargeWording } from "./_shared/stripe-voucher-scan.mts";
 import { matchVoucherRule, parseVoucherRules } from "./_shared/voucher-rules.mts";
 import {
   LESSON_ITEM_PREFIX,
-  ONLINE_SHOP_SETTING,
   ONLINE_SHOP_SHIPPING_SETTING,
   cleanFulfilment,
   cleanVariants,
   onlineBuyerPersonId,
   onlineShopItems,
-  onlineShopSwitchedOn,
   orderLineName,
   packageOffersForLesson,
   readOnlineOrder,
@@ -46,7 +44,15 @@ import {
 import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
-import { GIFT_CARD_SETTING, parseGiftCardDesign, type GiftCardDesign } from "./_shared/gift-card.mts";
+import {
+  GIFT_CARD_SETTING,
+  GIFT_EMAIL_FIELDS,
+  cleanGiftEmailWording,
+  cleanOwnGiftCardDesign,
+  parseGiftCardDesign,
+  type GiftCardDesign,
+  type GiftEmailField,
+} from "./_shared/gift-card.mts";
 import { buildGiftCardPdf } from "./_shared/gift-card-pdf.mts";
 import { fillMergeFields, parseNotificationTemplates, type GiftVoucherMergeField } from "./_shared/notification-templates.mts";
 import { notificationTemplateText } from "./_shared/notification-template-text.mts";
@@ -267,8 +273,19 @@ function cleanProductPayload(raw: Record<string, unknown>) {
       const months = Math.round(cleanNumber(raw?.voucherExpiryMonths, 0, { min: 0, max: 120 }));
       return raw?.isVoucher === true && months > 0 ? months : null;
     })(),
-    // The website's shop. A voucher is on it by being a voucher; this is for goods.
+    // Shown on the website store: a voucher or goods alike.
     sell_online: raw?.sellOnline === true,
+    // A voucher's own gift card and email wording. Null: it uses the standard
+    // ones under Settings › Templates › Gift voucher. Its options (variants)
+    // all share these.
+    gift_card_design: (() => {
+      const design = raw?.isVoucher === true ? cleanOwnGiftCardDesign(raw?.giftCardDesign) : null;
+      return design ? JSON.stringify(design) : null;
+    })(),
+    gift_email: (() => {
+      const wording = raw?.isVoucher === true ? cleanGiftEmailWording(raw?.giftEmail) : null;
+      return wording ? JSON.stringify(wording) : null;
+    })(),
     fulfilment: cleanFulfilment(raw?.fulfilment),
     image_url: cleanHttpsUrl(raw?.imageUrl),
     download_url: cleanHttpsUrl(raw?.downloadUrl),
@@ -317,6 +334,8 @@ function productRowToApi(row: Record<string, unknown>) {
     imageUrl: String(row.image_url || ""),
     downloadUrl: String(row.download_url || ""),
     variants: cleanVariants(row.variants),
+    giftCardDesign: cleanOwnGiftCardDesign(row.gift_card_design),
+    giftEmail: cleanGiftEmailWording(row.gift_email),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -6604,11 +6623,9 @@ const ONLINE_ORDER_ABANDONED_AFTER_MS = 2 * 60 * 60 * 1000;
 const ONLINE_ORDERS_PER_HOUR = 30;
 
 type OnlineShopState = {
-  /** The coach's switch. */
-  enabled: boolean;
   /** Whether a customer can actually buy right now. */
   open: boolean;
-  /** Why not, when the switch is on and it still cannot sell. */
+  /** Why not. */
   blocker: "" | "card_payments" | "nothing_for_sale";
   businessName: string;
   currency: string;
@@ -6619,21 +6636,19 @@ type OnlineShopState = {
 };
 
 async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
-  const [switchValue, shippingValue, connection, services, products, currency, methods, branding] = await Promise.all([
-    readSettingValue(accountId, ONLINE_SHOP_SETTING),
+  const [shippingValue, connection, services, products, currency, methods, branding] = await Promise.all([
     readSettingValue(accountId, ONLINE_SHOP_SHIPPING_SETTING),
     accountStripeConnection(accountId),
     readServiceList(accountId),
     supabase("billing_products_services", {
       query:
-        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,variants,track_stock,stock_level` +
-        `&account_id=eq.${encodeFilter(accountId)}&or=(is_voucher.is.true,sell_online.is.true)`,
+        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,variants,track_stock,stock_level,gift_card_design` +
+        `&account_id=eq.${encodeFilter(accountId)}&sell_online=is.true`,
     }),
     resolveDefaultCurrency(accountId),
     listPaymentMethodRows(accountId),
     resolveInvoiceBranding(accountId),
   ]);
-  const enabled = onlineShopSwitchedOn(switchValue);
   const shippingFee = round2(cleanNumber(shippingValue, 0, { min: 0, max: 100000 }));
   // Clarity Pay only, like the player portal: a business on its own Stripe
   // takes invoice payments and nothing else.
@@ -6642,8 +6657,7 @@ async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
   const items = onlineShopItems(services, products, currency);
   const blocker = !canTakeCards ? "card_payments" : !items.length ? "nothing_for_sale" : "";
   return {
-    enabled,
-    open: enabled && !blocker,
+    open: !blocker,
     blocker,
     businessName: branding.businessName,
     currency,
@@ -6665,16 +6679,15 @@ export async function publicOnlineShop(accountId: string) {
   };
 }
 
-/** The coach's view: the switch, and what a customer would see. */
+/** The coach's view: whether it is open, why not, and what a customer would see. */
 async function coachOnlineShop(accountId: string) {
   const shop = await readOnlineShop(accountId);
-  return { enabled: shop.enabled, open: shop.open, blocker: shop.blocker, items: shop.items, shippingFee: shop.shippingFee };
+  return { open: shop.open, blocker: shop.blocker, items: shop.items, shippingFee: shop.shippingFee };
 }
 
-/** The switch and the shipping fee. Only what the body names changes. */
+/** The shipping fee. What is on the shelf is ticked on each item, not here. */
 async function writeOnlineShop(accountId: string, body: Record<string, unknown>) {
   const values: Record<string, string> = {};
-  if (typeof body?.enabled === "boolean") values[ONLINE_SHOP_SETTING] = body.enabled ? "true" : "false";
   if (body?.shippingFee !== undefined) values[ONLINE_SHOP_SHIPPING_SETTING] = String(round2(cleanNumber(body.shippingFee, 0, { min: 0, max: 100000 })));
   if (Object.keys(values).length) {
     await supabase("settings", {
@@ -7213,13 +7226,14 @@ export async function settlePosCheckoutFromWebhook(accountId: string, session: R
 }
 
 /**
- * The wording and the gift card for an order with a voucher in it.
+ * The wording and the gift cards for an order with a voucher in it.
  *
- * The words are the coach's gift voucher template (Settings › Templates), so
- * the buyer reads what the business wrote rather than a generic receipt. The
- * card is the coach's artwork with each voucher's name, code and value written
- * on it, as one PDF with a page per voucher. No artwork uploaded, no card: the
- * codes are in the email either way.
+ * The words are the coach's: the first voucher in the order with its own email
+ * wording supplies it line by line, and any line it leaves blank (or every
+ * line, for a voucher with none) comes from the standard gift voucher template
+ * under Settings › Templates. Each voucher is printed on its own gift card when
+ * it has one, else the standard card, as one PDF per card with a page per
+ * voucher. No artwork, no card: the codes are in the email either way.
  */
 async function giftVoucherEmail(
   accountId: string,
@@ -7227,10 +7241,25 @@ async function giftVoucherEmail(
   coupons: Array<ReturnType<typeof couponRowToApi>>,
   branding: Awaited<ReturnType<typeof resolveInvoiceBranding>>,
 ) {
-  const [templatesValue, designValue] = await Promise.all([
+  const productIds = [...new Set(coupons.map((coupon) => coupon.productId).filter(Boolean))];
+  const [templatesValue, designValue, productRows] = await Promise.all([
     readSettingValue(accountId, "notificationTemplatesJson"),
     readSettingValue(accountId, GIFT_CARD_SETTING),
+    productIds.length
+      ? (supabase("billing_products_services", {
+          query:
+            `select=id,gift_card_design,gift_email&account_id=eq.${encodeFilter(accountId)}` +
+            `&id=in.(${encodeURIComponent(productIds.map((id) => `"${id.replace(/"/g, "")}"`).join(","))})`,
+        }) as Promise<Array<Record<string, unknown>>>)
+      : Promise.resolve([] as Array<Record<string, unknown>>),
   ]);
+  const ownById = new Map(
+    productRows.map((product) => [
+      String(product.id ?? ""),
+      { design: cleanOwnGiftCardDesign(product.gift_card_design), email: cleanGiftEmailWording(product.gift_email) },
+    ]),
+  );
+  const ownEmail = coupons.map((coupon) => ownById.get(coupon.productId)?.email).find(Boolean) || null;
   const templates = parseNotificationTemplates(templatesValue);
   const buyer = cleanString(row.customer_name, "", 140);
   const variables: Record<GiftVoucherMergeField, string> = {
@@ -7241,26 +7270,39 @@ async function giftVoucherEmail(
     receiptNumber: String(row.receipt_number ?? ""),
     total: formatMoney(row.amount, String(row.currency || "NZD")),
   };
-  const wording = (field: "subject" | "heading" | "body" | "signoff") =>
-    fillMergeFields(notificationTemplateText(templates, "giftVoucher", field, branding.messageLanguage), variables).trim();
+  const wording = (field: GiftEmailField) =>
+    fillMergeFields(
+      ownEmail?.[field].trim() ? ownEmail[field] : notificationTemplateText(templates, "giftVoucher", field, branding.messageLanguage),
+      variables,
+    ).trim();
 
-  let attachment: { filename: string; content: string } | null = null;
-  try {
-    attachment = await giftCardAttachment(accountId, parseGiftCardDesign(designValue), coupons);
-  } catch (error) {
-    // The codes are in the email. A card that cannot be made must not stop it.
-    console.error("billing_api:gift_card_failed", accountId, String(row.id ?? ""), error);
+  // Vouchers on the same card share a PDF; a different card is a PDF of its own.
+  const standard = parseGiftCardDesign(designValue);
+  const byCard = new Map<string, { design: GiftCardDesign; coupons: typeof coupons }>();
+  for (const coupon of coupons) {
+    const design = ownById.get(coupon.productId)?.design || standard;
+    const key = JSON.stringify(design);
+    const group = byCard.get(key) || { design, coupons: [] };
+    group.coupons.push(coupon);
+    byCard.set(key, group);
+  }
+  const attachments: Array<{ filename: string; content: string }> = [];
+  for (const group of byCard.values()) {
+    try {
+      const attachment = await giftCardAttachment(accountId, group.design, group.coupons);
+      if (attachment) attachments.push(attachment);
+    } catch (error) {
+      // The codes are in the email. A card that cannot be made must not stop it.
+      console.error("billing_api:gift_card_failed", accountId, String(row.id ?? ""), error);
+    }
   }
   return {
-    subject: wording("subject"),
-    heading: wording("heading"),
-    body: wording("body"),
-    signoff: wording("signoff"),
-    attachment,
+    ...(Object.fromEntries(GIFT_EMAIL_FIELDS.map((field) => [field, wording(field)])) as Record<GiftEmailField, string>),
+    attachments,
   };
 }
 
-/** The gift card PDF, or null when the business has not uploaded artwork. */
+/** One gift card PDF, or null when the card has no artwork. */
 async function giftCardAttachment(accountId: string, design: GiftCardDesign, coupons: Array<ReturnType<typeof couponRowToApi>>) {
   if (!design.imageUrl || !coupons.length) return null;
   // Fetched only from this business's own folder in our bucket: the address is
@@ -7283,7 +7325,7 @@ async function giftCardAttachment(accountId: string, design: GiftCardDesign, cou
     })),
   );
   return {
-    filename: coupons.length === 1 ? `gift-voucher-${coupons[0].code}.pdf` : "gift-vouchers.pdf",
+    filename: coupons.length === 1 ? `gift-voucher-${coupons[0].code}.pdf` : `gift-vouchers-${coupons[0].code}.pdf`,
     content: Buffer.from(pdf).toString("base64"),
   };
 }
@@ -7331,7 +7373,7 @@ async function emailOnlineOrder(accountId: string, id: string) {
     covers: coupon.coversItemName ? mt("Redeemable for {item}", { item: coupon.coversItemName }) : "",
     worth: coupon.showsValue ? mt("Worth {amount}", { amount: formatMoney(coupon.originalValue, coupon.currency) }) : "",
   }));
-  const attachedLine = gift?.attachment ? mt("Your gift card is attached, ready to print or pass on.") : "";
+  const attachedLine = gift?.attachments.length ? mt("Your gift card is attached, ready to print or pass on.") : "";
   const packageLines = packages.map((name) => mt("{item} is on your account.", { item: name }));
 
   const text = [
@@ -7405,7 +7447,7 @@ async function emailOnlineOrder(accountId: string, id: string) {
     html,
     replyTo: branding.contactEmail || undefined,
     idempotencyKey: `online-order-${id}`,
-    attachments: gift?.attachment ? [gift.attachment] : undefined,
+    attachments: gift?.attachments.length ? gift.attachments : undefined,
   });
   if (!result.sent) console.error("billing_api:online_order_email_not_sent", accountId, id, result.reason);
 }

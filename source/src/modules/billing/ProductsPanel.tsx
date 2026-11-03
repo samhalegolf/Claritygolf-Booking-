@@ -10,6 +10,11 @@ import { Loading } from "../shared/Loading";
 //
 // Nothing is open or editable until it is asked for.
 //
+// A gift voucher is set up whole here: its options ($50, $100, ...), whether
+// it shows on the website store, and its gift card and email -- its own, or
+// the standard ones under Settings › Templates › Gift voucher. Every option of
+// a voucher shares its card and email.
+//
 // Presentational, like BillingReportsPanel: App.tsx owns the list and every
 // request. What lives here is form state, which is UI and nothing else.
 //
@@ -33,6 +38,15 @@ import { isLowStock } from "./stockMath";
 import { t, readerLocale } from "../../lib/i18n";
 import { prepareImage } from "../site-builder/imagePrep";
 import { uploadSiteImage } from "../site-builder/siteApi";
+import { GiftCardDesigner } from "../notifications/GiftCardDesigner";
+import {
+  GIFT_EMAIL_FIELDS,
+  defaultGiftCardDesign,
+  type GiftCardDesign,
+  type GiftEmailField,
+  type GiftEmailWording,
+} from "../../../netlify/functions/_shared/gift-card.mts";
+import { DEFAULT_NOTIFICATION_TEMPLATES, GIFT_VOUCHER_MERGE_FIELDS } from "../../../netlify/functions/_shared/notification-templates.mts";
 
 export type ProductFormValues = {
   id: string;
@@ -57,41 +71,59 @@ export type ProductFormValues = {
   voucherShowsValue: boolean;
   voucherExpiryMonths: number;
   // The website's shop: on the shelf, how it reaches the buyer, its picture,
-  // its download, and its options (a size, a pack) each priced or not.
+  // its download, and its options (a size, a pack, a $50 voucher) each with
+  // its own price and description or not.
   sellOnline: boolean;
   fulfilment: "collect" | "ship" | "download";
   imageUrl: string;
   downloadUrl: string;
-  variants: Array<{ id: string; name: string; price: number | null }>;
+  variants: ProductVariant[];
+  // A voucher's own gift card and email. Null: the standard ones.
+  giftCardDesign: GiftCardDesign | null;
+  giftEmail: GiftEmailWording | null;
   // Only sent when creating - stock on an existing product moves through an
   // adjustment so a save can't undo a sale made while the form was open.
   openingStock: number;
 };
 
-/** "Small", "Large = 45": one option per line, with its own price after an equals sign. */
-export function parseVariantLines(text: string, existing: ProductFormValues["variants"] = []): ProductFormValues["variants"] {
-  const seen = new Set<string>();
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 20)
-    .map((line, index) => {
-      const [rawName, rawPrice] = line.split("=");
-      const name = rawName.trim().slice(0, 80);
-      const price = rawPrice === undefined ? null : Number(rawPrice.replace(/[^0-9.]/g, ""));
-      // A line that names an existing option keeps its id, so a cart holding it still means the same thing.
-      const known = existing.find((variant) => variant.name === name && !seen.has(variant.id));
-      const id = known?.id || `v${Date.now().toString(36)}${index}`;
-      seen.add(id);
-      return { id, name, price: price !== null && Number.isFinite(price) && price >= 0 ? price : null };
-    })
-    .filter((variant) => variant.name);
+export type ProductVariant = { id: string; name: string; price: number | null; description: string };
+
+/** An option as typed: the price stays a string until save, like the form's other numbers. */
+type VariantDraft = { id: string; name: string; price: string; description: string };
+
+function variantDrafts(variants: ProductVariant[] | undefined): VariantDraft[] {
+  return (variants || []).map((variant) => ({
+    id: variant.id,
+    name: variant.name,
+    price: variant.price === null ? "" : String(variant.price),
+    description: variant.description || "",
+  }));
 }
 
-export function variantLines(variants: ProductFormValues["variants"] | undefined): string {
-  return (variants || []).map((variant) => (variant.price === null ? variant.name : `${variant.name} = ${variant.price}`)).join("\n");
+/** The options to save: named ones only, a blank price meaning the item's own. */
+function variantsFromDrafts(drafts: VariantDraft[]): ProductVariant[] {
+  return drafts
+    .map((draft) => {
+      const price = draft.price.trim() === "" ? null : Number(draft.price);
+      return {
+        id: draft.id,
+        name: draft.name.trim().slice(0, 80),
+        price: price !== null && Number.isFinite(price) && price >= 0 ? price : null,
+        description: draft.description.trim().slice(0, 300),
+      };
+    })
+    .filter((variant) => variant.name)
+    .slice(0, 20);
 }
+
+const newVariantId = () => `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+const GIFT_EMAIL_LABELS: Record<GiftEmailField, string> = {
+  subject: t("Subject"),
+  heading: t("Heading"),
+  body: t("Message"),
+  signoff: t("Sign-off"),
+};
 
 export type StockAdjustInput = { mode: "delta" | "setTo"; value: number; note: string };
 
@@ -105,8 +137,8 @@ type ProductFormDraft = Omit<ProductFormValues, "price" | "costPrice" | "taxRate
   taxRate: string;
   lowStockThreshold: string;
   openingStock: string;
-  /** The options as typed, one per line. */
-  variantsText: string;
+  /** The options as typed. */
+  variants: VariantDraft[];
 };
 
 function toNumber(value: string, fallback = 0) {
@@ -131,6 +163,8 @@ export type ProductsPanelProps = {
   // Takes the coach to where lesson types are edited. Services in this list
   // are only shown here; they belong to that screen.
   onEditLessonTypes: () => void;
+  // Takes the coach to the standard gift card and email, Settings › Templates › Gift voucher.
+  onOpenGiftTemplates: () => void;
 };
 
 const KIND_PLURALS: Record<BillingCatalogKind, string> = {
@@ -175,7 +209,9 @@ function emptyForm(taxRate: number, view: ProductsPanelView): ProductFormDraft {
     fulfilment: "collect",
     imageUrl: "",
     downloadUrl: "",
-    variantsText: "",
+    variants: [],
+    giftCardDesign: null,
+    giftEmail: null,
   };
 }
 
@@ -201,7 +237,9 @@ function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFo
     fulfilment: product.fulfilment || "collect",
     imageUrl: product.imageUrl || "",
     downloadUrl: product.downloadUrl || "",
-    variantsText: variantLines(product.variants),
+    variants: variantDrafts(product.variants),
+    giftCardDesign: product.giftCardDesign || null,
+    giftEmail: product.giftEmail || null,
   };
 }
 
@@ -227,6 +265,7 @@ export function ProductsPanel({
   onAdjustStock,
   onLoadMovements,
   onEditLessonTypes,
+  onOpenGiftTemplates,
 }: ProductsPanelProps) {
   const [form, setForm] = useState<ProductFormDraft>(() => emptyForm(defaultTaxRate, view));
   const [saving, setSaving] = useState(false);
@@ -338,7 +377,7 @@ export function ProductsPanel({
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      const { variantsText, ...rest } = form;
+      const { variants, ...rest } = form;
       const values: ProductFormValues = {
         ...rest,
         name: form.name.trim(),
@@ -348,7 +387,9 @@ export function ProductsPanel({
         lowStockThreshold: toNumber(form.lowStockThreshold),
         openingStock: toNumber(form.openingStock),
         voucherExpiryMonths: Math.max(0, Math.round(toNumber(form.voucherExpiryMonths))),
-        variants: parseVariantLines(variantsText, products.find((product) => product.id === form.id)?.variants),
+        variants: variantsFromDrafts(variants),
+        giftCardDesign: form.isVoucher ? form.giftCardDesign : null,
+        giftEmail: form.isVoucher ? form.giftEmail : null,
       };
       if (await onSave(values)) {
         resetForm();
@@ -588,16 +629,14 @@ export function ProductsPanel({
                 </label>
               </>
             )}
-            {!form.isVoucher && (
-              <label className="settings-field pos-settles-toggle">
-                <input
-                  checked={form.sellOnline}
-                  onChange={(event) => updateForm("sellOnline", event.target.checked)}
-                  type="checkbox"
-                />
-                <span>{t("Sell on your website")}</span>
-              </label>
-            )}
+            <label className="settings-field pos-settles-toggle">
+              <input
+                checked={form.sellOnline}
+                onChange={(event) => updateForm("sellOnline", event.target.checked)}
+                type="checkbox"
+              />
+              <span>{t("Show on your website store")}</span>
+            </label>
             {form.sellOnline && !form.isVoucher && (
               <>
                 <label className="settings-field">
@@ -614,30 +653,147 @@ export function ProductsPanel({
                     <input value={form.downloadUrl} onChange={(event) => updateForm("downloadUrl", event.target.value)} placeholder="https://…" />
                   </label>
                 )}
-                <label className="settings-field product-notes-field">
-                  <span>{t("Options, one per line")}</span>
-                  <textarea
-                    value={form.variantsText}
-                    onChange={(event) => updateForm("variantsText", event.target.value)}
-                    rows={3}
-                    placeholder={"Small\nMedium\nLarge = 45"}
-                  />
-                </label>
-                <div className="settings-field product-notes-field">
-                  <span>{t("Picture")}</span>
-                  {form.imageUrl && <img className="product-picture-preview" src={form.imageUrl} alt="" />}
-                  <div className="product-picture-actions">
-                    <label className="outline-button logo-upload">
-                      {uploading ? t("Uploading…") : form.imageUrl ? t("Replace picture") : t("Upload picture")}
-                      <input accept="image/*" type="file" disabled={uploading} onChange={(event) => { void uploadPicture(event.target.files?.[0]); event.target.value = ""; }} />
-                    </label>
-                    {form.imageUrl && (
-                      <button className="outline-button" type="button" onClick={() => updateForm("imageUrl", "")}>{t("Remove")}</button>
-                    )}
-                  </div>
-                  {uploadError && <p className="field-help">{uploadError}</p>}
-                </div>
               </>
+            )}
+            {(form.sellOnline || form.isVoucher) && (
+              <div className="settings-field product-notes-field product-variants">
+                <span>{form.isVoucher ? t("Options, e.g. $50, $100 and $200 of the same voucher") : t("Options, e.g. sizes or packs")}</span>
+                {form.variants.length ? (
+                  <div className="product-variant-rows">
+                    {form.variants.map((variant, index) => {
+                      const change = (patch: Partial<VariantDraft>) =>
+                        updateForm("variants", form.variants.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)));
+                      return (
+                        <div className="product-variant-row" key={variant.id}>
+                          <input
+                            aria-label={t("Option name")}
+                            value={variant.name}
+                            maxLength={80}
+                            placeholder={form.isVoucher ? t("e.g. $100 voucher") : t("e.g. Large")}
+                            onChange={(event) => change({ name: event.target.value })}
+                          />
+                          <input
+                            aria-label={t("Option price ({currency})", { currency })}
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={variant.price}
+                            placeholder={form.price || t("Price")}
+                            onChange={(event) => change({ price: event.target.value })}
+                          />
+                          <input
+                            aria-label={t("Option description")}
+                            value={variant.description}
+                            maxLength={300}
+                            placeholder={t("Description (optional)")}
+                            onChange={(event) => change({ description: event.target.value })}
+                          />
+                          <button
+                            className="text-link-button"
+                            type="button"
+                            aria-label={t("Remove option")}
+                            onClick={() => updateForm("variants", form.variants.filter((_, at) => at !== index))}
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {form.variants.length < 20 && (
+                  <button
+                    className="outline-button"
+                    type="button"
+                    onClick={() => updateForm("variants", [...form.variants, { id: newVariantId(), name: "", price: "", description: "" }])}
+                  >
+                    <Plus size={14} /> {t("Add an option")}
+                  </button>
+                )}
+                <p className="field-help">
+                  {form.isVoucher
+                    ? t("Each option has its own price and description; a blank price sells at the price above. All options share this voucher's gift card and email.")
+                    : t("Each option has its own price and description; a blank price sells at the price above. Stock, when counted, is shared across options.")}
+                </p>
+              </div>
+            )}
+            {form.sellOnline && (
+              <div className="settings-field product-notes-field">
+                <span>{t("Picture on the store")}</span>
+                {form.imageUrl && <img className="product-picture-preview" src={form.imageUrl} alt="" />}
+                <div className="product-picture-actions">
+                  <label className="outline-button logo-upload">
+                    {uploading ? t("Uploading…") : form.imageUrl ? t("Replace picture") : t("Upload picture")}
+                    <input accept="image/*" type="file" disabled={uploading} onChange={(event) => { void uploadPicture(event.target.files?.[0]); event.target.value = ""; }} />
+                  </label>
+                  {form.imageUrl && (
+                    <button className="outline-button" type="button" onClick={() => updateForm("imageUrl", "")}>{t("Remove")}</button>
+                  )}
+                </div>
+                {form.isVoucher && !form.imageUrl && (
+                  <p className="field-help">{t("Leave it empty and the store shows this voucher's own gift card artwork, when it has one.")}</p>
+                )}
+                {uploadError && <p className="field-help">{uploadError}</p>}
+              </div>
+            )}
+            {form.isVoucher && (
+              <div className="settings-field product-notes-field product-gift-setup">
+                <span>{t("Gift card")}</span>
+                <label className="pos-settles-toggle">
+                  <input
+                    type="checkbox"
+                    checked={form.giftCardDesign !== null}
+                    onChange={(event) => updateForm("giftCardDesign", event.target.checked ? defaultGiftCardDesign() : null)}
+                  />
+                  <span>{t("Give this voucher its own gift card")}</span>
+                </label>
+                {form.giftCardDesign ? (
+                  <GiftCardDesigner design={form.giftCardDesign} locked={false} onChange={(design) => updateForm("giftCardDesign", design)} />
+                ) : (
+                  <p className="field-help">{t("It uses your standard gift card.")}</p>
+                )}
+
+                <span>{t("Email")}</span>
+                <label className="pos-settles-toggle">
+                  <input
+                    type="checkbox"
+                    checked={form.giftEmail !== null}
+                    onChange={(event) =>
+                      updateForm("giftEmail", event.target.checked ? { subject: "", heading: "", body: "", signoff: "" } : null)
+                    }
+                  />
+                  <span>{t("Write this voucher its own email")}</span>
+                </label>
+                {form.giftEmail ? (
+                  <>
+                    {GIFT_EMAIL_FIELDS.map((field) => {
+                      const wording = form.giftEmail as GiftEmailWording;
+                      const change = (value: string) => updateForm("giftEmail", { ...wording, [field]: value });
+                      return (
+                        <label className="settings-field" key={field}>
+                          <span>{GIFT_EMAIL_LABELS[field]}</span>
+                          {field === "body" ? (
+                            <textarea rows={4} value={wording.body} placeholder={DEFAULT_NOTIFICATION_TEMPLATES.giftVoucher.body} onChange={(event) => change(event.target.value)} />
+                          ) : (
+                            <input value={wording[field]} placeholder={DEFAULT_NOTIFICATION_TEMPLATES.giftVoucher[field]} onChange={(event) => change(event.target.value)} />
+                          )}
+                        </label>
+                      );
+                    })}
+                    <p className="field-help">
+                      {t("A line left blank uses your standard gift voucher email. You can use {fields}. The codes and receipt are added for you.", {
+                        fields: GIFT_VOUCHER_MERGE_FIELDS.map((name) => `{{${name}}}`).join(", "),
+                      })}
+                    </p>
+                  </>
+                ) : (
+                  <p className="field-help">{t("It uses your standard gift voucher email.")}</p>
+                )}
+                <button className="text-link-button" type="button" onClick={onOpenGiftTemplates}>
+                  {t("Edit the standard gift card and email (Settings › Templates › Gift voucher)")}
+                </button>
+              </div>
             )}
             <label className="settings-field product-notes-field">
               <span>{t("Notes")}</span>
@@ -657,8 +813,8 @@ export function ProductsPanel({
         {form.isVoucher && form.voucherItemId && (
           <p className="field-help">{t("Until any of it is spent, the voucher pays for one of these at whatever it costs on the day. If that is less than the voucher is worth, the rest goes to the client's account credit. It can also be spent like money on anything else.")}</p>
         )}
-        {form.sellOnline && !form.isVoucher && (
-          <p className="field-help">{t("It goes on the shelf of the Shop block on your website once the shop is open (Settings › Website). An option after an equals sign has its own price; the rest sell at the price above. Stock, when counted, is shared across options.")}</p>
+        {form.sellOnline && (
+          <p className="field-help">{t("It shows in the Shop on your website, where anyone can buy it by card once Clarity Pay is set up.")}</p>
         )}
         {showDetail && !form.trackStock && (
           <p className="field-help">{t("Not counted - use this for something like a fitting fee that you sell but never have on a shelf.")}</p>

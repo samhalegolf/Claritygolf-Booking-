@@ -74,6 +74,8 @@ export type Service = {
   passExpiryMonths?: number;
   /** Packages only: purchased units may fund other eligible services by value. */
   crossRedeemable?: boolean;
+  /** Passes and bundles only: shown on the website store. */
+  sellOnline?: boolean;
   /** Bundles only: what selling this one hands over, and how many of each. */
   bundleItems?: BundleItem[];
   /** Services only: may be funded by value from a cross-redeemable pass. */
@@ -535,6 +537,8 @@ export function cleanService(service?: Partial<Service>, index = 0): Service {
         ? clamp(Math.round(Number(service.passExpiryMonths)), 0, 120)
         : undefined,
     crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
+    // Passes and bundles only: shown on the website store.
+    sellOnline: lessonFormat === "package" && service?.sellOnline === true ? true : undefined,
     bundleItems:
       lessonFormat === "package" && cleanBundleItems(service?.bundleItems).length
         ? cleanBundleItems(service?.bundleItems)

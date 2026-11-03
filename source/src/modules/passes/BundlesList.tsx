@@ -25,6 +25,8 @@ export type BundleDraft = {
   price: number;
   items: BundleItem[];
   active: boolean;
+  /** Shown on the website store. */
+  sellOnline: boolean;
 };
 
 export type BundlesListProps = {
@@ -56,6 +58,7 @@ function draftFrom(service: Service | null): BundleDraft {
     price: service?.price ?? 0,
     items: cleanBundleItems(service?.bundleItems),
     active: service ? service.active : true,
+    sellOnline: service?.sellOnline === true,
   };
 }
 
@@ -118,7 +121,10 @@ export function BundlesList({ services, products, formatMoney, saving, onSave, o
           <tbody>
             {bundles.map((service) => (
               <tr key={service.id} className={service.active ? "" : "voided-row"}>
-                <td>{service.name}</td>
+                <td>
+                  {service.name}
+                  {service.sellOnline ? <em className="pass-on-website">{" · "}{t("On website")}</em> : null}
+                </td>
                 <td>{includesLabel(service)}</td>
                 <td>{formatMoney(service.price)}</td>
                 <td>
@@ -272,6 +278,11 @@ function BundleEditor({
         <input type="checkbox" checked={draft.active} onChange={(event) => set("active", event.target.checked)} />
         {t("On sale")}
       </label>
+      <label className="pass-coverage-option pass-field-wide">
+        <input type="checkbox" checked={draft.sellOnline} onChange={(event) => set("sellOnline", event.target.checked)} />
+        {t("Show on your website store")}
+      </label>
+      {draft.sellOnline ? <p className="field-help pass-field-wide">{t("Anyone can buy it from the Shop on your website and pay by card, once Clarity Pay is set up.")}</p> : null}
 
       <p className="field-help pass-field-wide">
         {t("Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.")}
