@@ -1713,3 +1713,148 @@ h3.site-heading {
 .site-frame-inert > iframe {
   pointer-events: none;
 }
+
+/* --- Free layout -------------------------------------------------------------
+   Items on a grid of --site-canvas-columns across and --site-canvas-rows rows,
+   each placed by its own grid-column and grid-row (CanvasBlock.tsx). Later
+   items are drawn on top. On a phone the grid becomes a column and the items
+   stack in reading order (their `order`), pictures and shapes keeping their
+   height in rows. */
+
+.site-canvas-grid {
+  position: relative;
+  /* The items' stacking stays inside the section, under the editor's section toolbar. */
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(var(--site-canvas-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--site-canvas-rows), var(--site-canvas-row));
+}
+
+.site-canvas-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.site-canvas-item.is-align-centre {
+  text-align: center;
+}
+
+.site-canvas-item.is-align-right {
+  text-align: right;
+}
+
+.site-canvas-item.is-text.is-fill-none {
+  justify-content: flex-start;
+}
+
+.site-canvas-item:not(.is-fill-none) {
+  justify-content: center;
+}
+
+.site-canvas-item.is-text:not(.is-fill-none) {
+  padding: 16px 20px;
+}
+
+.site-canvas-item.is-fill-surface {
+  background: var(--site-surface);
+  color: var(--site-surface-text);
+}
+
+.site-canvas-item.is-fill-primary {
+  background: var(--site-primary);
+  color: var(--site-on-primary);
+}
+
+.site-canvas-item.is-fill-accent {
+  background: var(--site-accent);
+  color: var(--site-on-primary);
+}
+
+.site-canvas-item.is-fill-text {
+  background: var(--site-text);
+  color: var(--site-bg);
+}
+
+.site-canvas-item.is-fill-background {
+  background: var(--site-bg);
+  color: var(--site-text);
+}
+
+.site-canvas-item:not(.is-fill-none) .site-heading {
+  color: inherit;
+}
+
+.site-canvas-item.is-corners-rounded {
+  border-radius: calc(var(--site-radius) + 12px);
+}
+
+.site-canvas-item.is-corners-pill {
+  border-radius: 999px;
+}
+
+.site-canvas-item.is-corners-circle {
+  border-radius: 50%;
+}
+
+.site-canvas-words {
+  margin: 0;
+}
+
+.site-canvas-words.is-lead {
+  font-size: 1.15rem;
+  color: var(--site-muted);
+}
+
+.site-canvas-item:not(.is-fill-none) .site-canvas-words.is-lead {
+  color: inherit;
+}
+
+.site-canvas-words.is-small {
+  font-size: 0.9rem;
+  color: var(--site-muted);
+}
+
+.site-canvas-item.is-image img,
+.site-canvas-item.is-image .site-placeholder,
+.site-canvas-link {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.site-canvas-item.is-image img {
+  object-fit: cover;
+}
+
+.site-canvas-item.is-image .site-placeholder {
+  min-height: 0;
+}
+
+.site-canvas-button {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0 12px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .site-canvas-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .site-canvas-item.is-image,
+  .site-canvas-item.is-shape {
+    height: calc(var(--site-canvas-h) * 12px);
+  }
+
+  .site-canvas-item.is-button {
+    min-height: 48px;
+  }
+}

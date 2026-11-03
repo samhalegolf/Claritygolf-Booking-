@@ -17,6 +17,7 @@ import {
   Megaphone,
   MessageSquareQuote,
   Minus,
+  Move,
   Newspaper,
   Play,
   ShoppingBag,
@@ -30,6 +31,7 @@ import { t } from "../../lib/i18n";
 export type BlockCatalogEntry = { type: SiteBlockType; label: string; hint: string; Icon: typeof Type };
 
 export const BLOCK_CATALOG: readonly BlockCatalogEntry[] = [
+  { type: "canvas", label: t("Free layout"), hint: t("Text, pictures, buttons and shapes, placed anywhere: drag to move, pull the edges to resize."), Icon: Move },
   { type: "hero", label: t("Hero"), hint: t("A big heading, a line and a button."), Icon: LayoutTemplate },
   { type: "text", label: t("Text"), hint: t("A heading and some paragraphs."), Icon: Type },
   { type: "image", label: t("Image"), hint: t("One picture, with a caption."), Icon: Image },

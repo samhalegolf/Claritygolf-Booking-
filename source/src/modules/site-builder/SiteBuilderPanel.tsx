@@ -46,6 +46,7 @@ import { Loading } from "../shared/Loading";
 import { SettingsGroup } from "../settings/SettingsLayout";
 import { blockCatalogEntry } from "./blockCatalog";
 import { setBlockField } from "./blockText";
+import { arrangeFreely } from "./canvasLayout";
 import { DomainPanel } from "./DomainPanel";
 import { BlockContentFields, FooterInspector, HeaderInspector, PageInspector, SectionDesignFields, SiteInspector } from "./Inspectors";
 import { SECTION_CATEGORIES, SECTION_LIBRARY, blockForChoice, type SectionChoice } from "./sectionLibrary";
@@ -100,6 +101,8 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   const [panel, setPanel] = useState<Panel>(null);
   const [sectionTab, setSectionTab] = useState<"content" | "design">("content");
   const [addAt, setAddAt] = useState(0);
+  // The item picked in a free layout section: drawn with handles on the page, opened in the side panel.
+  const [canvasItem, setCanvasItem] = useState<{ block: string; item: string } | null>(null);
   const [addCategory, setAddCategory] = useState<string>(SECTION_CATEGORIES[0]);
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -453,6 +456,28 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       setSelected("footer");
       setPanel("footer");
     },
+    arrangeFreely: (blockId) => {
+      const block = currentPage?.content.blocks.find((candidate) => candidate.id === blockId);
+      const next = block ? arrangeFreely(block) : null;
+      if (!next || !window.confirm(t("Turn this section into a free layout? You can then drag its words, buttons and picture anywhere. It stays a free layout afterwards."))) return;
+      updateBlock(blockId, next);
+      setSelected({ block: blockId });
+    },
+    canvasItem,
+    selectCanvasItem: (blockId, itemId) => {
+      setSelected({ block: blockId });
+      setCanvasItem(itemId ? { block: blockId, item: itemId } : null);
+    },
+    changeCanvas: (blockId, next) => {
+      const block = currentPage?.content.blocks.find((candidate) => candidate.id === blockId);
+      if (block?.type === "canvas") updateBlock(blockId, { ...block, ...next });
+    },
+    editCanvasItem: (blockId, itemId) => {
+      setSelected({ block: blockId });
+      setCanvasItem({ block: blockId, item: itemId });
+      setSectionTab("content");
+      setPanel("section");
+    },
     labels: {
       addSection: t("Add section"),
       editSection: t("Edit section"),
@@ -463,6 +488,28 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       editHeader: t("Edit site header"),
       editFooter: t("Edit footer"),
       emptyPage: t("This page is empty. Add a section to start."),
+      arrangeFreely: t("Arrange freely: drag the parts anywhere"),
+      canvas: {
+        heading: t("Heading"),
+        text: t("Text"),
+        picture: t("Picture"),
+        button: t("Button"),
+        shape: t("Shape"),
+        addHeading: t("Add a heading"),
+        addText: t("Add text"),
+        addPicture: t("Add a picture"),
+        addButton: t("Add a button"),
+        addShape: t("Add a shape"),
+        newHeading: t("A new heading"),
+        newText: t("Write something here."),
+        newButton: t("Find out more"),
+        edit: t("Edit"),
+        forward: t("Bring forward"),
+        backward: t("Send backward"),
+        duplicate: t("Duplicate"),
+        remove: t("Remove"),
+        height: t("Drag to change the section's height"),
+      },
     },
   };
 
@@ -887,7 +934,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
                   </div>
                   {sectionTab === "content" ? (
                     <>
-                      <BlockContentFields block={selectedBlock} onChange={(next) => updateBlock(selectedBlock.id, next)} pages={pageOptions} bookingHref={bookingHref} onError={onToast} />
+                      <BlockContentFields block={selectedBlock} focusItem={canvasItem?.block === selectedBlock.id ? canvasItem.item : ""} onChange={(next) => updateBlock(selectedBlock.id, next)} pages={pageOptions} bookingHref={bookingHref} onError={onToast} />
                       <p className="site-field-help">
                         {t("Link to this section with")} <code>#{selectedBlock.id}</code>
                       </p>

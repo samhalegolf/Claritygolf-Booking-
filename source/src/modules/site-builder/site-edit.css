@@ -146,3 +146,179 @@
     display: none;
   }
 }
+
+/* --- Free layout, being arranged (CanvasBlock.tsx) ----------------------------
+   The grid shows faintly while the section is hovered or picked; the picked
+   item has a frame, eight handles and its own toolbar; the bar under the
+   section pulls its height; the add bar puts a new piece in. */
+
+.is-editing .site-canvas.is-arranging {
+  position: relative;
+  padding-bottom: 8px;
+}
+
+.is-editing .site-block:hover .site-canvas-grid,
+.is-editing .site-block.is-selected .site-canvas-grid {
+  background-image:
+    linear-gradient(to right, rgba(59, 130, 246, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+  background-size: calc(100% / var(--site-canvas-columns)) var(--site-canvas-row);
+}
+
+.is-editing .site-canvas-item {
+  cursor: grab;
+  outline: 1px dashed transparent;
+  outline-offset: 0;
+  touch-action: none;
+  user-select: none;
+}
+
+.is-editing .site-canvas-item a,
+.is-editing .site-canvas-item img {
+  -webkit-user-drag: none;
+}
+
+.is-editing .site-canvas-item:hover {
+  outline-color: rgba(59, 130, 246, 0.7);
+}
+
+.is-editing .site-canvas-item.is-picked {
+  outline: 2px solid rgb(59 130 246);
+}
+
+.is-editing .site-canvas-item.is-held {
+  cursor: grabbing;
+  opacity: 0.9;
+}
+
+.is-editing .site-canvas-item.is-typing {
+  cursor: text;
+  user-select: text;
+}
+
+.is-editing .site-canvas-item:focus-visible {
+  outline: 2px solid rgb(59 130 246);
+}
+
+.site-canvas-handle {
+  position: absolute;
+  z-index: 2;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(59 130 246);
+  border-radius: 3px;
+  background: rgb(255 255 255);
+  touch-action: none;
+}
+
+.site-canvas-handle.is-n,
+.site-canvas-handle.is-s {
+  left: calc(50% - 6px);
+  cursor: ns-resize;
+}
+
+.site-canvas-handle.is-e,
+.site-canvas-handle.is-w {
+  top: calc(50% - 6px);
+  cursor: ew-resize;
+}
+
+.site-canvas-handle.is-n,
+.site-canvas-handle.is-ne,
+.site-canvas-handle.is-nw {
+  top: -7px;
+}
+
+.site-canvas-handle.is-s,
+.site-canvas-handle.is-se,
+.site-canvas-handle.is-sw {
+  bottom: -7px;
+}
+
+.site-canvas-handle.is-e,
+.site-canvas-handle.is-ne,
+.site-canvas-handle.is-se {
+  right: -7px;
+}
+
+.site-canvas-handle.is-w,
+.site-canvas-handle.is-nw,
+.site-canvas-handle.is-sw {
+  left: -7px;
+}
+
+.site-canvas-handle.is-ne,
+.site-canvas-handle.is-sw {
+  cursor: nesw-resize;
+}
+
+.site-canvas-handle.is-nw,
+.site-canvas-handle.is-se {
+  cursor: nwse-resize;
+}
+
+/* The picked item's own toolbar: above it, or below when it sits at the top. */
+.site-edit-toolbar.site-canvas-toolbar {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 10px);
+  left: 0;
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 40;
+}
+
+.site-edit-toolbar.site-canvas-toolbar.is-below {
+  top: calc(100% + 10px);
+  bottom: auto;
+}
+
+.site-canvas-rows-handle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 14px;
+  margin-top: 4px;
+  cursor: ns-resize;
+  touch-action: none;
+  opacity: 0;
+}
+
+.site-canvas-rows-handle span {
+  width: 48px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgb(59 130 246);
+}
+
+.site-canvas-addbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgb(17 24 39);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.is-editing .site-block:hover .site-canvas-rows-handle,
+.is-editing .site-block.is-selected .site-canvas-rows-handle,
+.is-editing .site-block:hover .site-canvas-addbar,
+.is-editing .site-block.is-selected .site-canvas-addbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+  /* Stacked on a phone, items are picked and edited but not dragged. */
+  .site-canvas-handle,
+  .site-canvas-rows-handle {
+    display: none;
+  }
+}

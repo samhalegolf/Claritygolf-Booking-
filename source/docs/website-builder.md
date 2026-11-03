@@ -112,9 +112,44 @@ same-origin `returnPath` so the buyer comes back to the site rather than to
 Clarity's shop page. An order is one till sale with several lines, priced
 on the server off the shelf, never off the request.
 
+## Free layout
+
+A free layout section (`canvas`) holds pieces placed anywhere, the way
+Squarespace's Fluid Engine works: text (six sizes, from a big heading to
+small text), pictures, buttons and shapes. Each piece covers cells of a grid
+24 columns across the content width and rows of 16px, and later pieces are
+drawn over earlier ones. Any piece can have a background from the site's own
+colours and square, rounded, pill or circle (oval, when the box is not
+square) corners; a picture fills its box and can link somewhere.
+
+In edit mode (`CanvasBlock.tsx`): press and drag a piece to move it, pull any
+of its eight handles to stretch it, pull the bar under the section to make
+the section taller or shorter, double-click words to type over them, and use
+the arrow keys to nudge (Shift for four cells) and Delete to remove. The
+picked piece has a toolbar to edit it in the side panel, bring it forward,
+send it back, duplicate or remove it. The bar under the section adds a
+heading, text, a picture, a button or a shape, below everything already
+there. Every move snaps to the grid and is written once, on letting go. The
+section grows to hold a piece dragged below it. The grid maths is in
+`canvasLayout.ts`.
+
+On a phone the pieces stack in reading order (top to bottom, then left to
+right); pictures and shapes keep their height in rows. In the phone preview
+pieces can be picked and edited but not dragged.
+
+**Add section is templates of pieces.** The plain layouts in the gallery
+(Intro, Text, the single pictures, Call to action, and an empty one) are
+free layouts with pieces already placed; once on the page each piece is
+moved, added and removed on its own. Sections that draw something live
+(lists, reviews, booking, shop, articles, forms, maps) stay blocks of their
+own. A hero, text, call to action or picture section made before this (by a
+template or the Squarespace import) has an "Arrange freely" button on its
+toolbar that turns it into a free layout with the same words, buttons,
+picture, id and style.
+
 ## Blocks
 
-hero, text, image, gallery (with an optional button), features, cards (a
+canvas (the free layout, above), hero, text, image, gallery (with an optional button), features, cards (a
 picture, heading, line and button each, 2 to 4 across), logos (small
 pictures in a row, a caption each, for certifications and partners),
 pricing, testimonials (with a picture or screenshot per review and an
@@ -295,6 +330,7 @@ inert: a click lands on the block, not inside the frame.
 | Renderer (editor preview and public page share it) | `src/modules/site-builder/SiteRenderer.tsx`, `site.css` |
 | Editor | `src/modules/site-builder/SiteBuilderPanel.tsx`, `Inspectors.tsx`, `fields.tsx` |
 | Section gallery (Add section) | `src/modules/site-builder/sectionLibrary.tsx` |
+| Free layout: drawing and arranging, grid maths | `src/modules/site-builder/CanvasBlock.tsx`, `canvasLayout.ts`, side panel in `Inspectors.tsx` (`CanvasFields`) |
 | Editing on the page: typed-over words, section toolbars | `SiteRenderer.tsx` (`editor` prop, `EditableText`), `blockText.ts`, `site-edit.css` (preview frame only) |
 | Shop block and the visitor's cart | `src/modules/site-builder/ShopBlock.tsx`, `siteCart.ts` |
 | The shelf, carts and orders (shared with the shop page) | `netlify/functions/_shared/online-shop.mts`, routes in `billing-api.mts`, migration `20261031000600_online_store` |
