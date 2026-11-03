@@ -32,6 +32,7 @@ import {
   Linkedin,
   Mail,
   MapPin,
+  Move,
   Pencil,
   Phone,
   Plus,
@@ -56,6 +57,7 @@ import {
   type SiteBlock,
   type SiteBlockStyle,
   type SiteButton,
+  type SiteCanvasBlock,
   type SiteFeatureIcon,
   type SitePage,
   type SitePageCard,
@@ -65,6 +67,9 @@ import {
   type SiteTheme,
   type SitePictureShape,
 } from "../../../netlify/functions/_shared/site/document.mts";
+import { CanvasBlock, CanvasEditor } from "./CanvasBlock";
+import { canArrangeFreely } from "./canvasLayout";
+import { EditableText } from "./EditableText";
 import { FormBlock } from "./FormBlock";
 import { ShopBlock } from "./ShopBlock";
 import { CART_EVENT, cartCount, readCart } from "./siteCart";
@@ -88,6 +93,15 @@ export type SiteEditorHooks = {
   removeSection: (blockId: string) => void;
   editHeader: () => void;
   editFooter: () => void;
+  /** Turn a hero, text, call to action or picture section into a free layout (canArrangeFreely). */
+  arrangeFreely: (blockId: string) => void;
+  /** The item picked in a free layout section, if any. */
+  canvasItem: { block: string; item: string } | null;
+  selectCanvasItem: (blockId: string, itemId: string | null) => void;
+  /** A free layout's items moved, stretched, added, restacked or removed. */
+  changeCanvas: (blockId: string, next: Pick<SiteCanvasBlock, "items" | "rows">) => void;
+  /** Open the side panel on one item of a free layout. */
+  editCanvasItem: (blockId: string, itemId: string) => void;
   /** The words on the editing controls, in the editor's language. */
   labels: {
     addSection: string;
@@ -99,46 +113,33 @@ export type SiteEditorHooks = {
     editHeader: string;
     editFooter: string;
     emptyPage: string;
+    arrangeFreely: string;
+    canvas: {
+      heading: string;
+      text: string;
+      picture: string;
+      button: string;
+      shape: string;
+      addHeading: string;
+      addText: string;
+      addPicture: string;
+      addButton: string;
+      addShape: string;
+      newHeading: string;
+      newText: string;
+      newButton: string;
+      edit: string;
+      forward: string;
+      backward: string;
+      duplicate: string;
+      remove: string;
+      height: string;
+    };
   };
 };
 
 /** The field-writer for the block being drawn, while the page is being edited in place. */
 const InlineEdit = createContext<((path: string, value: string) => void) | null>(null);
-
-/**
- * Words the editor can type over. Plain text in, plain text out: a single
- * line ends at Enter, a multi-line field keeps its blank lines as paragraph
- * breaks. Written back on leaving the field, so typing never redraws the page
- * under the caret; Escape puts the words back as they were.
- */
-function EditableText({ as: Tag, value, className = "", multiline = false, onCommit }: { as: "h1" | "h2" | "h3" | "p" | "div" | "span" | "strong" | "figcaption"; value: string; className?: string; multiline?: boolean; onCommit: (next: string) => void }) {
-  return (
-    <Tag
-      // A new value from the side panel draws afresh; typing here does not, until the field is left.
-      key={value}
-      className={`${className} site-inline-edit${multiline ? " is-multiline" : ""}`.trim()}
-      contentEditable="plaintext-only"
-      suppressContentEditableWarning
-      spellCheck
-      onBlur={(event) => {
-        const raw = event.currentTarget.innerText.replace(/\u00a0/g, " ");
-        const next = multiline ? raw.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim() : raw.replace(/\s*\n\s*/g, " ").trim();
-        if (next !== value) onCommit(next);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.currentTarget.innerText = value;
-          event.currentTarget.blur();
-        } else if (event.key === "Enter" && !multiline) {
-          event.preventDefault();
-          event.currentTarget.blur();
-        }
-      }}
-    >
-      {value}
-    </Tag>
-  );
-}
 
 /** A line of words that is typed over in edit mode, and drawn as it is otherwise. Nothing when empty. */
 function Text({ as, value, field, className, multiline }: { as: "p" | "span" | "strong" | "figcaption"; value: string; field?: string; className?: string; multiline?: boolean }) {
@@ -457,6 +458,7 @@ export function SiteRenderer({
         {control(labels.addSection, () => editor.addSection(index + 1), <><Plus size={14} /> {labels.addSection}</>, "site-edit-add is-after")}
         <div className="site-edit-toolbar">
           {control(labels.editSection, () => editor.editSection(block.id), <><Pencil size={14} /> <span>{labels.editSection}</span></>, "site-edit-tool is-labelled")}
+          {canArrangeFreely(block) ? control(labels.arrangeFreely, () => editor.arrangeFreely(block.id), <Move size={15} />) : null}
           {index > 0 ? control(labels.moveUp, () => editor.moveSection(block.id, -1), <ArrowUp size={15} />) : null}
           {index < count - 1 ? control(labels.moveDown, () => editor.moveSection(block.id, 1), <ArrowDown size={15} />) : null}
           {control(labels.duplicate, () => editor.duplicateSection(block.id), <Copy size={15} />)}
@@ -531,6 +533,7 @@ export function SiteRenderer({
         editor ? partChrome(editor.labels.editHeader, editor.editHeader) : null,
       )}
 
+      <CanvasEditor.Provider value={editor ?? null}>
       <main className="site-main">
         {missingPage ? (
           <section className="site-container site-missing">
@@ -580,6 +583,7 @@ export function SiteRenderer({
           </div>
         ) : null}
       </main>
+      </CanvasEditor.Provider>
 
       {frame(
         "footer",
@@ -1071,6 +1075,8 @@ function Block({
           {block.showMap && block.address ? <MapFrame address={block.address} preview={preview} /> : null}
         </section>
       );
+    case "canvas":
+      return <CanvasBlock block={block} Button={Button} linkProps={linkProps} />;
     case "divider":
       return <div className={`site-container site-divider is-${block.line} is-${block.size}`}>{block.line === "line" ? <hr /> : null}</div>;
     default:

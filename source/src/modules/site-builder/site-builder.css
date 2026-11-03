@@ -1044,3 +1044,10 @@
     flex-wrap: wrap;
   }
 }
+
+/* The free layout's "add a piece" buttons in the side panel. */
+.site-canvas-add-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

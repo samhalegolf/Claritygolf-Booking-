@@ -42,6 +42,10 @@ test("every layout in the section gallery makes a section the cleaner keeps as i
     for (const [key, value] of Object.entries(choice.patch || {})) {
       assert.deepEqual(cleaned[key], value, `${choice.id}: ${key} survives the cleaner`);
     }
+    if (block.type === "canvas") {
+      assert.deepEqual(cleaned.items, block.items, `${choice.id}: its items sit inside the grid as placed`);
+      assert.equal(cleaned.rows, block.rows, `${choice.id}: its height is tall enough for its items`);
+    }
     assert.ok(style, "a fresh section carries a plain style");
   }
 });
@@ -49,7 +53,11 @@ test("every layout in the section gallery makes a section the cleaner keeps as i
 test("the gallery has an id per layout, and every block a site can have is in it", () => {
   const ids = SECTION_LIBRARY.map((choice) => choice.id);
   assert.equal(new Set(ids).size, ids.length);
-  for (const type of SITE_BLOCK_TYPES) assert.ok(SECTION_LIBRARY.some((choice) => choice.type === type), `${type} can be added`);
+  // Headings, words and bands are offered as free layout templates; these blocks remain for pages made before them.
+  const laidOutFreely = ["hero", "text", "cta"];
+  for (const type of SITE_BLOCK_TYPES) {
+    if (!laidOutFreely.includes(type)) assert.ok(SECTION_LIBRARY.some((choice) => choice.type === type), `${type} can be added`);
+  }
   // A house site, with no booking page, still has something in every other category.
   const house = SECTION_LIBRARY.filter((choice) => !BUSINESS_ONLY_BLOCKS.includes(choice.type));
   for (const category of SECTION_CATEGORIES) {

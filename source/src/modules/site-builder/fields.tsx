@@ -1,6 +1,6 @@
 // The inspector's fields. Small, and the same everywhere in the editor.
 import { ArrowDown, ArrowUp, ImagePlus, Plus, Trash2 } from "lucide-react";
-import { useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 
 import { pageHref, pageSlugFromHref, type SiteButton, type SiteImage } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
@@ -311,7 +311,10 @@ export function ListEditor<T extends { id: string }>({
   create,
   itemLabel,
   render,
+  focusId = "",
 }: {
+  /** An item picked somewhere else (on the page): it opens here. */
+  focusId?: string;
   items: T[];
   onChange: (next: T[]) => void;
   max: number;
@@ -320,7 +323,10 @@ export function ListEditor<T extends { id: string }>({
   itemLabel: (item: T, index: number) => string;
   render: (item: T, update: (patch: Partial<T>) => void) => ReactNode;
 }) {
-  const [openId, setOpenId] = useState("");
+  const [openId, setOpenId] = useState(focusId);
+  useEffect(() => {
+    if (focusId) setOpenId(focusId);
+  }, [focusId]);
   const move = (index: number, delta: number) => {
     const next = [...items];
     const [item] = next.splice(index, 1);

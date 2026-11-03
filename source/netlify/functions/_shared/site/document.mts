@@ -584,6 +584,106 @@ export type SiteInstagramBlock = BlockBase & { type: "instagram"; heading: strin
  */
 export type SiteShopBlock = BlockBase & { type: "shop"; heading: string; intro: string; mode: "cards" | "embed"; height: number };
 
+// --- Free layout ---------------------------------------------------------------
+
+/**
+ * A section where things sit where the coach puts them: text, pictures,
+ * buttons and shapes on a grid, dragged into place and stretched to size in
+ * the editor, the way Squarespace's Fluid Engine works. The grid is
+ * CANVAS_COLUMNS columns across the content width and `rows` rows of
+ * CANVAS_ROW_PX each; an item covers the cells from (x, y), w across and h
+ * down. Later items are drawn over earlier ones. On a phone the items stack
+ * in reading order (top to bottom, then left to right).
+ */
+export const CANVAS_COLUMNS = 24;
+export const CANVAS_ROW_PX = 16;
+export const CANVAS_MIN_ROWS = 4;
+export const CANVAS_MAX_ROWS = 160;
+export const MAX_CANVAS_ITEMS = 40;
+
+export const SITE_CANVAS_ITEM_KINDS = ["text", "image", "button", "shape"] as const;
+export type SiteCanvasItemKind = (typeof SITE_CANVAS_ITEM_KINDS)[number];
+/** How big the words are: three heading sizes and three text sizes. */
+export const SITE_CANVAS_TEXT_SIZES = ["h1", "h2", "h3", "lead", "body", "small"] as const;
+export type SiteCanvasTextSize = (typeof SITE_CANVAS_TEXT_SIZES)[number];
+/** What fills an item's box, from the site's own colours. */
+export const SITE_CANVAS_FILLS = ["none", "surface", "primary", "accent", "text", "background"] as const;
+export type SiteCanvasFill = (typeof SITE_CANVAS_FILLS)[number];
+/** The box's corners: square, rounded, an ellipse filling the box, or a pill. */
+export const SITE_CANVAS_CORNERS = ["square", "rounded", "circle", "pill"] as const;
+export type SiteCanvasCorners = (typeof SITE_CANVAS_CORNERS)[number];
+
+export type SiteCanvasItem = {
+  id: string;
+  kind: SiteCanvasItemKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** The words of a text item, or a button's label. */
+  text: string;
+  size: SiteCanvasTextSize;
+  align: "left" | "centre" | "right";
+  image: SiteImage | null;
+  /** Where a button, or a picture, goes when pressed. */
+  href: string;
+  buttonStyle: "primary" | "secondary";
+  fill: SiteCanvasFill;
+  corners: SiteCanvasCorners;
+};
+
+export type SiteCanvasBlock = BlockBase & { type: "canvas"; rows: number; items: SiteCanvasItem[] };
+
+const whole = (value: unknown, min: number, max: number, fallback: number) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+};
+
+/** One item, cleaned and kept inside the grid. */
+export function cleanCanvasItem(input: Record<string, unknown>, index: number): SiteCanvasItem | null {
+  const kind = SITE_CANVAS_ITEM_KINDS.find((known) => known === input.kind);
+  if (!kind) return null;
+  const w = whole(input.w, 1, CANVAS_COLUMNS, 8);
+  const h = whole(input.h, 1, CANVAS_MAX_ROWS, 4);
+  return {
+    id: blockId(input.id, index, "item"),
+    kind,
+    x: whole(input.x, 0, CANVAS_COLUMNS - w, 0),
+    y: whole(input.y, 0, CANVAS_MAX_ROWS - h, 0),
+    w,
+    h,
+    text: text(input.text, kind === "button" ? 60 : 4000),
+    size: oneOf(input.size, SITE_CANVAS_TEXT_SIZES, "body"),
+    align: oneOf(input.align, ["left", "centre", "right"], "left"),
+    image: cleanImage(input.image),
+    href: cleanSiteHref(input.href),
+    buttonStyle: oneOf(input.buttonStyle, ["primary", "secondary"], "primary"),
+    fill: oneOf(input.fill, SITE_CANVAS_FILLS, kind === "shape" ? "primary" : "none"),
+    corners: oneOf(input.corners, SITE_CANVAS_CORNERS, "square"),
+  };
+}
+
+/** The rows a free layout needs: its own height, and never less than reaches its lowest item. */
+export function canvasRowsNeeded(items: readonly Pick<SiteCanvasItem, "y" | "h">[], rows = CANVAS_MIN_ROWS): number {
+  const lowest = items.reduce((bottom, item) => Math.max(bottom, item.y + item.h), 0);
+  return Math.min(CANVAS_MAX_ROWS, Math.max(CANVAS_MIN_ROWS, rows, lowest));
+}
+
+/** A fresh item of a kind, starting at row `y`. */
+export function newCanvasItem(kind: SiteCanvasItemKind, y = 0, words: { text?: string; button?: string } = {}): SiteCanvasItem {
+  const base = { id: siteId("item"), kind, x: 0, y, text: "", size: "body" as const, align: "left" as const, image: null, href: "", buttonStyle: "primary" as const, fill: "none" as const, corners: "square" as const };
+  switch (kind) {
+    case "text":
+      return { ...base, w: 12, h: 4, text: words.text ?? "Write something here." };
+    case "image":
+      return { ...base, w: 8, h: 14 };
+    case "button":
+      return { ...base, w: 5, h: 3, text: words.button ?? "Find out more" };
+    case "shape":
+      return { ...base, w: 6, h: 8, fill: "primary", corners: "rounded" };
+  }
+}
+
 export type SiteBlock =
   | SiteHeroBlock
   | SiteTextBlock
@@ -606,7 +706,8 @@ export type SiteBlock =
   | SiteArticlesBlock
   | SiteShopBlock
   | SiteVideosBlock
-  | SiteInstagramBlock;
+  | SiteInstagramBlock
+  | SiteCanvasBlock;
 export type SiteBlockType = SiteBlock["type"];
 
 export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
@@ -632,6 +733,7 @@ export const SITE_BLOCK_TYPES: readonly SiteBlockType[] = [
   "videos",
   "instagram",
   "shop",
+  "canvas",
 ];
 
 export type SiteSocialLink = { kind: SiteSocialKind; url: string };
@@ -1184,6 +1286,15 @@ function cleanBlockFields(input: Record<string, unknown>, id: string): SiteBlock
         height: Number.isFinite(height) ? Math.min(MAX_BOOKING_HEIGHT, Math.max(MIN_BOOKING_HEIGHT, Math.round(height))) : 900,
       };
     }
+    case "canvas": {
+      const seen = new Set<string>();
+      const items = cleanList(input.items, MAX_CANVAS_ITEMS, cleanCanvasItem).map((item, itemIndex) => {
+        const unique = seen.has(item.id) ? { ...item, id: `${item.id}-${itemIndex}` } : item;
+        seen.add(unique.id);
+        return unique;
+      });
+      return { id, type: "canvas", rows: canvasRowsNeeded(items, whole(input.rows, CANVAS_MIN_ROWS, CANVAS_MAX_ROWS, 24)), items };
+    }
     default:
       return null;
   }
@@ -1283,7 +1394,7 @@ export function sitePageImageUrls(content: SitePageContent): string[] {
     if (block.type === "image" && block.image) urls.push(block.image.url);
     if (block.type === "gallery") urls.push(...block.images.map((image) => image.url));
     if (block.type === "cards" || block.type === "logos") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
-    if (block.type === "testimonials" || block.type === "instagram") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
+    if (block.type === "testimonials" || block.type === "instagram" || block.type === "canvas") urls.push(...block.items.flatMap((item) => (item.image ? [item.image.url] : [])));
   }
   return urls;
 }
@@ -1388,6 +1499,13 @@ function newBlockFields(type: SiteBlockType): SiteBlockInput {
       return { id, type, heading: "Follow on Instagram", handle: "", items: [], columns: 4 };
     case "shop":
       return { id, type, heading: "Shop", intro: "Lesson packages, gift vouchers and gear.", mode: "cards", height: 900 };
+    case "canvas": {
+      const heading = { ...newCanvasItem("text", 2, { text: "A heading you can move" }), x: 2, w: 14, h: 6, size: "h2" as const };
+      const words = { ...newCanvasItem("text", 9, { text: "Drag anything to move it, and pull its edges to make it bigger or smaller." }), x: 2, w: 10, h: 4 };
+      const button = { ...newCanvasItem("button", 15, { button: "Book a lesson" }), x: 2 };
+      const picture = { ...newCanvasItem("image", 2), x: 16, w: 7, h: 16, corners: "rounded" as const };
+      return { id, type, rows: 20, items: [heading, words, button, picture] };
+    }
   }
 }
 

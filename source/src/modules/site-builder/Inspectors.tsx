@@ -1,6 +1,6 @@
 // What the right-hand column shows for whatever is selected: the site's
 // look, the header, the footer, the page itself, or one block.
-import { ExternalLink, Trash2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -15,8 +15,16 @@ import {
   themeFromPreset,
   MAX_EMBED_CODE,
   embedSource,
+  CANVAS_MAX_ROWS,
+  CANVAS_MIN_ROWS,
+  MAX_CANVAS_ITEMS,
+  canvasRowsNeeded,
+  newCanvasItem,
   type SiteBlock,
   type SiteBlockStyle,
+  type SiteCanvasBlock,
+  type SiteCanvasItem,
+  type SiteCanvasItemKind,
   type SiteFooter,
   type SiteHeader,
   type SitePage,
@@ -30,6 +38,7 @@ import { BOOKING_SCREENS } from "../public-booking/bookingScreens";
 import { ButtonInput, ColorInput, DateInput, ImageInput, LinkInput, ListEditor, NumberInput, SelectInput, TextArea, TextInput, ToggleInput, type PageOption } from "./fields";
 import { fetchCoachShop, updateCoachShop, type CoachShop } from "./siteApi";
 import { money } from "./ShopBlock";
+import { addItem } from "./canvasLayout";
 
 type Common = { pages: PageOption[]; bookingHref: string; onError: (message: string) => void };
 
@@ -438,7 +447,7 @@ function PictureShapeInput({ value, onChange }: { value: SitePictureShape; onCha
 }
 
 /** A section's Content tab: its words, pictures, buttons and lists. */
-export function BlockContentFields({ block, onChange, pages, bookingHref, onError }: { block: SiteBlock; onChange: (next: SiteBlock) => void } & Common) {
+export function BlockContentFields({ block, onChange, pages, bookingHref, onError, focusItem = "" }: { block: SiteBlock; onChange: (next: SiteBlock) => void; focusItem?: string } & Common) {
   const set = <B extends SiteBlock>(patch: Partial<B>) => onChange({ ...block, ...patch } as SiteBlock);
   switch (block.type) {
     case "hero":
@@ -930,6 +939,8 @@ export function BlockContentFields({ block, onChange, pages, bookingHref, onErro
           <ToggleInput label={t("Show a map of the address")} checked={block.showMap} onChange={(showMap) => set({ showMap })} />
         </>
       );
+    case "canvas":
+      return <CanvasFields block={block} onChange={onChange} focusItem={focusItem} pages={pages} bookingHref={bookingHref} onError={onError} />;
     case "divider":
       return (
         <>
@@ -956,5 +967,142 @@ export function BlockContentFields({ block, onChange, pages, bookingHref, onErro
       );
     default:
       return null;
+  }
+}
+
+const canvasKindLabel = (kind: SiteCanvasItemKind) => ({ text: t("Text"), image: t("Picture"), button: t("Button"), shape: t("Shape") })[kind];
+
+/**
+ * A free layout's Content tab: its height, and every item in it, drawn front
+ * last. Items are moved and stretched on the page; here are their words,
+ * pictures, links and colours, and the way to add one or take it away.
+ */
+function CanvasFields({ block, onChange, focusItem, pages, bookingHref, onError }: { block: SiteCanvasBlock; onChange: (next: SiteBlock) => void; focusItem: string } & Common) {
+  const setItems = (items: SiteCanvasItem[]) => onChange({ ...block, items, rows: canvasRowsNeeded(items, block.rows) });
+  const add = (kind: SiteCanvasItemKind) => {
+    const next = addItem(block, newCanvasItem(kind, 0, { text: t("Write something here."), button: t("Find out more") }));
+    onChange({ ...block, ...next });
+  };
+  return (
+    <>
+      <p className="site-field-help">{t("Drag things on the page to move them, and pull their edges to make them bigger, smaller or a different shape. Double-click words to type over them.")}</p>
+      <NumberInput label={t("Section height (rows)")} value={block.rows} min={Math.max(CANVAS_MIN_ROWS, canvasRowsNeeded(block.items, 0))} max={CANVAS_MAX_ROWS} onChange={(rows) => onChange({ ...block, rows: canvasRowsNeeded(block.items, rows) })} />
+      {block.items.length < MAX_CANVAS_ITEMS ? (
+        <div className="site-canvas-add-fields">
+          {(["text", "image", "button", "shape"] as const).map((kind) => (
+            <button key={kind} className="outline-button" type="button" onClick={() => add(kind)}>
+              <Plus size={16} />
+              {canvasKindLabel(kind)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <ListEditor
+        items={block.items}
+        onChange={setItems}
+        max={MAX_CANVAS_ITEMS}
+        focusId={focusItem}
+        addLabel={t("Add text")}
+        create={() => ({ ...newCanvasItem("text", canvasRowsNeeded(block.items, 0) + 1, { text: t("Write something here.") }), x: 2 })}
+        itemLabel={(item) => `${canvasKindLabel(item.kind)}${item.kind === "text" || item.kind === "button" ? `: ${item.text.slice(0, 40)}` : item.image?.alt ? `: ${item.image.alt}` : ""}`}
+        render={(item, update) => <CanvasItemFields item={item} update={update} pages={pages} bookingHref={bookingHref} onError={onError} />}
+      />
+    </>
+  );
+}
+
+function CanvasItemFields({ item, update, pages, bookingHref, onError }: { item: SiteCanvasItem; update: (patch: Partial<SiteCanvasItem>) => void } & Common) {
+  const fill = (
+    <SelectInput
+      label={item.kind === "shape" ? t("Colour") : t("Background")}
+      value={item.fill}
+      onChange={(next) => update({ fill: next })}
+      options={[
+        { value: "none", label: t("None") },
+        { value: "surface", label: t("Panel colour") },
+        { value: "primary", label: t("Button colour") },
+        { value: "accent", label: t("Accent colour") },
+        { value: "text", label: t("Text colour") },
+        { value: "background", label: t("Page colour") },
+      ]}
+    />
+  );
+  const corners = (
+    <SelectInput
+      label={t("Shape")}
+      value={item.corners}
+      onChange={(next) => update({ corners: next })}
+      options={[
+        { value: "square", label: t("Square corners") },
+        { value: "rounded", label: t("Rounded corners") },
+        { value: "pill", label: t("Pill") },
+        { value: "circle", label: t("Circle or oval") },
+      ]}
+    />
+  );
+  switch (item.kind) {
+    case "text":
+      return (
+        <>
+          <TextArea label={t("Words")} value={item.text} rows={4} maxLength={4000} onChange={(text) => update({ text })} help={t("Blank lines start new paragraphs.")} />
+          <SelectInput
+            label={t("Size")}
+            value={item.size}
+            onChange={(size) => update({ size })}
+            options={[
+              { value: "h1", label: t("Big heading") },
+              { value: "h2", label: t("Heading") },
+              { value: "h3", label: t("Small heading") },
+              { value: "lead", label: t("Large text") },
+              { value: "body", label: t("Text") },
+              { value: "small", label: t("Small text") },
+            ]}
+          />
+          <SelectInput
+            label={t("Alignment")}
+            value={item.align}
+            onChange={(align) => update({ align })}
+            options={[
+              { value: "left", label: t("Left") },
+              { value: "centre", label: t("Centre") },
+              { value: "right", label: t("Right") },
+            ]}
+          />
+          {fill}
+          {item.fill !== "none" ? corners : null}
+        </>
+      );
+    case "image":
+      return (
+        <>
+          <ImageInput label={t("Picture")} value={item.image} onChange={(image) => update({ image })} onError={onError} />
+          {corners}
+          <p className="site-field-help">{t("Leave the address empty for a picture that goes nowhere.")}</p>
+          <LinkInput label={t("Goes to when pressed")} value={item.href} onChange={(href) => update({ href })} pages={pages} bookingHref={bookingHref} />
+        </>
+      );
+    case "button":
+      return (
+        <>
+          <TextInput label={t("Button text")} value={item.text} maxLength={60} onChange={(text) => update({ text })} />
+          <LinkInput label={t("Goes to")} value={item.href} onChange={(href) => update({ href })} pages={pages} bookingHref={bookingHref} />
+          <SelectInput
+            label={t("Style")}
+            value={item.buttonStyle}
+            onChange={(buttonStyle) => update({ buttonStyle })}
+            options={[
+              { value: "primary", label: t("Filled") },
+              { value: "secondary", label: t("Quiet") },
+            ]}
+          />
+        </>
+      );
+    case "shape":
+      return (
+        <>
+          {fill}
+          {corners}
+        </>
+      );
   }
 }
