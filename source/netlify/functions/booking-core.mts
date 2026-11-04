@@ -138,6 +138,7 @@ import {
   issueCaddyPass,
   readCaddyPlayerStatus,
 } from "./_shared/caddy.mts";
+import { readPlayerBag, savePlayerBag } from "./_shared/player-bag.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
   cleanPlayerBookingEmbedHeight,
@@ -10494,6 +10495,22 @@ async function routeBookingApiRequest(
       return json({ ok: true, appUrl: caddyAppUrl(), status });
     }
 
+    // The player's own bag. Everything that says whose bag it is comes from
+    // the session; the body only carries the clubs. A portal session always
+    // has the shared login, which is what the Caddy sync matches on.
+    if ((req.method === "GET" || req.method === "PUT") && pathname === "/api/player/bag") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session || !session.personId) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const link = session.authUserId ? { authUserId: session.authUserId, email: session.email } : null;
+      if (req.method === "GET") {
+        return json({ ok: true, bag: await readPlayerBag(session.accountId, session.personId, link) });
+      }
+      const body = await parseBody(req);
+      return json({ ok: true, bag: await savePlayerBag(session.accountId, session.personId, body?.clubs, "player", link) });
+    }
+
     // Registering as a guest is necessarily unauthenticated -- having no
     // account is the entire premise. The bar is the one createPublicBooking
     // already set for a stranger writing into this account: a name, an
@@ -11503,6 +11520,25 @@ async function routeBookingApiRequest(
         status,
         deepLink: status.connected ? caddyPlayerDeepLink(portalPlayer.authUserId) : "",
       });
+    }
+
+    // The bag on a player profile. The Caddy link is the player's portal
+    // login: without one there is no shared identity to sync by, and the bag
+    // simply lives here.
+    if ((req.method === "GET" || req.method === "PUT") && pathname === "/api/player-bag") {
+      const body = req.method === "PUT" ? await parseBody(req) : null;
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const personId = cleanString(body?.personId ?? url.searchParams.get("personId"), "", 160);
+      const portalPlayer = (await listPortalPlayers(requestContext.accountId)).find(
+        (entry) => entry.personId === personId && entry.status !== "disabled",
+      );
+      const link = portalPlayer ? { authUserId: portalPlayer.authUserId, email: portalPlayer.email } : null;
+      if (req.method === "GET") {
+        return json({ ok: true, bag: await readPlayerBag(requestContext.accountId, personId, link) });
+      }
+      return json({ ok: true, bag: await savePlayerBag(requestContext.accountId, personId, body?.clubs, "coach", link) });
     }
 
     if (req.method === "DELETE" && pathname === "/api/portal-players") {

@@ -1,0 +1,219 @@
+/* The bag editor: the same component on the coach's player profile and in the
+ * player portal. Tokens only, so it follows both apps' light and dark themes.
+ *
+ * Two columns, longest club top-left, as Clarity Caddy draws the same bag. The
+ * column-first order is done in BagEditor.tsx (columnOrder); the grid itself
+ * just flows row by row. */
+
+.bag-editor {
+  display: grid;
+  gap: var(--c-space-3);
+  min-width: 0;
+  background: var(--c-surface);
+}
+
+.bag-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-3);
+  padding: 12px 14px;
+  border-top: 1px solid var(--c-border);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+}
+
+.bag-editor-head strong {
+  display: block;
+  font-size: var(--c-size-body);
+  color: var(--c-text);
+}
+
+.bag-editor-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+.bag-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+}
+
+.bag-editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bag-editor-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--c-space-2);
+  padding: 0 14px;
+}
+
+.bag-editor-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.bag-editor-form label span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.bag-editor input {
+  width: 9em;
+  min-height: var(--c-h-control);
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font: inherit;
+}
+
+.bag-editor input:focus {
+  outline: none;
+  border-color: var(--c-text);
+  background: var(--c-surface);
+}
+
+.bag-editor-form button,
+.bag-club-edit-actions button {
+  min-height: var(--c-h-control);
+  padding: 0 14px;
+}
+
+.bag-editor-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.bag-editor-error {
+  margin: 0;
+  padding: 0 14px;
+  color: var(--c-error-text);
+  font-size: var(--c-size-meta);
+}
+
+.bag-editor-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.bag-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--c-space-2);
+  margin: 0;
+  padding: 0 14px 14px;
+  list-style: none;
+}
+
+.bag-club > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--c-space-2);
+  width: 100%;
+  min-height: var(--c-h-row);
+  padding: 8px 12px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bag-club > button:hover {
+  background: var(--c-hover);
+}
+
+.bag-club strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bag-club-carry {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-club-total {
+  grid-column: 1 / -1;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-club.is-editing {
+  grid-column: 1 / -1;
+}
+
+.bag-club.is-editing form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--c-space-2);
+  padding: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+}
+
+.bag-club-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.bag-club-close {
+  display: inline-grid;
+  place-items: center;
+  width: var(--c-h-control);
+  height: var(--c-h-control);
+  border: 0;
+  border-radius: var(--c-radius-pill);
+  background: transparent;
+  color: var(--c-muted);
+  cursor: pointer;
+}
+
+.bag-club-close:hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+/* The portal's sections carry no card chrome of their own. */
+.bag-editor.is-portal .bag-editor-head {
+  border-radius: var(--c-radius-card);
+  border: 1px solid var(--c-border);
+}
+
+.bag-editor.is-portal .bag-editor-form,
+.bag-editor.is-portal .bag-editor-error,
+.bag-editor.is-portal .bag-grid,
+.bag-editor.is-portal .bag-editor-empty {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+@media (max-width: 420px) {
+  .bag-editor input {
+    width: 7em;
+  }
+}

@@ -113,6 +113,9 @@ const VideoAnalysisPage = lazy(() =>
 // terminal stay exactly where the player left them.
 const BookingWidget = lazy(() => import("../public-booking/PublicBookingApp"));
 
+// The bag editor is shared with the coach's player profile: one bag, one editor.
+const BagEditor = lazy(() => import("../player-bag/BagEditor").then((module) => ({ default: module.BagEditor })));
+
 type Booking = {
   id: string;
   serviceName?: string;
@@ -1505,7 +1508,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   useEffect(() => {
     // Lessons doesn't exist for a guest any more -- if a sign-out happens
     // while sitting on it, land back on Home instead of rendering a dead tab.
-    if (!wasGuestRef.current && isGuest && (tab === "lessons" || tab === "practice")) setTab("home");
+    if (!wasGuestRef.current && isGuest && (tab === "lessons" || tab === "practice" || tab === "bag")) setTab("home");
     wasGuestRef.current = isGuest;
   }, [isGuest, tab]);
 
@@ -1606,7 +1609,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // about where Back goes. Its teardown sets the tab, so this leaves it be.
       if (backLayers.some((layer) => layer.id === "video-studio") && !wanted.has("video-studio")) return;
       if (snapshot.tab === "book" && !bookingEmbed) return;
-      if (isGuest && (snapshot.tab === "reviews" || snapshot.tab === "lessons" || snapshot.tab === "practice")) return;
+      if (isGuest && (snapshot.tab === "reviews" || snapshot.tab === "lessons" || snapshot.tab === "practice" || snapshot.tab === "bag")) return;
       setTab(snapshot.tab);
       setLessonsSubtab(snapshot.lessonsSubtab);
     },
@@ -2849,6 +2852,14 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       )}
                     </>
                   )}
+                </section>
+              )}
+
+              {tab === "bag" && !isGuest && cap.golfBag && (
+                <section className="player-portal-section">
+                  <Suspense fallback={<Loading what={t("your bag")} className="player-portal-empty" />}>
+                    <BagEditor url="/api/player/bag" audience="player" variant="portal" showCaddy={cap.caddy} />
+                  </Suspense>
                 </section>
               )}
 

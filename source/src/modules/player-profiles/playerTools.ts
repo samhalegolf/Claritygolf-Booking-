@@ -1,4 +1,4 @@
-import { ImagePlus } from "lucide-react";
+import { Briefcase, ImagePlus } from "lucide-react";
 import type { CapabilityKey } from "../../../netlify/functions/_shared/market-profile.mts";
 import { t } from "../../lib/i18n";
 import {
@@ -13,8 +13,8 @@ import {
   type IconComponent,
 } from "../shared/ClarityIcons";
 
-/* The nine sections of a player profile. The first four are the coach's
- * daily reads and sit on the bar; the last five are the record and live behind
+/* The ten sections of a player profile. The first four are the coach's
+ * daily reads and sit on the bar; the last six are the record and live behind
  * its toggle -- see .player-tool-tabs.is-expanded. */
 export type PlayerProfileTool =
   | "bookings"
@@ -22,6 +22,7 @@ export type PlayerProfileTool =
   | "videos"
   | "practice"
   | "notes"
+  | "bag"
   | "emails"
   | "transactions"
   | "passes"
@@ -48,7 +49,7 @@ export type PlayerPracticeSummary = {
 };
 
 /* The bar itself, in order. Split into the four that are always on it and the
- * five behind the toggle -- SECONDARY_PLAYER_TOOLS below is derived from the
+ * six behind the toggle -- SECONDARY_PLAYER_TOOLS below is derived from the
  * second list so the two can never drift apart. */
 export const PRIMARY_PLAYER_TOOL_TABS = [
   { id: "bookings", label: t("Bookings"), Icon: ClarityCalendar },
@@ -59,6 +60,7 @@ export const PRIMARY_PLAYER_TOOL_TABS = [
 
 export const SECONDARY_PLAYER_TOOL_TABS = [
   { id: "notes", label: t("Notes"), Icon: ClarityBookingPages },
+  { id: "bag", label: t("Bag"), Icon: Briefcase },
   { id: "emails", label: t("Emails"), Icon: ClarityEmail },
   { id: "transactions", label: t("Transactions"), Icon: ClarityPayments },
   { id: "passes", label: t("Passes"), Icon: ClarityPassesCredits },
@@ -71,6 +73,7 @@ export const PLAYER_TOOL_CAPABILITY: Partial<Record<PlayerProfileTool, Capabilit
   reviews: "swingReview",
   videos: "videoAnalysis",
   practice: "practice",
+  bag: "golfBag",
   passes: "passes",
   portals: "portal",
 };
@@ -80,7 +83,7 @@ export function playerToolAllowed(tool: PlayerProfileTool, capabilities: Record<
   return !capability || capabilities[capability];
 }
 
-/** The five that only appear once the tab bar is opened out. */
+/** The six that only appear once the tab bar is opened out. */
 export const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerProfileTool>(
   SECONDARY_PLAYER_TOOL_TABS.map((tab) => tab.id),
 );

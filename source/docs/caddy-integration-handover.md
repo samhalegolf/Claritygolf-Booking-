@@ -51,13 +51,15 @@ that was already in `invitePlayer()` was UI-only and proved nothing.
 
 ## The seam
 
-One endpoint, three actions: `POST /api/clarity-integration` in Caddy.
+One endpoint, five actions: `POST /api/clarity-integration` in Caddy.
 
 | Action | What it does |
 |---|---|
 | `ensureRelationship` | Idempotent, additive coach↔player link. Never removes a player from another coach. |
 | `issuePass` | Writes one `user_entitlements` row. Only `month_pass` is issuable through this seam — memberships and billing stay Caddy's. |
 | `playerStatus` | Account existence, access level, coach count. Read-only. |
+| `readBag` | The player's bag as Caddy holds it, and whether a bag Booking sent is still waiting for the phone. Service secret only. |
+| `writeBag` | Puts Booking's bag into Caddy's cloud copy and leaves it for the phone to pick up. Service secret only. |
 
 Booking's side is `netlify/functions/_shared/caddy.mts` — the only place Booking
 talks to Caddy.
@@ -119,6 +121,25 @@ implying they do not exist.
 | `netlify/functions/booking-core.mts` | grant flow, email variants, `/api/caddy-status` |
 | `src/App.tsx` | pass checkbox, Caddy card, deep link |
 | `src/modules/player-profiles/playerProfiles.css` | card styling |
+
+## The bag (added 4 Nov 2026)
+
+Booking has its own copy of a player's bag (`player_bags`), edited by the
+coach on the player profile (Bag tab) and by the player in the portal (Bag in
+the bar). When the player has a portal login and a Caddy account, the two
+bags are kept the same.
+
+- Booking reconciles on every read and save (`_shared/player-bag.mts`). It
+  remembers the last bag both sides agreed on, so whichever side changed since
+  then wins. If both changed, the more recent edit wins; an empty bag never
+  beats a real one on the first sync. Rules and tests: `_shared/bag-model.mts`.
+- Caddy is local-first, so a bag Booking sends goes into Caddy's cloud copy
+  *and* a delivery note on `app_accounts.metadata.bookingBag`. The phone picks
+  it up (`scripts/clarity-booking-bag.js` in Caddy) next time Caddy opens and
+  backs up with the revision it took. Until then `readBag` says `pending` and
+  Booking takes nothing from Caddy, so the phone's older bag is never mistaken
+  for a new edit.
+- The bag is a golf module (`golfBag` capability), off for non-golf presets.
 
 ## Still open
 

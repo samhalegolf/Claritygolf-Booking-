@@ -62,6 +62,7 @@ const ClarityVoiceTextPanel = lazy(() =>
 const PracticeBlockPanel = lazy(() =>
   import("../practice/PracticeBlockPanel").then((module) => ({ default: module.PracticeBlockPanel })),
 );
+const BagEditor = lazy(() => import("../player-bag/BagEditor").then((module) => ({ default: module.BagEditor })));
 
 /** One clip on the player's video shelf. Declared here, where the shelf is drawn;
  * App.tsx builds the groups and imports the type. */
@@ -532,10 +533,10 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                             title={
                               playerToolTabsExpanded
                                 ? t("Collapse")
-                                : t("Notes, Emails, Transactions, Passes, Portals")
+                                : t("Notes, Bag, Emails, Transactions, Passes, Portals")
                             }
                             onClick={() => {
-                              // Closing the bar while one of the five is
+                              // Closing the bar while one of the six is
                               // open would leave the body on a tab with
                               // no pill, so it falls back to the first.
                               if (playerToolTabsExpanded && SECONDARY_PLAYER_TOOLS.has(playerProfileTool)) {
@@ -1136,6 +1137,23 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                               <p className="notes-empty">{t("No lesson notes yet.")}</p>
                             )}
                           </div>
+                        </div>
+                      ) : playerToolExpanded && playerProfileTool === "bag" ? (
+                        <div className="player-tool-body">
+                          <Suspense fallback={<Loading what={t("bag")} />}>
+                            <BagEditor
+                              // Keyed so switching player remounts rather than
+                              // showing the previous player's bag until the
+                              // read lands.
+                              key={notesWorkspaceClient.id}
+                              url={`/api/player-bag?personId=${encodeURIComponent(notesWorkspaceClient.id)}`}
+                              savePayload={{ personId: notesWorkspaceClient.id }}
+                              audience="coach"
+                              variant="console"
+                              showCaddy={capabilities.caddy}
+                              onUnauthorized={() => setAuthStatus("guest")}
+                            />
+                          </Suspense>
                         </div>
                       ) : playerToolExpanded && playerProfileTool === "practice" ? (
                         <div className="player-tool-body">

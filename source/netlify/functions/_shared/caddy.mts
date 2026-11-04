@@ -159,3 +159,33 @@ export function caddyPlayerDeepLink(playerAuthUserId: string) {
   if (!playerAuthUserId) return "";
   return `${caddyAppUrl()}/?clarityPlayer=${encodeURIComponent(playerAuthUserId)}`;
 }
+
+/**
+ * The player's bag as Caddy holds it.
+ *
+ * `connected` is false when the player has no Caddy account, and then there is
+ * nothing to sync with. `pending` means Booking sent Caddy a bag that the
+ * player's phone has not picked up yet: until it has, whatever Caddy's cloud
+ * copy says is the phone's older bag, not a new edit, and must not be read as
+ * one. `updatedAt` is when that bag last changed, as near as Caddy knows.
+ */
+export type CaddyBag = {
+  connected: boolean;
+  clubs: unknown[];
+  updatedAt: string | null;
+  pending: boolean;
+};
+
+export async function readCaddyBag(playerAuthUserId: string, playerEmail: string): Promise<CaddyBag> {
+  const body = await callCaddy("readBag", { playerAuthUserId, playerEmail });
+  return {
+    connected: Boolean(body.connected),
+    clubs: Array.isArray(body.clubs) ? body.clubs : [],
+    updatedAt: body.updatedAt || null,
+    pending: Boolean(body.pending),
+  };
+}
+
+export async function writeCaddyBag(playerAuthUserId: string, playerEmail: string, clubs: unknown[]) {
+  return callCaddy("writeBag", { playerAuthUserId, playerEmail, clubs });
+}

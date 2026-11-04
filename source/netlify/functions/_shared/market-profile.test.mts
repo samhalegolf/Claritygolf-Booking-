@@ -66,7 +66,7 @@ test("Hair & Beauty becomes Stylist / Client / Service / Chair with golf modules
   assert.equal(market.terminology.serviceSingular, "Service");
   assert.equal(market.terminology.resourceSingular, "Chair");
   assert.equal(market.product.name, "Clarity Booking");
-  for (const key of ["videoAnalysis", "swingReview", "handedness", "puttingLab", "caddy", "optix", "practice"] as const) {
+  for (const key of ["videoAnalysis", "swingReview", "handedness", "golfBag", "puttingLab", "caddy", "optix", "practice"] as const) {
     assert.equal(market.capabilities[key], false, `${key} should be off for hair`);
   }
   for (const key of ["calendar", "publicBooking", "resources", "billing", "products", "passes", "portal"] as const) {

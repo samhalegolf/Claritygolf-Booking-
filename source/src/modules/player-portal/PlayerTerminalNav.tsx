@@ -9,6 +9,7 @@
 // Clarity Caddy is deliberately absent. It is a different product, and its one
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
+import { Briefcase } from "lucide-react";
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 import type { CapabilityKey, MarketCapabilities } from "../../../netlify/functions/_shared/market-profile.mts";
 import {
@@ -31,6 +32,7 @@ export type PlayerTerminalDestination =
   | "reviews"
   | "passes"
   | "practice"
+  | "bag"
   | "notes"
   | "videos"
   | "book"
@@ -60,19 +62,22 @@ const NAV_LINKS: NavLink[] = [
   { id: "reviews", label: t("Reviews"), Icon: ClarityAssessments },
   { id: "passes", label: t("Passes"), Icon: ClarityPassesCredits },
   { id: "practice", label: t("Practice"), Icon: ClarityLessonsProgrammes },
+  { id: "bag", label: t("Bag"), Icon: Briefcase },
   { id: "notes", label: t("Notes"), Icon: ClarityBookingPages },
   { id: "videos", label: t("Videos"), Icon: ClarityVideoAnalysis },
 ];
 
 // Lessons -- and booking with it -- doesn't exist for a guest at all, and
 // neither does practice or reviews: prescribed practice and swing reviews both
-// come from a coach, and a guest has not got one yet. Not shown-but-locked,
+// come from a coach, and a guest has not got one yet. Nor the bag: it is kept
+// against the player's record, and a guest has no record to keep it on. Not shown-but-locked,
 // just not here: there is nothing behind any of them to show.
 const GUEST_HIDDEN: ReadonlySet<PlayerTerminalDestination> = new Set([
   "lessons",
   "reviews",
   "passes",
   "practice",
+  "bag",
 ]);
 
 // The module each destination belongs to. A business with that module off has
@@ -82,6 +87,7 @@ export const DESTINATION_CAPABILITY: Partial<Record<PlayerTerminalDestination, C
   reviews: "swingReview",
   passes: "passes",
   practice: "practice",
+  bag: "golfBag",
   videos: "videoAnalysis",
 };
 
