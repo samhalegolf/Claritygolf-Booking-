@@ -365,9 +365,9 @@ function LinkList({
 }
 
 /**
- * The shop itself, edited from the block that shows it: the switch that
- * opens it, and what is on the shelf. Packages are the lesson types marked
- * sellable; vouchers are the products ticked as vouchers under Billing.
+ * The shop itself, seen from the block that shows it: whether it can sell,
+ * the shipping fee, and what is on the shelf. Each pass, bundle, voucher and
+ * product is ticked to show on the website store where it is edited.
  */
 function ShopStatus({ onError }: { onError: (message: string) => void }) {
   const [shop, setShop] = useState<CoachShop | null>(null);
@@ -385,17 +385,7 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
   return (
     <div className="site-shop-status">
       <h4 className="site-inspector-subtitle">{t("Your shop")}</h4>
-      <ToggleInput
-        label={shop.enabled ? t("The shop is open") : t("The shop is closed")}
-        checked={shop.enabled}
-        onChange={(enabled) => {
-          setBusy(true);
-          updateCoachShop({ enabled })
-            .then(setShop)
-            .catch((cause: Error) => onError(cause.message))
-            .finally(() => setBusy(false));
-        }}
-      />
+      <p className="site-field-help">{shop.open ? t("The shop is open.") : t("The shop is closed.")}</p>
       <NumberInput
         label={t("Shipping fee, per order with something to post")}
         value={shop.shippingFee}
@@ -413,7 +403,7 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
       />
       {busy ? <p className="site-field-help">{t("Saving...")}</p> : null}
       {shop.blocker === "card_payments" ? <p className="site-field-help">{t("Card payments are not set up yet: connect Clarity Pay under Billing before the shop can take orders.")}</p> : null}
-      {shop.blocker === "nothing_for_sale" ? <p className="site-field-help">{t("Nothing is for sale yet. Mark a lesson package as sellable under Lesson types, or tick a product as a gift voucher or \"Sell on your website\" under Billing › Products.")}</p> : null}
+      {shop.blocker === "nothing_for_sale" ? <p className="site-field-help">{t("Nothing is on the store yet. Tick \"Show on your website store\" on a pass or bundle under Billing › Passes, or on a gift voucher or product under Billing › Products.")}</p> : null}
       {shop.items.length ? (
         <ul className="site-shop-items">
           {shop.items.map((item) => (
@@ -425,7 +415,7 @@ function ShopStatus({ onError }: { onError: (message: string) => void }) {
         </ul>
       ) : null}
       <p className="site-field-help">
-        <ExternalLink size={12} /> {t("Prices and what is included are set where the item lives: packages under Lesson types, vouchers and goods under Billing › Products, where a product gets its picture, options and how it reaches the buyer.")}
+        <ExternalLink size={12} /> {t("What shows here, its price and what is included are set where the item lives: passes and bundles under Billing › Passes, vouchers and goods under Billing › Products, where they get their picture and options.")}
       </p>
     </div>
   );

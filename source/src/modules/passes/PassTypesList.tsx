@@ -30,6 +30,8 @@ export type PassTypeDraft = {
   expiryMonths: number;
   crossRedeemable: boolean;
   active: boolean;
+  /** Shown on the website store. */
+  sellOnline: boolean;
 };
 
 export type PassTypesListProps = {
@@ -60,6 +62,7 @@ function draftFrom(service: Service | null): PassTypeDraft {
     expiryMonths: service?.passExpiryMonths ?? DEFAULT_EXPIRY_MONTHS,
     crossRedeemable: service?.crossRedeemable === true,
     active: service ? service.active : true,
+    sellOnline: service?.sellOnline === true,
   };
 }
 
@@ -113,7 +116,10 @@ export function PassTypesList({ services, formatMoney, saving, onSave, onArchive
           <tbody>
             {passTypes.map((service) => (
               <tr key={service.id} className={service.active ? "" : "voided-row"}>
-                <td>{service.name}</td>
+                <td>
+                  {service.name}
+                  {service.sellOnline ? <em className="pass-on-website">{" · "}{t("On website")}</em> : null}
+                </td>
                 <td>{coverLabel(service)}</td>
                 <td>{service.packageAllowance ?? "—"}</td>
                 <td>{expiryLabel(service.passExpiryMonths ?? DEFAULT_EXPIRY_MONTHS)}</td>
@@ -264,6 +270,11 @@ function PassTypeEditor({
         <input type="checkbox" checked={draft.active} onChange={(event) => set("active", event.target.checked)} />
         {t("On sale")}
       </label>
+      <label className="pass-coverage-option pass-field-wide">
+        <input type="checkbox" checked={draft.sellOnline} onChange={(event) => set("sellOnline", event.target.checked)} />
+        {t("Show on your website store")}
+      </label>
+      {draft.sellOnline ? <p className="field-help pass-field-wide">{t("Anyone can buy it from the Shop on your website and pay by card, once Clarity Pay is set up.")}</p> : null}
 
       {!isNew ? (
         <p className="field-help pass-field-wide">

@@ -9,7 +9,7 @@
 
 import { randomBytes } from "node:crypto";
 
-import { GIFT_CARD_SETTING, parseGiftCardDesign } from "../gift-card.mts";
+import { GIFT_CARD_SETTING, cleanOwnGiftCardDesign, parseGiftCardDesign } from "../gift-card.mts";
 import { db } from "../settings-store.mts";
 import {
   HOME_PAGE_SLUG,
@@ -199,10 +199,11 @@ export async function siteImageUrlsInUse(accountId: string): Promise<string[]> {
       WHERE account_id = ${accountId}
     ` as Promise<Array<Pick<PageRow, "document" | "published_document">>>,
     db().sql`
-      SELECT image_url
+      SELECT image_url, gift_card_design
       FROM billing_products_services
-      WHERE account_id = ${accountId} AND image_url IS NOT NULL AND image_url <> ''
-    ` as Promise<Array<{ image_url: string }>>,
+      WHERE account_id = ${accountId}
+        AND ((image_url IS NOT NULL AND image_url <> '') OR gift_card_design IS NOT NULL)
+    ` as Promise<Array<{ image_url: string | null; gift_card_design: unknown }>>,
     db().sql`
       SELECT value
       FROM settings
@@ -212,7 +213,7 @@ export async function siteImageUrlsInUse(accountId: string): Promise<string[]> {
   const urlsOf = (document: unknown) => (document ? sitePageImageUrls(cleanSitePageContent(parseJson(document))) : []);
   return [
     ...pages.flatMap((row) => [...urlsOf(row.document), ...urlsOf(row.published_document)]),
-    ...products.map((row) => String(row.image_url)),
+    ...products.flatMap((row) => [String(row.image_url || ""), cleanOwnGiftCardDesign(row.gift_card_design)?.imageUrl || ""]).filter(Boolean),
     ...giftCard.map((row) => parseGiftCardDesign(row.value).imageUrl).filter(Boolean),
   ];
 }

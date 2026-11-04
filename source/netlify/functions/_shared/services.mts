@@ -500,6 +500,8 @@ function cleanService(service, index = 0, accountId = "") {
     // Months a pass of this type stays spendable; 0 = never.
     passExpiryMonths: lessonFormat === "package" ? cleanPassExpiryMonths(service?.passExpiryMonths) : undefined,
     crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
+    // Passes and bundles only: shown on the website store.
+    sellOnline: lessonFormat === "package" && service?.sellOnline === true ? true : undefined,
     // A bundle: selling it issues each of these pass types instead of a pass
     // of its own. Absent on an ordinary pass type.
     bundleItems:

@@ -15,7 +15,6 @@ import {
   cleanVariants,
   onlineBuyerPersonId,
   onlineShopItems,
-  onlineShopSwitchedOn,
   orderLineName,
   readOnlineOrder,
 } from "./online-shop.mts";
@@ -29,10 +28,11 @@ const fivePack = {
   lessonFormat: "package",
   packageAllowance: 5,
   coversServiceIds: ["svc-lesson"],
+  sellOnline: true,
 };
-const voucherRow = { id: "prod-voucher", name: "Lesson Gift Voucher", default_price: 160, active: true, is_voucher: true };
+const voucherRow = { id: "prod-voucher", name: "Lesson Gift Voucher", default_price: 160, active: true, is_voucher: true, sell_online: true };
 
-test("the shelf is the packages the portal sells plus the voucher products", () => {
+test("the shelf is the packages and vouchers ticked to show on the website", () => {
   const items = onlineShopItems([lesson, fivePack], [voucherRow], "NZD");
   assert.deepEqual(
     items.map((item) => [item.id, item.kind, item.price, item.credits]),
@@ -62,6 +62,38 @@ test("an archived, inactive or free package is left off", () => {
   assert.deepEqual(items.map((item) => item.id), [`${LESSON_ITEM_PREFIX}svc-five`]);
 });
 
+test("a pass or voucher not ticked for the website stays off the shelf", () => {
+  const items = onlineShopItems(
+    [lesson, fivePack, { ...fivePack, id: "svc-ten", sellOnline: undefined }],
+    [voucherRow, { ...voucherRow, id: "counter-only", sell_online: false }],
+    "NZD",
+  );
+  assert.deepEqual(items.map((item) => item.id), [`${LESSON_ITEM_PREFIX}svc-five`, "prod-voucher"]);
+});
+
+test("a voucher's options share it: one card, priced from the cheapest, its own card's artwork as the picture", () => {
+  const [item] = onlineShopItems(
+    [],
+    [
+      {
+        ...voucherRow,
+        variants: [
+          { id: "fifty", name: "$50", price: 50, description: "Half an hour" },
+          { id: "hundred", name: "$100", price: 100 },
+        ],
+        gift_card_design: { imageUrl: "https://cdn.example/card.png" },
+      },
+    ],
+    "NZD",
+  );
+  assert.equal(item.price, 50);
+  assert.equal(item.image, "https://cdn.example/card.png");
+  assert.deepEqual(item.variants.map((variant) => [variant.id, variant.price, variant.description]), [
+    ["fifty", 50, "Half an hour"],
+    ["hundred", 100, ""],
+  ]);
+});
+
 test("only active, priced products ticked as vouchers are sold as vouchers", () => {
   const items = onlineShopItems(
     [],
@@ -74,13 +106,6 @@ test("only active, priced products ticked as vouchers are sold as vouchers", () 
     "NZD",
   );
   assert.deepEqual(items.map((item) => item.id), ["prod-voucher"]);
-});
-
-test("the switch is on only when it says so", () => {
-  assert.equal(onlineShopSwitchedOn("true"), true);
-  assert.equal(onlineShopSwitchedOn("false"), false);
-  assert.equal(onlineShopSwitchedOn(undefined), false);
-  assert.equal(onlineShopSwitchedOn("yes"), false);
 });
 
 const gloveRow = {
@@ -114,13 +139,13 @@ test("a product is on the shelf once ticked for the website, priced from its che
 });
 
 test("variants are a list of named choices; a bad entry is dropped and a price must be a number", () => {
-  assert.deepEqual(cleanVariants('[{"name":"Small"},{"name":"Large","price":"45"},{"name":""},{"id":"x","name":"Odd","price":-1}]'), [
-    { id: "v1", name: "Small", price: null },
-    { id: "v2", name: "Large", price: 45 },
-    { id: "x", name: "Odd", price: null },
+  assert.deepEqual(cleanVariants('[{"name":"Small"},{"name":"Large","price":"45","description":"Fits most"},{"name":""},{"id":"x","name":"Odd","price":-1}]'), [
+    { id: "v1", name: "Small", price: null, description: "" },
+    { id: "v2", name: "Large", price: 45, description: "Fits most" },
+    { id: "x", name: "Odd", price: null, description: "" },
   ]);
   assert.deepEqual(cleanVariants("not json"), []);
-  assert.deepEqual(cleanVariants([{ id: "a", name: "One" }, { id: "a", name: "Twice" }]), [{ id: "a", name: "One", price: null }]);
+  assert.deepEqual(cleanVariants([{ id: "a", name: "One" }, { id: "a", name: "Twice" }]), [{ id: "a", name: "One", price: null, description: "" }]);
 });
 
 const shelf = onlineShopItems([lesson, fivePack], [voucherRow, gloveRow, bookRow], "NZD");

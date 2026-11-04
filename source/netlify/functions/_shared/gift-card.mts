@@ -131,3 +131,46 @@ export const GIFT_CARD_BASELINE_DROP = 0.35;
 
 /** What one voucher's card says. Already formatted: the value carries its currency. */
 export type GiftCardText = Record<GiftCardFieldId, string>;
+
+/**
+ * A voucher's own gift card, as a product row stores it (gift_card_design).
+ * Null means the voucher uses the business's standard card from Templates.
+ */
+export function cleanOwnGiftCardDesign(raw: unknown): GiftCardDesign | null {
+  if (typeof raw === "string") {
+    try {
+      return raw.trim() ? cleanOwnGiftCardDesign(JSON.parse(raw)) : null;
+    } catch {
+      return null;
+    }
+  }
+  return raw && typeof raw === "object" ? cleanGiftCardDesign(raw) : null;
+}
+
+/** The gift voucher email lines a voucher can word for itself. */
+export const GIFT_EMAIL_FIELDS = ["subject", "heading", "body", "signoff"] as const;
+export type GiftEmailField = (typeof GIFT_EMAIL_FIELDS)[number];
+export type GiftEmailWording = Record<GiftEmailField, string>;
+
+const GIFT_EMAIL_LIMITS: Record<GiftEmailField, number> = { subject: 200, heading: 200, body: 4000, signoff: 400 };
+
+/**
+ * A voucher's own email wording, as a product row stores it (gift_email).
+ * A blank line falls back to the standard gift voucher template; all blank,
+ * or nothing stored, is null: the voucher uses the standard email.
+ */
+export function cleanGiftEmailWording(raw: unknown): GiftEmailWording | null {
+  if (typeof raw === "string") {
+    try {
+      return raw.trim() ? cleanGiftEmailWording(JSON.parse(raw)) : null;
+    } catch {
+      return null;
+    }
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const wording = Object.fromEntries(
+    GIFT_EMAIL_FIELDS.map((field) => [field, typeof source[field] === "string" ? (source[field] as string).slice(0, GIFT_EMAIL_LIMITS[field]) : ""]),
+  ) as GiftEmailWording;
+  return GIFT_EMAIL_FIELDS.some((field) => wording[field].trim()) ? wording : null;
+}

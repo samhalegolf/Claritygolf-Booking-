@@ -8,6 +8,8 @@
 // The persisted, backend-owned shapes (Billing*Record / report / preset types)
 // mirror what netlify/functions/billing-api.mts returns.
 
+import type { GiftCardDesign, GiftEmailWording } from "../../../netlify/functions/_shared/gift-card.mts";
+
 export type InvoiceCustomFieldPlacement = "header" | "bill-to" | "payment" | "footer";
 
 export type InvoiceCustomField = {
@@ -92,7 +94,11 @@ export type BillingCatalogItem = {
   fulfilment?: "collect" | "ship" | "download";
   imageUrl?: string;
   downloadUrl?: string;
-  variants?: Array<{ id: string; name: string; price: number | null }>;
+  variants?: Array<{ id: string; name: string; price: number | null; description: string }>;
+  // A voucher's own gift card and email wording; null uses the standard ones
+  // under Settings › Templates › Gift voucher. Its options all share them.
+  giftCardDesign?: GiftCardDesign | null;
+  giftEmail?: GiftEmailWording | null;
   // A lesson type, shown in the catalog but owned by Settings > Services. It
   // can be sold and invoiced; it cannot be edited or retired from Billing.
   readOnly?: boolean;

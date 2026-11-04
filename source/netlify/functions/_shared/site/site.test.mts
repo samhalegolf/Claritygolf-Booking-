@@ -725,7 +725,12 @@ test("a save or publish from a copy older than the saved site is refused; pages 
         { document: null, published_document: { blocks: [{ type: "hero", image: { url: "https://cdn.example/still-shown.jpg", alt: "" } }] } },
       ];
     }
-    if (text.startsWith("SELECT image_url FROM billing_products_services")) return [{ image_url: "https://cdn.example/voucher.jpg" }];
+    if (text.startsWith("SELECT image_url, gift_card_design FROM billing_products_services")) {
+      return [
+        { image_url: "https://cdn.example/voucher.jpg", gift_card_design: null },
+        { image_url: "", gift_card_design: { imageUrl: "https://cdn.example/own-card.png" } },
+      ];
+    }
     if (text.startsWith("SELECT value FROM settings")) return [{ value: JSON.stringify({ imageUrl: "https://cdn.example/gift-card.png" }) }];
     return [];
   });
@@ -746,8 +751,14 @@ test("a save or publish from a copy older than the saved site is refused; pages 
 
     assert.deepEqual(
       await siteImageUrlsInUse("riverside"),
-      ["https://cdn.example/draft.jpg", "https://cdn.example/still-shown.jpg", "https://cdn.example/voucher.jpg", "https://cdn.example/gift-card.png"],
-      "a dropped page's published picture, a product's picture and the gift card artwork are all still in use",
+      [
+        "https://cdn.example/draft.jpg",
+        "https://cdn.example/still-shown.jpg",
+        "https://cdn.example/voucher.jpg",
+        "https://cdn.example/own-card.png",
+        "https://cdn.example/gift-card.png",
+      ],
+      "a dropped page's published picture, a product's picture, a voucher's own card and the standard gift card artwork are all still in use",
     );
   } finally {
     setDatabaseForTests(null);
