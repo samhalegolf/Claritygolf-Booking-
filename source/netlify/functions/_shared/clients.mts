@@ -776,6 +776,17 @@ export async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}
         [survivorId, loserId],
       );
     }
+    // One bag per person. The survivor's own bag wins; the duplicate's moves
+    // across only when the survivor has none, and otherwise goes with the
+    // duplicate (ON DELETE CASCADE).
+    if (await tableExistsHere("player_bags")) {
+      await client.query(
+        `UPDATE player_bags SET person_id = $1
+         WHERE account_id = $3 AND person_id = $2
+           AND NOT EXISTS (SELECT 1 FROM player_bags WHERE account_id = $3 AND person_id = $1)`,
+        [survivorId, loserId, cleanAccountId],
+      );
+    }
     await client.query("DELETE FROM people WHERE id = $1", [loserId]);
     await client.query("COMMIT");
   } catch (error) {
