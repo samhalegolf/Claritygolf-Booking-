@@ -5247,5 +5247,10 @@
   "Total {total} m": "Totaal {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "Voeg clubs één voor één toe, of genereer een complete tas uit de carry van je ijzer 7.",
   "your bag": "je tas",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notities, Tas, e-mails, transacties, strippenkaarten, portals"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notities, Tas, e-mails, transacties, strippenkaarten, portals",
+  "Invoice date": "Factuurdatum",
+  "Income counted by": "Inkomsten geteld op",
+  "Income counted by:": "Inkomsten geteld op:",
+  "{count} invoice paid": "{count} factuur betaald",
+  "{count} invoices paid": "{count} facturen betaald"
 }

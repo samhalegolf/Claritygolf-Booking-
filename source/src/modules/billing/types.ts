@@ -248,12 +248,17 @@ export type BillingReportAgingInvoice = {
   bucket: BillingReportAgingBucket;
 };
 
+// Which date income is counted on: the invoice's issue date (accrual) or the
+// day payment was received (cash - paid invoices only).
+export type BillingReportBasis = "invoice" | "payment";
+
 export type BillingReportSummary = {
   currency: string;
   taxName: string;
   taxRate: number;
   rangeStart: string;
   rangeEnd: string;
+  basis: BillingReportBasis;
   generatedAt: string;
   income: {
     total: number;

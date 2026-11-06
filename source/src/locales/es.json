@@ -5247,5 +5247,10 @@
   "Total {total} m": "Total {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "Añade palos uno a uno o genera una bolsa completa a partir del vuelo del hierro 7.",
   "your bag": "tu bolsa",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notas, Bolsa, emails, transacciones, bonos, portales"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notas, Bolsa, emails, transacciones, bonos, portales",
+  "Invoice date": "Fecha de factura",
+  "Income counted by": "Ingresos contados por",
+  "Income counted by:": "Ingresos contados por:",
+  "{count} invoice paid": "{count} factura pagada",
+  "{count} invoices paid": "{count} facturas pagadas"
 }

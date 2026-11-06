@@ -2047,7 +2047,16 @@ function monthsBetween(start: Date, end: Date) {
   return months;
 }
 
-type ReportInvoiceRow = { issue_date: string; total: unknown; tax_total: unknown; amount_paid: unknown; status: string; customer_name: string };
+type ReportInvoiceRow = { issue_date: string; paid_at: string | null; total: unknown; tax_total: unknown; amount_paid: unknown; status: string; customer_name: string };
+
+// Which date an invoice's income lands on. "invoice" = accrual (issue date,
+// every sent/paid/overdue invoice). "payment" = cash (the day it was paid,
+// paid invoices only, counting what was actually received).
+type ReportBasis = "invoice" | "payment";
+
+function parseReportBasis(url: URL): ReportBasis {
+  return url.searchParams.get("basis") === "payment" ? "payment" : "invoice";
+}
 type ReportExpenseRow = { expense_date: string; amount: unknown; category_id: string | null; category_name_snapshot: string | null };
 type ReportAgingRow = { invoice_number: string; customer_name: string; issue_date: string; due_date: string | null; total: unknown; amount_paid: unknown };
 
@@ -2062,10 +2071,20 @@ async function buildReportSummary(accountId: string, url: URL) {
   const rangeEnd = formatDateOnly(rangeEndDate);
 
   const tax = await resolveReportTaxConfig(accountId);
+  const basis = parseReportBasis(url);
+  // paid_at is a UTC timestamp; the viewer's zone decides which local day it
+  // was paid on (a 9am NZ payment on 1 April is still 31 March in UTC).
+  const timeZone = url.searchParams.get("timeZone");
+  const DAY_MS = 86400000;
+  const invoiceQuery =
+    basis === "payment"
+      ? // Pad the UTC window a day each side, then filter on the local date below.
+        `&status=eq.paid&paid_at=gte.${encodeFilter(formatDateOnly(new Date(rangeStartDate.getTime() - DAY_MS)))}&paid_at=lt.${encodeFilter(formatDateOnly(new Date(rangeEndDate.getTime() + 2 * DAY_MS)))}`
+      : `&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(rangeStart)}&issue_date=lte.${encodeFilter(rangeEnd)}`;
 
-  const [invoiceRows, expenseRows, outstandingRows] = (await Promise.all([
+  const [rawInvoiceRows, expenseRows, outstandingRows] = (await Promise.all([
     supabase("billing_invoices", {
-      query: `select=issue_date,total,tax_total,amount_paid,status,customer_name&account_id=eq.${encodeFilter(accountId)}&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(rangeStart)}&issue_date=lte.${encodeFilter(rangeEnd)}`,
+      query: `select=issue_date,paid_at,total,tax_total,amount_paid,status,customer_name&account_id=eq.${encodeFilter(accountId)}${invoiceQuery}`,
     }),
     supabase("billing_expenses", {
       query: `select=expense_date,amount,category_id,category_name_snapshot&account_id=eq.${encodeFilter(accountId)}&voided=is.false&expense_date=gte.${encodeFilter(rangeStart)}&expense_date=lte.${encodeFilter(rangeEnd)}`,
@@ -2075,16 +2094,36 @@ async function buildReportSummary(accountId: string, url: URL) {
     }),
   ])) as [ReportInvoiceRow[], ReportExpenseRow[], ReportAgingRow[]];
 
+  // One shape for both bases: the date the income lands on, the amount, and
+  // its share of tax. On a payment basis that's the amount received (tax
+  // pro-rated to it); an older paid invoice with no amount_paid counts in full.
+  const invoiceRows = rawInvoiceRows
+    .map((row) => {
+      const total = Number(row.total) || 0;
+      const taxTotal = Number(row.tax_total) || 0;
+      if (basis === "invoice") {
+        return { date: row.issue_date, amount: total, tax: taxTotal, status: row.status, customerName: row.customer_name };
+      }
+      const paid = Number(row.amount_paid) || total;
+      return {
+        date: row.paid_at ? dashboardToday(timeZone, new Date(row.paid_at)) : "",
+        amount: paid,
+        tax: total ? taxTotal * (paid / total) : 0,
+        status: row.status,
+        customerName: row.customer_name,
+      };
+    })
+    .filter((row) => row.date >= rangeStart && row.date <= rangeEnd);
+
   // Income (by status) + GST collected.
   const incomeByStatus = { sent: 0, paid: 0, overdue: 0 };
   let incomeTotal = 0;
   let taxCollected = 0;
   for (const row of invoiceRows) {
-    const total = Number(row.total) || 0;
-    incomeTotal += total;
-    taxCollected += Number(row.tax_total) || 0;
+    incomeTotal += row.amount;
+    taxCollected += row.tax;
     if (row.status === "sent" || row.status === "paid" || row.status === "overdue") {
-      incomeByStatus[row.status] += total;
+      incomeByStatus[row.status] += row.amount;
     }
   }
 
@@ -2130,8 +2169,8 @@ async function buildReportSummary(accountId: string, url: URL) {
   // Month-by-month income vs expenses.
   const months = monthsBetween(rangeStartDate, rangeEndDate).map((month) => {
     const income = invoiceRows
-      .filter((row) => row.issue_date >= month.start && row.issue_date <= month.end)
-      .reduce((sum, row) => sum + (Number(row.total) || 0), 0);
+      .filter((row) => row.date >= month.start && row.date <= month.end)
+      .reduce((sum, row) => sum + row.amount, 0);
     const expenses = includedExpenseRows
       .filter((row) => row.expense_date >= month.start && row.expense_date <= month.end)
       .reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
@@ -2141,9 +2180,9 @@ async function buildReportSummary(accountId: string, url: URL) {
   // Top customers by income in range.
   const customerMap = new Map<string, { customerName: string; total: number; invoiceCount: number }>();
   for (const row of invoiceRows) {
-    const name = (row.customer_name || "").trim() || "Unknown";
+    const name = (row.customerName || "").trim() || "Unknown";
     const bucket = customerMap.get(name) || { customerName: name, total: 0, invoiceCount: 0 };
-    bucket.total += Number(row.total) || 0;
+    bucket.total += row.amount;
     bucket.invoiceCount += 1;
     customerMap.set(name, bucket);
   }
@@ -2192,6 +2231,7 @@ async function buildReportSummary(accountId: string, url: URL) {
     taxRate: tax.taxRate,
     rangeStart,
     rangeEnd,
+    basis,
     generatedAt: nowIso(),
     income: {
       total: round2(incomeTotal),
@@ -3372,7 +3412,7 @@ async function renderReportPdf(
   text(branding.businessName, nameX, nameY, { size: 16, bold: true });
   textRight("FINANCIAL REPORT", contentRight, headerTop - 4, { size: 15, bold: true, color: brand });
   y = headerTop - Math.max(logoH, 22) - 8;
-  textRight(`${summary.rangeStart} to ${summary.rangeEnd}`, contentRight, y, { size: 9, color: muted });
+  textRight(`${summary.rangeStart} to ${summary.rangeEnd} · ${summary.basis === "payment" ? "Payment received date" : "Invoice date"}`, contentRight, y, { size: 9, color: muted });
   if (branding.taxNumber) text(`${branding.taxName} No: ${branding.taxNumber}`, margin, y, { size: 9, color: muted });
   y -= 13;
   textRight(`Generated ${String(summary.generatedAt).slice(0, 10)}`, contentRight, y, { size: 9, color: muted });
@@ -3401,10 +3441,13 @@ async function renderReportPdf(
     row("Net profit", money(summary.netProfit), { bold: true, color: summary.netProfit < 0 ? rgb(0.72, 0.13, 0.13) : brand });
     y -= 6;
 
-    heading("Income by status");
-    row("Paid", money(summary.income.byStatus.paid));
-    row("Sent (awaiting payment)", money(summary.income.byStatus.sent));
-    row("Overdue", money(summary.income.byStatus.overdue));
+    // On a payment basis everything counted is paid, so the split says nothing.
+    if (summary.basis === "invoice") {
+      heading("Income by status");
+      row("Paid", money(summary.income.byStatus.paid));
+      row("Sent (awaiting payment)", money(summary.income.byStatus.sent));
+      row("Overdue", money(summary.income.byStatus.overdue));
+    }
   }
 
   // GST.

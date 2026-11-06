@@ -7,8 +7,9 @@ import { Loading } from "../shared/Loading";
 
 import { Download } from "lucide-react";
 import { ClarityBookingPages } from "../shared/ClarityIcons";
-import type { BillingReportSummary } from "./types";
+import type { BillingReportBasis, BillingReportSummary } from "./types";
 import {
+  REPORT_BASIS_LABELS,
   REPORT_PRESET_LABELS,
   REPORT_SECTIONS,
   type ReportRangePreset,
@@ -38,6 +39,8 @@ export type BillingReportsPanelProps = {
   loadState: "idle" | "loading" | "loaded" | "error";
   preset: ReportRangePreset;
   onSelectPreset: (preset: ReportRangePreset) => void;
+  basis: BillingReportBasis;
+  onSelectBasis: (basis: BillingReportBasis) => void;
   customStart: string;
   customEnd: string;
   onCustomStartChange: (value: string) => void;
@@ -59,6 +62,8 @@ export function BillingReportsPanel({
   loadState,
   preset,
   onSelectPreset,
+  basis,
+  onSelectBasis,
   customStart,
   customEnd,
   onCustomStartChange,
@@ -117,6 +122,20 @@ export function BillingReportsPanel({
               type="button"
             >
               {option === "custom" ? t("Custom") : REPORT_PRESET_LABELS[option]}
+            </button>
+          ))}
+        </div>
+        <div className="report-section-toggle" role="group" aria-label={t("Income counted by")}>
+          <span className="report-toggle-label">{t("Income counted by:")}</span>
+          {(["invoice", "payment"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={basis === option ? "active" : ""}
+              aria-pressed={basis === option}
+              onClick={() => onSelectBasis(option)}
+            >
+              {REPORT_BASIS_LABELS[option]}
             </button>
           ))}
         </div>
@@ -182,7 +201,11 @@ export function BillingReportsPanel({
                   <article className="data-card report-stat">
                     <span>{t("Income")}</span>
                     <strong>{money(summary.income.total)}</strong>
-                    <small>{tn(summary.income.invoiceCount, "{count} invoice", "{count} invoices")}</small>
+                    <small>
+                      {summary.basis === "payment"
+                        ? tn(summary.income.invoiceCount, "{count} invoice paid", "{count} invoices paid")
+                        : tn(summary.income.invoiceCount, "{count} invoice", "{count} invoices")}
+                    </small>
                   </article>
                   <article className="data-card report-stat">
                     <span>{t("Expenses")}</span>
