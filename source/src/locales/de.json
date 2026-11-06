@@ -5252,5 +5252,9 @@
   "Income counted by": "Einnahmen gezählt nach",
   "Income counted by:": "Einnahmen gezählt nach:",
   "{count} invoice paid": "{count} Rechnung bezahlt",
-  "{count} invoices paid": "{count} Rechnungen bezahlt"
+  "{count} invoices paid": "{count} Rechnungen bezahlt",
+  "Invoices paid": "Bezahlte Rechnungen",
+  "Invoices issued": "Ausgestellte Rechnungen",
+  "Expenses logged": "Erfasste Ausgaben",
+  "{taxName} (est.)": "{taxName} (geschätzt)"
 }

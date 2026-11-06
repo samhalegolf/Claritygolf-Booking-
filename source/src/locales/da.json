@@ -5252,5 +5252,9 @@
   "Income counted by": "Indtægt opgjort efter",
   "Income counted by:": "Indtægt opgjort efter:",
   "{count} invoice paid": "{count} faktura betalt",
-  "{count} invoices paid": "{count} fakturaer betalt"
+  "{count} invoices paid": "{count} fakturaer betalt",
+  "Invoices paid": "Betalte fakturaer",
+  "Invoices issued": "Udstedte fakturaer",
+  "Expenses logged": "Registrerede udgifter",
+  "{taxName} (est.)": "{taxName} (anslået)"
 }

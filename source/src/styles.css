@@ -10792,6 +10792,19 @@
   font-size: 12px;
 }
 
+/* Headline cards open to the invoices / expenses behind their figure. Same
+   card look; the button only adds the pointer and an ink edge while open. */
+.report-stat-button {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.report-stat-button.active {
+  border-color: var(--c-accent);
+}
+
 /* Profit and loss, so these say which one. --c-accent is the app's ink, and a
    net loss printed in ink reads as just another figure. */
 .report-positive {

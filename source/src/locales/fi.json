@@ -5252,5 +5252,9 @@
   "Income counted by": "Tulot lasketaan",
   "Income counted by:": "Tulot lasketaan:",
   "{count} invoice paid": "{count} lasku maksettu",
-  "{count} invoices paid": "{count} laskua maksettu"
+  "{count} invoices paid": "{count} laskua maksettu",
+  "Invoices paid": "Maksetut laskut",
+  "Invoices issued": "Lähetetyt laskut",
+  "Expenses logged": "Kirjatut kulut",
+  "{taxName} (est.)": "{taxName} (arvio)"
 }

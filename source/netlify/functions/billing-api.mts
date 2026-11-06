@@ -2047,7 +2047,7 @@ function monthsBetween(start: Date, end: Date) {
   return months;
 }
 
-type ReportInvoiceRow = { issue_date: string; paid_at: string | null; total: unknown; tax_total: unknown; amount_paid: unknown; status: string; customer_name: string };
+type ReportInvoiceRow = { id: string; invoice_number: string; issue_date: string; paid_at: string | null; total: unknown; tax_total: unknown; amount_paid: unknown; status: string; customer_name: string };
 
 // Which date an invoice's income lands on. "invoice" = accrual (issue date,
 // every sent/paid/overdue invoice). "payment" = cash (the day it was paid,
@@ -2057,7 +2057,7 @@ type ReportBasis = "invoice" | "payment";
 function parseReportBasis(url: URL): ReportBasis {
   return url.searchParams.get("basis") === "payment" ? "payment" : "invoice";
 }
-type ReportExpenseRow = { expense_date: string; amount: unknown; category_id: string | null; category_name_snapshot: string | null };
+type ReportExpenseRow = { id: string; description: string; vendor: string | null; expense_date: string; amount: unknown; category_id: string | null; category_name_snapshot: string | null };
 type ReportAgingRow = { invoice_number: string; customer_name: string; issue_date: string; due_date: string | null; total: unknown; amount_paid: unknown };
 
 async function buildReportSummary(accountId: string, url: URL) {
@@ -2084,10 +2084,10 @@ async function buildReportSummary(accountId: string, url: URL) {
 
   const [rawInvoiceRows, expenseRows, outstandingRows] = (await Promise.all([
     supabase("billing_invoices", {
-      query: `select=issue_date,paid_at,total,tax_total,amount_paid,status,customer_name&account_id=eq.${encodeFilter(accountId)}${invoiceQuery}`,
+      query: `select=id,invoice_number,issue_date,paid_at,total,tax_total,amount_paid,status,customer_name&account_id=eq.${encodeFilter(accountId)}${invoiceQuery}`,
     }),
     supabase("billing_expenses", {
-      query: `select=expense_date,amount,category_id,category_name_snapshot&account_id=eq.${encodeFilter(accountId)}&voided=is.false&expense_date=gte.${encodeFilter(rangeStart)}&expense_date=lte.${encodeFilter(rangeEnd)}`,
+      query: `select=id,description,vendor,expense_date,amount,category_id,category_name_snapshot&account_id=eq.${encodeFilter(accountId)}&voided=is.false&expense_date=gte.${encodeFilter(rangeStart)}&expense_date=lte.${encodeFilter(rangeEnd)}`,
     }),
     supabase("billing_invoices", {
       query: `select=invoice_number,customer_name,issue_date,due_date,total,amount_paid&account_id=eq.${encodeFilter(accountId)}&status=in.(${AGING_STATUSES.join(",")})`,
@@ -2102,10 +2102,12 @@ async function buildReportSummary(accountId: string, url: URL) {
       const total = Number(row.total) || 0;
       const taxTotal = Number(row.tax_total) || 0;
       if (basis === "invoice") {
-        return { date: row.issue_date, amount: total, tax: taxTotal, status: row.status, customerName: row.customer_name };
+        return { id: row.id, invoiceNumber: row.invoice_number, date: row.issue_date, amount: total, tax: taxTotal, status: row.status, customerName: row.customer_name };
       }
       const paid = Number(row.amount_paid) || total;
       return {
+        id: row.id,
+        invoiceNumber: row.invoice_number,
         date: row.paid_at ? dashboardToday(timeZone, new Date(row.paid_at)) : "",
         amount: paid,
         tax: total ? taxTotal * (paid / total) : 0,
@@ -2164,7 +2166,8 @@ async function buildReportSummary(accountId: string, url: URL) {
   // so onExpenses treats every expense as GST-inclusive - an estimate, not a
   // filed figure.
   const gstCollected = round2(taxCollected);
-  const gstOnExpenses = tax.taxRate > 0 ? round2(expenseTotal * (tax.taxRate / (100 + tax.taxRate))) : 0;
+  const expenseTaxShare = tax.taxRate > 0 ? tax.taxRate / (100 + tax.taxRate) : 0;
+  const gstOnExpenses = round2(expenseTotal * expenseTaxShare);
 
   // Month-by-month income vs expenses.
   const months = monthsBetween(rangeStartDate, rangeEndDate).map((month) => {
@@ -2236,6 +2239,18 @@ async function buildReportSummary(accountId: string, url: URL) {
     income: {
       total: round2(incomeTotal),
       invoiceCount: invoiceRows.length,
+      // The invoices behind the total, so the Income card can open into them.
+      items: [...invoiceRows]
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .map((row) => ({
+          id: row.id,
+          invoiceNumber: row.invoiceNumber,
+          customerName: (row.customerName || "").trim() || "Unknown",
+          date: row.date,
+          status: row.status,
+          amount: round2(row.amount),
+          tax: round2(row.tax),
+        })),
       byStatus: {
         sent: round2(incomeByStatus.sent),
         paid: round2(incomeByStatus.paid),
@@ -2245,6 +2260,19 @@ async function buildReportSummary(accountId: string, url: URL) {
     expenses: {
       total: round2(expenseTotal),
       count: includedExpenseRows.length,
+      // The expenses behind the total (after the category filter), so the
+      // Expenses card can open into them. GST is the same estimate as above.
+      items: [...includedExpenseRows]
+        .sort((a, b) => b.expense_date.localeCompare(a.expense_date))
+        .map((row) => ({
+          id: row.id,
+          date: row.expense_date,
+          description: row.description || "",
+          vendor: row.vendor || "",
+          categoryName: row.category_name_snapshot || "Uncategorised",
+          amount: round2(Number(row.amount) || 0),
+          tax: round2((Number(row.amount) || 0) * expenseTaxShare),
+        })),
       byCategory,
       excludedCategoryIds: [...excludedCategories],
       excludedCategoryNames,
