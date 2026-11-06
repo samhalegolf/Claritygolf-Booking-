@@ -5252,5 +5252,9 @@
   "Income counted by": "Entrate conteggiate per",
   "Income counted by:": "Entrate conteggiate per:",
   "{count} invoice paid": "{count} fattura pagata",
-  "{count} invoices paid": "{count} fatture pagate"
+  "{count} invoices paid": "{count} fatture pagate",
+  "Invoices paid": "Fatture pagate",
+  "Invoices issued": "Fatture emesse",
+  "Expenses logged": "Spese registrate",
+  "{taxName} (est.)": "{taxName} (stima)"
 }

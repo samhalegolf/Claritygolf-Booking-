@@ -4,7 +4,9 @@ import { Loading } from "../shared/Loading";
 // is given and reports user intent (range change, export) back through
 // callbacks. It owns no fetching or range state - App.tsx does - so it stays
 // decoupled from workspace state, matching the other billing slice components.
+// The only state here is which headline card is open to its line items.
 
+import { useState } from "react";
 import { Download } from "lucide-react";
 import { ClarityBookingPages } from "../shared/ClarityIcons";
 import type { BillingReportBasis, BillingReportSummary } from "./types";
@@ -25,6 +27,10 @@ const PRESET_ORDER: ReportRangePreset[] = [
   "last-financial-year",
   "custom",
 ];
+
+// Which headline card is open: Income and Expenses open their own list; Net
+// profit and Net tax are made of both, so they open both.
+type StatKey = "income" | "expenses" | "net" | "gst";
 
 const AGING_BUCKETS: Array<{ key: "current" | "d1_30" | "d31_60" | "d61_90" | "d90plus"; label: string }> = [
   { key: "current", label: t("Current") },
@@ -79,6 +85,14 @@ export function BillingReportsPanel({
   onClearCategories,
   formatMoney,
 }: BillingReportsPanelProps) {
+  const [expandedStat, setExpandedStat] = useState<StatKey | null>(null);
+  const toggleStat = (key: StatKey) => setExpandedStat((current) => (current === key ? null : key));
+  const statProps = (key: StatKey) => ({
+    type: "button" as const,
+    className: `data-card report-stat report-stat-button${expandedStat === key ? " active" : ""}`,
+    "aria-expanded": expandedStat === key,
+    onClick: () => toggleStat(key),
+  });
   const currency = summary?.currency ?? "";
   const money = (amount: number) => formatMoney(amount, currency);
   const chartMax = Math.max(1, ...(summary?.months.flatMap((month) => [month.income, month.expenses]) ?? [0]));
@@ -198,7 +212,7 @@ export function BillingReportsPanel({
             <div className="report-stat-grid">
               {shown.has("pl") && (
                 <>
-                  <article className="data-card report-stat">
+                  <button {...statProps("income")}>
                     <span>{t("Income")}</span>
                     <strong>{money(summary.income.total)}</strong>
                     <small>
@@ -206,27 +220,103 @@ export function BillingReportsPanel({
                         ? tn(summary.income.invoiceCount, "{count} invoice paid", "{count} invoices paid")
                         : tn(summary.income.invoiceCount, "{count} invoice", "{count} invoices")}
                     </small>
-                  </article>
-                  <article className="data-card report-stat">
+                  </button>
+                  <button {...statProps("expenses")}>
                     <span>{t("Expenses")}</span>
                     <strong>{money(summary.expenses.total)}</strong>
                     <small>{t("{count} logged", { count: summary.expenses.count })}</small>
-                  </article>
-                  <article className="data-card report-stat">
+                  </button>
+                  <button {...statProps("net")}>
                     <span>{t("Net profit")}</span>
                     <strong className={summary.netProfit < 0 ? "report-negative" : "report-positive"}>{money(summary.netProfit)}</strong>
                     <small>{t("income minus expenses")}</small>
-                  </article>
+                  </button>
                 </>
               )}
               {shown.has("gst") && (
-                <article className="data-card report-stat">
+                <button {...statProps("gst")}>
                   <span>{t("Net {taxName}", { taxName: summary.taxName })}</span>
                   <strong>{money(Math.abs(summary.gst.net))}</strong>
                   <small>{summary.gst.net >= 0 ? "payable" : "refund"} · {summary.taxRate}%</small>
-                </article>
+                </button>
               )}
             </div>
+          )}
+
+          {showStatGrid && expandedStat && expandedStat !== "expenses" && (
+            <article className="data-card">
+              <div className="data-card-header">
+                <div>
+                  <span>{t("Income")}</span>
+                  <h2>{summary.basis === "payment" ? t("Invoices paid") : t("Invoices issued")}</h2>
+                </div>
+                <strong>{money(summary.income.total)}</strong>
+              </div>
+              {summary.income.items.length ? (
+                <table className="report-aging-table">
+                  <thead>
+                    <tr>
+                      <th>{summary.basis === "payment" ? t("Paid") : t("Date")}</th>
+                      <th>{t("Invoice")}</th>
+                      <th>{t("Customer")}</th>
+                      <th className="report-num">{summary.taxName}</th>
+                      <th className="report-num">{t("Amount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.income.items.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.date}</td>
+                        <td>{item.invoiceNumber}</td>
+                        <td>{item.customerName}</td>
+                        <td className="report-num">{money(item.tax)}</td>
+                        <td className="report-num">{money(item.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="field-help">{t("No income in this range.")}</p>
+              )}
+            </article>
+          )}
+
+          {showStatGrid && expandedStat && expandedStat !== "income" && (
+            <article className="data-card">
+              <div className="data-card-header">
+                <div>
+                  <span>{t("Expenses")}</span>
+                  <h2>{t("Expenses logged")}</h2>
+                </div>
+                <strong>{money(summary.expenses.total)}</strong>
+              </div>
+              {summary.expenses.items.length ? (
+                <table className="report-aging-table">
+                  <thead>
+                    <tr>
+                      <th>{t("Date")}</th>
+                      <th>{t("Description")}</th>
+                      <th>{t("Category")}</th>
+                      <th className="report-num">{t("{taxName} (est.)", { taxName: summary.taxName })}</th>
+                      <th className="report-num">{t("Amount")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.expenses.items.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.date}</td>
+                        <td>{item.vendor ? `${item.description} · ${item.vendor}` : item.description}</td>
+                        <td>{item.categoryName}</td>
+                        <td className="report-num">{money(item.tax)}</td>
+                        <td className="report-num">{money(item.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="field-help">{t("No expenses logged in this range.")}</p>
+              )}
+            </article>
           )}
 
           {shown.has("chart") && (

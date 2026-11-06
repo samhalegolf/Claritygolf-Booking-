@@ -49,10 +49,11 @@ function summary(): BillingReportSummary {
     rangeEnd: "2026-06-30",
     basis: "invoice",
     generatedAt: "2026-07-18T00:00:00.000Z",
-    income: { total: 1000, invoiceCount: 3, byStatus: { sent: 400, paid: 500, overdue: 100 } },
+    income: { total: 1000, invoiceCount: 3, byStatus: { sent: 400, paid: 500, overdue: 100 }, items: [] },
     expenses: {
       total: 230,
       count: 2,
+      items: [],
       byCategory: [{ categoryId: "c1", categoryName: "Travel, gear", total: 230, count: 2 }],
     },
     netProfit: 770,

@@ -5252,5 +5252,9 @@
   "Income counted by": "Inkomsten geteld op",
   "Income counted by:": "Inkomsten geteld op:",
   "{count} invoice paid": "{count} factuur betaald",
-  "{count} invoices paid": "{count} facturen betaald"
+  "{count} invoices paid": "{count} facturen betaald",
+  "Invoices paid": "Betaalde facturen",
+  "Invoices issued": "Uitgegeven facturen",
+  "Expenses logged": "Geregistreerde uitgaven",
+  "{taxName} (est.)": "{taxName} (geschat)"
 }

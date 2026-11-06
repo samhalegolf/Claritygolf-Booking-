@@ -5252,5 +5252,9 @@
   "Income counted by": "収入の計上基準",
   "Income counted by:": "収入の計上基準:",
   "{count} invoice paid": "{count} 件の請求書が支払済み",
-  "{count} invoices paid": "{count} 件の請求書が支払済み"
+  "{count} invoices paid": "{count} 件の請求書が支払済み",
+  "Invoices paid": "支払済みの請求書",
+  "Invoices issued": "発行済みの請求書",
+  "Expenses logged": "記録された経費",
+  "{taxName} (est.)": "{taxName}（概算）"
 }

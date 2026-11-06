@@ -5252,5 +5252,9 @@
   "Income counted by": "Intäkter räknas efter",
   "Income counted by:": "Intäkter räknas efter:",
   "{count} invoice paid": "{count} faktura betald",
-  "{count} invoices paid": "{count} fakturor betalda"
+  "{count} invoices paid": "{count} fakturor betalda",
+  "Invoices paid": "Betalda fakturor",
+  "Invoices issued": "Utfärdade fakturor",
+  "Expenses logged": "Registrerade utgifter",
+  "{taxName} (est.)": "{taxName} (uppsk.)"
 }

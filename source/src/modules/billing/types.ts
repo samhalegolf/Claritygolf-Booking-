@@ -264,10 +264,12 @@ export type BillingReportSummary = {
     total: number;
     invoiceCount: number;
     byStatus: { sent: number; paid: number; overdue: number };
+    items: Array<{ id: string; invoiceNumber: string; customerName: string; date: string; status: string; amount: number; tax: number }>;
   };
   expenses: {
     total: number;
     count: number;
+    items: Array<{ id: string; date: string; description: string; vendor: string; categoryName: string; amount: number; tax: number }>;
     byCategory: Array<{ categoryId: string; categoryName: string; total: number; count: number }>;
     // Whole-report category filter: totals above already exclude these; the
     // names drive the "Filtered — excludes: …" banner + export annotation.
