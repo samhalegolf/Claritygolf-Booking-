@@ -12,7 +12,7 @@
 // Shared by the Sell screen and the checkout modal.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon } from "./types";
 import { searchCoupons } from "./couponMath";
@@ -73,6 +73,9 @@ export type CouponPickerProps = {
   formatMoney: (amount: number, currency?: string) => string;
   onHold: (coupon: BillingCoupon) => void;
   onRelease: () => void;
+  // Puts the item a voucher is for on the sale, when it is for one that is
+  // not there yet. Left out where the sale cannot take catalog items.
+  onAddCoveredItem?: () => void;
   disabled?: boolean;
 };
 
@@ -85,6 +88,7 @@ export function CouponPicker({
   formatMoney,
   onHold,
   onRelease,
+  onAddCoveredItem,
   disabled = false,
 }: CouponPickerProps) {
   const [query, setQuery] = useState("");
@@ -102,9 +106,10 @@ export function CouponPicker({
     const money = (amount: number) => formatMoney(amount, held.currency);
     // A voucher for a lesson or product says so, and whether this sale has it.
     const forItem = held.coversItemName && voucherHoldsItem({ ...held, coversItemId: held.coversItemId || "" });
+    const missingItem = forItem && !redemption?.coversItem;
     const what = redemption?.coversItem
       ? t("Pays for {item} at today's price", { item: held.coversItemName || "" })
-      : forItem
+      : missingItem
         ? t("For {item}, which is not on this sale. It can be spent as money.", { item: held.coversItemName || "" })
         : "";
     const after = credit > 0 ? t("{amount} goes to the client's account credit", { amount: money(credit) }) : left > 0 ? t("{left} stays on it", { left: money(left) }) : "";
@@ -117,6 +122,12 @@ export function CouponPicker({
             {held.issuedToName || clientNames.get(held.customerId) ? ` · ${held.issuedToName || clientNames.get(held.customerId)}` : ""}
           </strong>
           {what && <em>{what}</em>}
+          {missingItem && onAddCoveredItem && !applied && (
+            <button className="outline-button coupon-held-add" disabled={disabled} onClick={onAddCoveredItem} type="button">
+              <Plus size={13} />
+              {t("Add {item} to the sale", { item: held.coversItemName || "" })}
+            </button>
+          )}
           <em>
             {applied
               ? [t("{amount} paid by coupon", { amount: money(pays) }), after].filter(Boolean).join(" - ")

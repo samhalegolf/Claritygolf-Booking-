@@ -5256,5 +5256,7 @@
   "Invoices paid": "Betaalde facturen",
   "Invoices issued": "Uitgegeven facturen",
   "Expenses logged": "Geregistreerde uitgaven",
-  "{taxName} (est.)": "{taxName} (geschat)"
+  "{taxName} (est.)": "{taxName} (geschat)",
+  "Individual services": "Losse diensten",
+  "Add {item} to the sale": "{item} aan de verkoop toevoegen"
 }

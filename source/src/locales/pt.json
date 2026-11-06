@@ -5256,5 +5256,7 @@
   "Invoices paid": "Faturas pagas",
   "Invoices issued": "Faturas emitidas",
   "Expenses logged": "Despesas registadas",
-  "{taxName} (est.)": "{taxName} (est.)"
+  "{taxName} (est.)": "{taxName} (est.)",
+  "Individual services": "Serviços individuais",
+  "Add {item} to the sale": "Adicionar {item} à venda"
 }

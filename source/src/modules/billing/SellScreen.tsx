@@ -231,6 +231,10 @@ export function SellScreen({
   const redemption = coupon
     ? voucherRedemption(coupon, voucherSaleLines(lines.filter((line) => line.productId)), total, { hasClient: canHoldCredit(customerId) })
     : null;
+  // The pass, lesson or product the held voucher is for, when the till sells it.
+  const coveredItem = coupon?.coversItemId
+    ? catalog.find((item) => item.id === coupon.coversItemId && item.active !== false && item.isVoucher !== true)
+    : undefined;
   const couponAmount = redemption?.pays ?? 0;
   const couponCovers = Boolean(coupon) && couponAmount > 0 && couponAmount >= total;
   // Only credit that has been put down counts against what is owed. A held
@@ -1041,6 +1045,7 @@ export function SellScreen({
             setCoupon(null);
             setCouponApplied(false);
           }}
+          onAddCoveredItem={coveredItem ? () => addItem(coveredItem) : undefined}
         />
         {needsCustomerForPackage && (
           <p className="field-help">{t("A package puts credits on a profile - add the customer before taking payment.")}</p>
