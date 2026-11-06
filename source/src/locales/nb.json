@@ -5247,5 +5247,10 @@
   "Total {total} m": "Totalt {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "Legg til køller én om gangen, eller lag en komplett bag ut fra carry for jern 7.",
   "your bag": "bagen din",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notater, bag, e-poster, transaksjoner, klippekort, portaler"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notater, bag, e-poster, transaksjoner, klippekort, portaler",
+  "Invoice date": "Fakturadato",
+  "Income counted by": "Inntekt regnet etter",
+  "Income counted by:": "Inntekt regnet etter:",
+  "{count} invoice paid": "{count} faktura betalt",
+  "{count} invoices paid": "{count} fakturaer betalt"
 }

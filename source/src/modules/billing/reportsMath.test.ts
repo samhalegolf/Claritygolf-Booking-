@@ -47,6 +47,7 @@ function summary(): BillingReportSummary {
     taxRate: 15,
     rangeStart: "2026-04-01",
     rangeEnd: "2026-06-30",
+    basis: "invoice",
     generatedAt: "2026-07-18T00:00:00.000Z",
     income: { total: 1000, invoiceCount: 3, byStatus: { sent: 400, paid: 500, overdue: 100 } },
     expenses: {
@@ -112,6 +113,16 @@ test("CSV annotates the filtered categories when the summary names them", () => 
   filtered.expenses.excludedCategoryNames = ["Personal", "Drawings"];
   const csv = buildReportCsv(filtered);
   assert.match(csv, /Filtered,Expenses exclude: Personal; Drawings/);
+});
+
+test("CSV labels the income basis and drops the status split on a payment basis", () => {
+  const invoiceCsv = buildReportCsv(summary(), ["pl"]);
+  assert.match(invoiceCsv, /Income counted by,Invoice date/);
+  assert.match(invoiceCsv, /Income by status/);
+
+  const paymentCsv = buildReportCsv({ ...summary(), basis: "payment" }, ["pl"]);
+  assert.match(paymentCsv, /Income counted by,Payment received/);
+  assert.doesNotMatch(paymentCsv, /Income by status/);
 });
 
 test("current report presets handle first days, leap day and completed boundaries", () => {

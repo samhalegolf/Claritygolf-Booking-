@@ -4,7 +4,7 @@
 // Presets follow the viewer’s local calendar day, then use UTC for date
 // arithmetic and YYYY-MM-DD keys to match the date-only billing records.
 
-import type { BillingReportSummary } from "./types";
+import type { BillingReportBasis, BillingReportSummary } from "./types";
 import { t } from "../../lib/i18n";
 
 export type ReportRangePreset =
@@ -64,6 +64,11 @@ export function presetRange(preset: ReportRangePreset, ref: Date): ReportRange |
   }
 }
 
+export const REPORT_BASIS_LABELS: Record<BillingReportBasis, string> = {
+  invoice: t("Invoice date"),
+  payment: t("Payment received"),
+};
+
 export const REPORT_PRESET_LABELS: Record<Exclude<ReportRangePreset, "custom">, string> = {
   "this-month": t("This month"),
   "last-month": t("Last month"),
@@ -122,6 +127,7 @@ export function buildReportCsv(
 
   lines.push(csvRow([t("Financial report")]));
   lines.push(csvRow([t("Range"), t("{start} to {end}", { start: summary.rangeStart, end: summary.rangeEnd })]));
+  lines.push(csvRow([t("Income counted by"), REPORT_BASIS_LABELS[summary.basis]]));
   lines.push(csvRow([t("Currency"), summary.currency]));
   lines.push(csvRow([t("Generated"), summary.generatedAt]));
   // Whole-report filter annotation so an exported CSV is never mistaken for the
@@ -138,11 +144,14 @@ export function buildReportCsv(
     lines.push(csvRow([t("Net profit"), money(summary.netProfit)]));
     lines.push("");
 
-    lines.push(csvRow([t("Income by status"), t("Amount")]));
-    lines.push(csvRow([t("Paid"), money(summary.income.byStatus.paid)]));
-    lines.push(csvRow([t("Sent"), money(summary.income.byStatus.sent)]));
-    lines.push(csvRow([t("Overdue"), money(summary.income.byStatus.overdue)]));
-    lines.push("");
+    // On a payment basis everything counted is paid, so the split says nothing.
+    if (summary.basis === "invoice") {
+      lines.push(csvRow([t("Income by status"), t("Amount")]));
+      lines.push(csvRow([t("Paid"), money(summary.income.byStatus.paid)]));
+      lines.push(csvRow([t("Sent"), money(summary.income.byStatus.sent)]));
+      lines.push(csvRow([t("Overdue"), money(summary.income.byStatus.overdue)]));
+      lines.push("");
+    }
   }
 
   if (shown.has("gst")) {

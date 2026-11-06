@@ -206,6 +206,7 @@ import type {
   InvoicePaymentSource,
   BillingInvoiceRecord,
   BillingReportSummary,
+  BillingReportBasis,
   BillingDiscountType,
   BillingDiscount,
   BillingExpenseCategory,
@@ -2023,6 +2024,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const [reportSections, setReportSections] = useState<ReportSectionKey[]>(() => [...ALL_REPORT_SECTIONS]);
   // Expense category ids excluded from the by-category breakdown (+ exports).
   const [reportExcludedCategories, setReportExcludedCategories] = useState<string[]>([]);
+  const [reportBasis, setReportBasis] = useState<BillingReportBasis>("invoice");
   const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
   const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
     id: "",
@@ -10150,13 +10152,19 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
 
+  // Shared query string for the JSON and PDF report routes: income basis plus
+  // the viewer's time zone (decides which local day a payment landed on).
+  function reportBasisParams(basis: BillingReportBasis) {
+    return `&basis=${basis}&timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`;
+  }
+
   async function fetchReportSummary(start: string, end: string, excluded: readonly string[] = reportExcludedCategories) {
     if (!start || !end) return;
     setReportLoadState("loading");
     try {
       const excludeParam = excluded.length ? `&excludeCategories=${encodeURIComponent(excluded.join(","))}` : "";
       const response = await fetch(
-        `/api/billing/reports/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}${excludeParam}`,
+        `/api/billing/reports/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}${excludeParam}${reportBasisParams(reportBasis)}`,
         { credentials: "same-origin", cache: "no-store" },
       );
       if (response.status === 401) {
@@ -10192,6 +10200,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     reportRange.start,
     reportRange.end,
     reportExcludedCategories,
+    reportBasis,
   ]);
 
   // Preset click resolves to a concrete range immediately; "custom" waits for
@@ -10251,7 +10260,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     const excludeParam = reportExcludedCategories.length
       ? `&excludeCategories=${encodeURIComponent(reportExcludedCategories.join(","))}`
       : "";
-    const url = `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}${excludeParam}`;
+    const url = `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}${excludeParam}${reportBasisParams(reportBasis)}`;
     try {
       if (await shareFileInApp({ url }, `financial-report-${reportRange.start}-to-${reportRange.end}.pdf`)) return;
     } catch {
@@ -17638,6 +17647,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   loadState={reportLoadState}
                   preset={reportPreset}
                   onSelectPreset={handleSelectReportPreset}
+                  basis={reportBasis}
+                  onSelectBasis={setReportBasis}
                   customStart={reportCustomStart}
                   customEnd={reportCustomEnd}
                   onCustomStartChange={setReportCustomStart}

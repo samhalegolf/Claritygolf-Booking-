@@ -5247,5 +5247,10 @@
   "Total {total} m": "Yhteensä {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "Lisää mailat yksi kerrallaan tai luo täysi bägi rauta 7:n lentomatkasta.",
   "your bag": "bägisi",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "Muistiinpanot, bägi, sähköpostit, tapahtumat, sarjakortit, portaalit"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "Muistiinpanot, bägi, sähköpostit, tapahtumat, sarjakortit, portaalit",
+  "Invoice date": "Laskun päivämäärä",
+  "Income counted by": "Tulot lasketaan",
+  "Income counted by:": "Tulot lasketaan:",
+  "{count} invoice paid": "{count} lasku maksettu",
+  "{count} invoices paid": "{count} laskua maksettu"
 }

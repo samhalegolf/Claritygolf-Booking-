@@ -5247,5 +5247,10 @@
   "Total {total} m": "Łącznie {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "Dodawaj kije pojedynczo albo wygeneruj pełną torbę z lotu żelaza 7.",
   "your bag": "twoja torba",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notatki, torba, E-maile, Transakcje, Karnety, Portale"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "Notatki, torba, E-maile, Transakcje, Karnety, Portale",
+  "Invoice date": "Data faktury",
+  "Income counted by": "Przychód liczony według",
+  "Income counted by:": "Przychód liczony według:",
+  "{count} invoice paid": "{count} faktura opłacona",
+  "{count} invoices paid": "{count} faktur opłaconych"
 }

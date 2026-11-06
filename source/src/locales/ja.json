@@ -5247,5 +5247,10 @@
   "Total {total} m": "トータル {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "クラブを1本ずつ追加するか、7番アイアンのキャリーからバッグ一式を作成します。",
   "your bag": "あなたのバッグ",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "メモ、バッグ、メール、取引、パス、ポータル"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "メモ、バッグ、メール、取引、パス、ポータル",
+  "Invoice date": "請求日",
+  "Income counted by": "収入の計上基準",
+  "Income counted by:": "収入の計上基準:",
+  "{count} invoice paid": "{count} 件の請求書が支払済み",
+  "{count} invoices paid": "{count} 件の請求書が支払済み"
 }

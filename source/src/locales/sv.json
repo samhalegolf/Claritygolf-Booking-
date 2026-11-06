@@ -5247,5 +5247,10 @@
   "Total {total} m": "Totalt {total} m",
   "Add clubs one at a time, or generate a full bag from a 7-iron carry.": "Lägg till klubbor en i taget, eller skapa en komplett bag från carry för järn 7.",
   "your bag": "din bag",
-  "Notes, Bag, Emails, Transactions, Passes, Portals": "Anteckningar, bag, e-post, transaktioner, klippkort, portaler"
+  "Notes, Bag, Emails, Transactions, Passes, Portals": "Anteckningar, bag, e-post, transaktioner, klippkort, portaler",
+  "Invoice date": "Fakturadatum",
+  "Income counted by": "Intäkter räknas efter",
+  "Income counted by:": "Intäkter räknas efter:",
+  "{count} invoice paid": "{count} faktura betald",
+  "{count} invoices paid": "{count} fakturor betalda"
 }
