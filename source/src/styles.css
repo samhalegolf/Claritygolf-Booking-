@@ -17049,6 +17049,16 @@
   margin-left: auto;
 }
 
+.coupon-held .coupon-held-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .sell-coupon-pay {
   display: flex;
   align-items: center;

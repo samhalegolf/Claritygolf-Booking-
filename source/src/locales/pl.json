@@ -5256,5 +5256,7 @@
   "Invoices paid": "Opłacone faktury",
   "Invoices issued": "Wystawione faktury",
   "Expenses logged": "Zarejestrowane wydatki",
-  "{taxName} (est.)": "{taxName} (szac.)"
+  "{taxName} (est.)": "{taxName} (szac.)",
+  "Individual services": "Usługi pojedyncze",
+  "Add {item} to the sale": "Dodaj {item} do sprzedaży"
 }

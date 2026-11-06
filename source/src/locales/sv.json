@@ -5256,5 +5256,7 @@
   "Invoices paid": "Betalda fakturor",
   "Invoices issued": "Utfärdade fakturor",
   "Expenses logged": "Registrerade utgifter",
-  "{taxName} (est.)": "{taxName} (uppsk.)"
+  "{taxName} (est.)": "{taxName} (uppsk.)",
+  "Individual services": "Enskilda tjänster",
+  "Add {item} to the sale": "Lägg till {item} i försäljningen"
 }

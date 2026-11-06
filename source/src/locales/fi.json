@@ -5256,5 +5256,7 @@
   "Invoices paid": "Maksetut laskut",
   "Invoices issued": "Lähetetyt laskut",
   "Expenses logged": "Kirjatut kulut",
-  "{taxName} (est.)": "{taxName} (arvio)"
+  "{taxName} (est.)": "{taxName} (arvio)",
+  "Individual services": "Yksittäiset palvelut",
+  "Add {item} to the sale": "Lisää {item} myyntiin"
 }

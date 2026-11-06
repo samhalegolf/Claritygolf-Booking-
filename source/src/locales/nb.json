@@ -5256,5 +5256,7 @@
   "Invoices paid": "Betalte fakturaer",
   "Invoices issued": "Utstedte fakturaer",
   "Expenses logged": "Registrerte utgifter",
-  "{taxName} (est.)": "{taxName} (anslått)"
+  "{taxName} (est.)": "{taxName} (anslått)",
+  "Individual services": "Enkelttjenester",
+  "Add {item} to the sale": "Legg {item} til salget"
 }

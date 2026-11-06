@@ -5256,5 +5256,7 @@
   "Invoices paid": "支払済みの請求書",
   "Invoices issued": "発行済みの請求書",
   "Expenses logged": "記録された経費",
-  "{taxName} (est.)": "{taxName}（概算）"
+  "{taxName} (est.)": "{taxName}（概算）",
+  "Individual services": "個別サービス",
+  "Add {item} to the sale": "{item}を販売に追加"
 }

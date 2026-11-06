@@ -173,6 +173,13 @@ const KIND_PLURALS: Record<BillingCatalogKind, string> = {
   package: t("Packages"),
 };
 
+// The groups of the "Voucher for" choice, in the order a gift is usually for.
+const VOUCHER_FOR_GROUPS: Array<{ kind: BillingCatalogKind; label: string }> = [
+  { kind: "package", label: t("Passes") },
+  { kind: "service", label: t("Individual services") },
+  { kind: "product", label: t("Products") },
+];
+
 // Products first: they are the only group you can edit here, and the only one
 // with stock to watch.
 const KIND_ORDER: BillingCatalogKind[] = ["product", "package", "service"];
@@ -341,13 +348,17 @@ export function ProductsPanel({
 
   // What a voucher can be for: the lesson types and products on sale, never
   // another voucher.
-  const voucherItemChoices = useMemo(
-    () =>
-      products
-        .filter((product) => product.active !== false && product.isVoucher !== true && product.id !== form.id)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [products, form.id],
-  );
+  // What a voucher can be for, grouped the way a coach thinks of them: passes
+  // (lesson packages), single lessons, then things off the shelf.
+  const voucherItemGroups = useMemo(() => {
+    const choices = products
+      .filter((product) => product.active !== false && product.isVoucher !== true && product.id !== form.id)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return VOUCHER_FOR_GROUPS.map((group) => ({
+      ...group,
+      items: choices.filter((product) => product.kind === group.kind),
+    })).filter((group) => group.items.length);
+  }, [products, form.id]);
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -598,10 +609,14 @@ export function ProductsPanel({
                   <span>{t("Voucher for")}</span>
                   <select value={form.voucherItemId} onChange={(event) => updateForm("voucherItemId", event.target.value)}>
                     <option value="">{t("An amount")}</option>
-                    {voucherItemChoices.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
+                    {voucherItemGroups.map((group) => (
+                      <optgroup key={group.kind} label={group.label}>
+                        {group.items.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </label>
