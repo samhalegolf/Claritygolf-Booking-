@@ -154,6 +154,22 @@ export function isScheduledGroupService(service?: Partial<Service> | null) {
   return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
 }
 
+/**
+ * A scheduled group lesson type whose weekly sessions should still appear on
+ * the calendar and be bookable. Archiving or deactivating the lesson type (or
+ * switching its schedule off) stops new sessions appearing; sessions that
+ * already have bookings are real calendar rows and stay where they are.
+ */
+export function hasLiveGroupSchedule(service?: Partial<Service> | null): service is Service & { groupSchedule: NonNullable<Service["groupSchedule"]> } {
+  return Boolean(
+    service &&
+      isScheduledGroupService(service) &&
+      service.active &&
+      service.archived !== true &&
+      service.groupSchedule?.active,
+  );
+}
+
 export const DEFAULT_REVIEW_TURNAROUND_DAYS = 3;
 export const MAX_REVIEW_TURNAROUND_DAYS = 30;
 
