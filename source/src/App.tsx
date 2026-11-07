@@ -431,6 +431,7 @@ import {
   emptyServiceEditor,
   generateServiceDraftId,
   hasCustomGroupFlag,
+  hasLiveGroupSchedule,
   isAppointmentStyleService,
   isCustomGroupService,
   isScheduledGroupService,
@@ -3136,7 +3137,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       });
     });
     services.forEach((service) => {
-      if (service.active && isScheduledGroupService(service) && service.groupSchedule?.active) {
+      if (hasLiveGroupSchedule(service)) {
         points.push(service.groupSchedule.startMinutes, service.groupSchedule.startMinutes + service.duration);
       }
     });
@@ -3853,10 +3854,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const scheduledGroupSlots = useMemo<CalendarItem[]>(() => {
     const firstWeek = getCurrentWeekOffset();
     return services
-      .filter((service) => isScheduledGroupService(service) && service.groupSchedule && service.groupSchedule.active && service.active)
+      .filter(hasLiveGroupSchedule)
       .flatMap((service) => {
         const schedule = service.groupSchedule;
-        if (!schedule) return [];
         const occurrenceCount = clamp(
           Math.round(schedule.occurrenceCount),
           1,
@@ -4504,7 +4504,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   function isGroupServiceSlotMatch(service: Service | null | undefined, week: number, day: number, start: number) {
-    if (!service || !isScheduledGroupService(service) || !service.groupSchedule?.active) return false;
+    if (!hasLiveGroupSchedule(service)) return false;
     if (day !== service.groupSchedule.dayOfWeek) return false;
     if (start !== service.groupSchedule.startMinutes) return false;
     if (!Number.isInteger(week)) return false;
@@ -4987,11 +4987,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     return services
       .filter(
         (groupService) =>
-          groupService.id !== service?.id &&
-          groupService.active &&
-          groupService.archived !== true &&
-          isScheduledGroupService(groupService) &&
-          groupService.groupSchedule?.active,
+          groupService.id !== service?.id && hasLiveGroupSchedule(groupService),
       )
       .flatMap((groupService) => {
         const schedule = groupService.groupSchedule!;
