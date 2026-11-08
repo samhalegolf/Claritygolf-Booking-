@@ -5258,5 +5258,6 @@
   "Expenses logged": "Dépenses enregistrées",
   "{taxName} (est.)": "{taxName} (est.)",
   "Individual services": "Services individuels",
-  "Add {item} to the sale": "Ajouter {item} à la vente"
+  "Add {item} to the sale": "Ajouter {item} à la vente",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Impossible de charger ses forfaits. Payez autrement ou rouvrez l'encaissement."
 }

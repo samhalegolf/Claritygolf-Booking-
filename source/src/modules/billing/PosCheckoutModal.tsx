@@ -275,7 +275,7 @@ export function PosCheckoutModal({
             : `/api/passes?personId=${encodeURIComponent(personId)}&balance=1`,
           { credentials: "same-origin", cache: "no-store" },
         );
-        if (!response.ok) return;
+        if (!response.ok) throw new Error();
         const data = (await response.json()) as {
           options?: PassOption[];
           passes?: { status: string; creditsAvailable: number }[];
@@ -284,7 +284,9 @@ export function PosCheckoutModal({
         setPassOptions(forLesson && Array.isArray(data.options) ? data.options : []);
         setPassBalance(spendableCredits(data.passes));
       } catch {
-        // No passes offered this time; paying by any other method still works.
+        // Paying by any other method still works, but say so rather than leave
+        // a Pass button with nothing behind it.
+        if (!cancelled) setError(t("Could not load their passes. Pay another way or reopen the checkout."));
       }
     })();
     return () => {

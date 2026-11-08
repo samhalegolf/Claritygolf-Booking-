@@ -5258,5 +5258,6 @@
   "Expenses logged": "Geregistreerde uitgaven",
   "{taxName} (est.)": "{taxName} (geschat)",
   "Individual services": "Losse diensten",
-  "Add {item} to the sale": "{item} aan de verkoop toevoegen"
+  "Add {item} to the sale": "{item} aan de verkoop toevoegen",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Hun strippenkaarten konden niet worden geladen. Betaal op een andere manier of open de kassa opnieuw."
 }

@@ -5258,5 +5258,6 @@
   "Expenses logged": "Registrerede udgifter",
   "{taxName} (est.)": "{taxName} (anslået)",
   "Individual services": "Enkeltydelser",
-  "Add {item} to the sale": "Tilføj {item} til salget"
+  "Add {item} to the sale": "Tilføj {item} til salget",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Kunne ikke hente deres klippekort. Betal på en anden måde, eller åbn kassen igen."
 }

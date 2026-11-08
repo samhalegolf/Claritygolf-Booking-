@@ -699,7 +699,7 @@ function monthsFromNow(months: number): string {
 function rowToAllocation(row: Record<string, unknown>): PassAllocationView {
   return {
     id: String(row.allocation_id || row.id),
-    credits: Number(row.credits) || 0,
+    credits: Number(row.credits_allocated) || 0,
     creditsRedeemed: Number(row.credits_redeemed) || 0,
     creditsAvailable: Number(row.credits_available) || 0,
     availableFrom: String(row.available_from || ""),

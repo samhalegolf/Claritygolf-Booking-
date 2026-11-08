@@ -5258,5 +5258,6 @@
   "Expenses logged": "Spese registrate",
   "{taxName} (est.)": "{taxName} (stima)",
   "Individual services": "Servizi singoli",
-  "Add {item} to the sale": "Aggiungi {item} alla vendita"
+  "Add {item} to the sale": "Aggiungi {item} alla vendita",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Impossibile caricare i suoi pacchetti. Paga in un altro modo o riapri la cassa."
 }

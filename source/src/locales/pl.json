@@ -5258,5 +5258,6 @@
   "Expenses logged": "Zarejestrowane wydatki",
   "{taxName} (est.)": "{taxName} (szac.)",
   "Individual services": "Usługi pojedyncze",
-  "Add {item} to the sale": "Dodaj {item} do sprzedaży"
+  "Add {item} to the sale": "Dodaj {item} do sprzedaży",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Nie udało się wczytać karnetów. Zapłać inaczej lub otwórz kasę ponownie."
 }
