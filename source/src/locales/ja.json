@@ -5259,5 +5259,6 @@
   "{taxName} (est.)": "{taxName}（概算）",
   "Individual services": "個別サービス",
   "Add {item} to the sale": "{item}を販売に追加",
-  "Could not load their passes. Pay another way or reopen the checkout.": "パスを読み込めませんでした。別の方法で支払うか、会計を開き直してください。"
+  "Could not load their passes. Pay another way or reopen the checkout.": "パスを読み込めませんでした。別の方法で支払うか、会計を開き直してください。",
+  "Pay now by card ({amount})": "今すぐカードで支払う（{amount}）"
 }
