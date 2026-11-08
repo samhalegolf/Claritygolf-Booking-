@@ -5258,5 +5258,6 @@
   "Expenses logged": "Registrerte utgifter",
   "{taxName} (est.)": "{taxName} (anslått)",
   "Individual services": "Enkelttjenester",
-  "Add {item} to the sale": "Legg {item} til salget"
+  "Add {item} to the sale": "Legg {item} til salget",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Kunne ikke laste inn klippekortene deres. Betal på en annen måte, eller åpne kassen på nytt."
 }

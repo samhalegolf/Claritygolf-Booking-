@@ -5258,5 +5258,6 @@
   "Expenses logged": "Erfasste Ausgaben",
   "{taxName} (est.)": "{taxName} (geschätzt)",
   "Individual services": "Einzelleistungen",
-  "Add {item} to the sale": "{item} zum Verkauf hinzufügen"
+  "Add {item} to the sale": "{item} zum Verkauf hinzufügen",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Ihre Pässe konnten nicht geladen werden. Zahlen Sie anders oder öffnen Sie die Kasse erneut."
 }

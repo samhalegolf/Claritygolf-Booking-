@@ -5258,5 +5258,6 @@
   "Expenses logged": "Despesas registadas",
   "{taxName} (est.)": "{taxName} (est.)",
   "Individual services": "Serviços individuais",
-  "Add {item} to the sale": "Adicionar {item} à venda"
+  "Add {item} to the sale": "Adicionar {item} à venda",
+  "Could not load their passes. Pay another way or reopen the checkout.": "Não foi possível carregar os pacotes. Pague de outra forma ou reabra o checkout."
 }
