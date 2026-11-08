@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
+import { STRIPE_CONNECTION_SETTING, stripeCredentialStatus } from "./_shared/stripe.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { cleanPhoneCountry } from "./_shared/phone.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
@@ -260,6 +261,8 @@ async function readSettings(accountId: string) {
     // From Settings > Invoices: the currency prices are written in, and how a
     // client can pay ahead, for the group invite's "paying ahead" section.
     ...invoicePaymentSettings(s.accountInvoiceSettingsJson, s.accountCountry),
+    // Card payments are on: the group invite can offer to pay a share online.
+    onlinePayments: stripeCredentialStatus(s[STRIPE_CONNECTION_SETTING]).configured,
     // Per-variant wording. Blank fields fall back to the shared defaults, so a
     // workspace that has never opened the editor still sends Clarity's copy.
     notificationTemplates: parseNotificationTemplates(s.notificationTemplatesJson),
@@ -496,9 +499,9 @@ function customGroupConfirmUrl(token: string, settings: any) {
  * is, their share of the price, a button to say they are coming, and how to pay
  * ahead if the business has said how. The wording is the coach's (the
  * groupInvite template); the table, the button's link and the paying-ahead
- * section are filled in per invite. `payUrl` pays the invited person's own
- * share invoice (see ensureGroupShareInvoice); without one the paying-ahead
- * section offers the business's bank details only, as before.
+ * section are filled in per invite. `payUrl` is their invite page, where they
+ * can pay their share by card; without one the paying-ahead section offers the
+ * business's bank details only.
  */
 function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVariables: Record<string, string>, payUrl = "") {
   const mt = messageText(settings.messageLanguage);
@@ -1124,31 +1127,10 @@ export async function notifyBookingEvent(input: NotifyInput) {
       await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status: "skipped", provider: "settings", error: "disabled_client_email", notificationJobId: input.notificationJobId });
       return;
     }
-    // Their share as an invoice of its own, so the email can carry its pay
-    // link and Billing shows who has paid. A failure here never stops the
-    // invite: it goes out with the bank details instead.
-    const mt = messageText(settings.messageLanguage);
-    let payUrl = "";
-    // No share invoice when the booker is covering the group: there is
-    // nothing for this person to pay.
-    if (friendShareAmount(appt) > 0) {
-      try {
-        const { ensureGroupShareInvoice } = await import("./billing-api.mts");
-        const share = await ensureGroupShareInvoice(accountId, {
-          bookingId: appt.id,
-          attendeeId: cleanString(attendee?.id, "", 120),
-          name: cleanString(attendee?.name, "", 120),
-          email: recipient,
-          amount: friendShareAmount(appt),
-          description: `${variables.service} · ${variables.date} · ${mt("Share for {name}", { name: cleanString(attendee?.name, "", 120) || recipient })}`,
-          week: appt.week,
-          day: appt.day,
-        }, settings.bookingUrl || "https://book.claritygolf.app");
-        payUrl = share?.payUrl || "";
-      } catch (error) {
-        console.error("notification_engine:group_share_invoice_failed", appt.id, error);
-      }
-    }
+    // Paying ahead happens on their invite page, which opens Stripe when they
+    // press Pay: nothing is invoiced until they have paid. Not offered when
+    // the booker is covering the group, or card payments are not set up.
+    const payUrl = friendShareAmount(appt) > 0 && settings.onlinePayments ? customGroupConfirmUrl(token, settings) : "";
     const invite = customGroupInviteBody(attendee, appt, settings, variables, payUrl);
     const result = await deliverEmail({
       accountId,
@@ -1262,25 +1244,6 @@ export async function notifyBookingEvent(input: NotifyInput) {
     await sendAndRecord("admin", adminRecipient, subjects.admin);
   } else {
     await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: adminRecipient, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email", notificationJobId: input.notificationJobId });
-  }
-
-  // A share invoice stands only while its player is in a lesson that is on:
-  // cancel the lesson, or take the player off it, and an unpaid share is voided.
-  if (appt.customGroup && (action === "cancelled" || (action === "updated" && previous))) {
-    const stillComing = new Set(action === "cancelled" ? [] : (appt.attendees || []).map((attendee: any) => cleanString(attendee?.id, "", 120)));
-    const gone = ((action === "cancelled" ? appt.attendees : previous?.attendees) || [])
-      .map((attendee: any) => cleanString(attendee?.id, "", 120))
-      // The booker has a share of their own once they pay theirs online, and
-      // it goes with the lesson when the lesson is cancelled.
-      .filter((id: string) => id && (action === "cancelled" || id !== "booker") && !stillComing.has(id));
-    if (gone.length) {
-      try {
-        const { voidGroupShareInvoices } = await import("./billing-api.mts");
-        await voidGroupShareInvoices(accountId, appt.id, gone);
-      } catch (error) {
-        console.error("notification_engine:group_share_void_failed", appt.id, error);
-      }
-    }
   }
 
   if ((action === "booking" || action === "updated") && appt.customGroup) {

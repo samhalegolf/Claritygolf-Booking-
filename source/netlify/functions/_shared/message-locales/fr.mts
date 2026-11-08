@@ -140,7 +140,6 @@ const catalog: Record<string, string> = {
   "Sent": "Envoyée",
   "Set a password to see your lessons, lesson notes and videos, and to book your next session:": "Choisissez un mot de passe pour voir vos cours, vos notes de cours et vos vidéos, et pour réserver votre prochaine séance :",
   "Set your password": "Créer votre mot de passe",
-  "Share for {name}": "Part de {name}",
   "Sign in and open Videos to watch it: {url}": "Connectez-vous et ouvrez Vidéos pour la regarder : {url}",
   "Someone": "Quelqu’un",
   "Someone asked to reset the password for your {business} player portal.": "Quelqu’un a demandé à réinitialiser le mot de passe de votre portail joueur {business}.",

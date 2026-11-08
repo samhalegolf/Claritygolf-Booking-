@@ -3038,10 +3038,9 @@
   opacity: 0.6;
 }
 
-/* "Who's paying?" under a group's price, and "Pay now / on the day" before
-   the confirm button and again after booking: the same pair of large choices. */
-.booking-group-payment,
-.booking-pay-choice {
+/* "Who's paying?" under a group's price, and "Pay now / on the day" after
+   booking: the same pair of large choices. */
+.booking-group-payment {
   display: grid;
   gap: 8px;
   margin: 6px 0 0;
@@ -3049,12 +3048,26 @@
   border: 0;
 }
 
-.booking-pay-choice {
-  margin: 14px 0 4px;
+/* Paying online ahead is an option, not a step: one quiet line above the
+   confirm button. Left alone, the booker pays on the day. */
+.booking-pay-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 2px;
+  color: var(--booking-muted, var(--c-text-soft));
+  font-size: var(--c-size-meta);
+  cursor: pointer;
 }
 
-.booking-group-payment legend,
-.booking-pay-choice legend {
+.booking-pay-now input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--coach-primary);
+}
+
+.booking-group-payment legend {
   margin-bottom: 6px;
   font-size: var(--c-size-meta);
   font-weight: 700;

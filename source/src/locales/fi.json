@@ -5259,5 +5259,6 @@
   "{taxName} (est.)": "{taxName} (arvio)",
   "Individual services": "Yksittäiset palvelut",
   "Add {item} to the sale": "Lisää {item} myyntiin",
-  "Could not load their passes. Pay another way or reopen the checkout.": "Heidän korttejaan ei voitu ladata. Maksa muulla tavalla tai avaa kassa uudelleen."
+  "Could not load their passes. Pay another way or reopen the checkout.": "Heidän korttejaan ei voitu ladata. Maksa muulla tavalla tai avaa kassa uudelleen.",
+  "Pay now by card ({amount})": "Maksa nyt kortilla ({amount})"
 }

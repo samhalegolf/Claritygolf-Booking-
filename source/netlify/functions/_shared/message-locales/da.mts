@@ -140,7 +140,6 @@ const catalog: Record<string, string> = {
   "Sent": "Sendt",
   "Set a password to see your lessons, lesson notes and videos, and to book your next session:": "Vælg en adgangskode for at se dine lektioner, lektionsnoter og videoer og for at booke din næste session:",
   "Set your password": "Vælg din adgangskode",
-  "Share for {name}": "Andel for {name}",
   "Sign in and open Videos to watch it: {url}": "Log ind og åbn Videoer for at se den: {url}",
   "Someone": "Nogen",
   "Someone asked to reset the password for your {business} player portal.": "Nogen har bedt om at nulstille adgangskoden til din spillerportal hos {business}.",
