@@ -1,13 +1,14 @@
 /**
- * Group shares: each player a booker invites to a custom group gets their own
- * invoice for their share, the booker is asked only for the rest, and an
+ * Paying for a lesson online: nothing is invoiced until Stripe says it was
+ * paid, then the webhook writes the invoice already marked paid. A player's
+ * share is an invoice of its own and the booker is asked only for the rest; an
  * invoice paid through its Stripe link is marked paid by the webhook.
  */
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkBookingLinks, ensureBookerPayment, ensureGroupShareInvoice, settleInvoiceCheckoutFromWebhook } from "../billing-api.mts";
+import { checkBookingLinks, ensureBookerPayment, settleInvoiceCheckoutFromWebhook, settleLessonCheckoutFromWebhook } from "../billing-api.mts";
 
 type Call = { url: string; method: string; body: string };
 type Route = (call: Call) => unknown;
@@ -21,7 +22,7 @@ function stubSupabase(routes: Array<[string, string, Route]>) {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const call = { url: decodeURIComponent(String(input)), method: (init?.method || "GET").toUpperCase(), body: String(init?.body || "") };
     calls.push(call);
-    const route = routes.find(([table, method]) => call.url.includes(`/rest/v1/${table}?`) && call.method === method);
+    const route = routes.find(([table, method]) => (call.url.includes(`/rest/v1/${table}?`) || call.url.endsWith(`/rest/v1/${table}`)) && call.method === method);
     if (!route) throw new Error(`unstubbed ${call.method} ${call.url}`);
     const answer = route[2](call);
     return answer === null ? new Response(null, { status: 204 }) : new Response(JSON.stringify(answer), { status: 200 });
@@ -96,52 +97,88 @@ test("each lesson's live share invoices are totalled, and a voided one is not", 
   }
 });
 
-test("an invite sent again reuses the player's share invoice rather than making a second", async () => {
+test("a split-group booker whose share is already paid is not sent to pay again", async () => {
   const stub = stubSupabase([
-    ["billing_invoice_items", "GET", (call) =>
-      call.url.includes("source_type=eq.group_share")
-        ? [{ invoice_id: "inv-a", source_id: "appt-1:attendee-1", line_total: 40 }]
-        : []],
-    ["billing_invoices", "GET", () => [{
-      id: "inv-a", invoice_number: "SHG-0102", status: "sent", total: 40, amount_paid: 0,
-      payment_link_url: "https://pay.stripe.com/plink_kept", currency: "NZD",
-    }]],
-    ["settings", "GET", () => []],
-  ]);
-  try {
-    const share = await ensureGroupShareInvoice("acct-1", {
-      bookingId: "appt-1", attendeeId: "attendee-1", name: "Jo", email: "jo@example.test",
-      amount: 40, description: "Shared Lesson", week: 0, day: 0,
-    }, "https://book.example");
-    assert.equal(share?.invoiceId, "inv-a");
-    assert.equal(share?.payUrl, "https://pay.stripe.com/plink_kept");
-    assert.equal(stub.calls.filter((call) => call.method === "POST").length, 0);
-  } finally {
-    stub.restore();
-  }
-});
-
-test("the booker paying their share of a split group pays a share invoice of their own", async () => {
-  const stub = stubSupabase([
-    ["pass_redemptions", "GET", () => []],
     ["billing_booking_invoice_links", "GET", () => []],
-    ["billing_invoice_items", "GET", (call) =>
-      call.url.includes("source_id=eq.appt-1:booker")
-        ? [{ invoice_id: "inv-b", source_id: "appt-1:booker", line_total: 80 }]
-        : [{ id: "line-1", source_type: "group_share", source_id: "appt-1:booker", line_total: 80 }]],
-    ["billing_invoices", "GET", () => [{
-      id: "inv-b", invoice_number: "SHG-0103", status: "sent", total: 80, amount_paid: 0,
-      payment_link_url: "https://pay.stripe.com/plink_booker", currency: "NZD",
-    }]],
-    ["settings", "GET", () => []],
+    ["billing_invoice_items", "GET", () => [{ invoice_id: "inv-b", source_id: "appt-1:booker", line_total: 80 }]],
+    ["billing_invoices", "GET", () => [{ id: "inv-b", status: "paid" }]],
   ]);
   try {
     const result = await ensureBookerPayment("acct-1", {
       bookingId: "appt-1", share: true, amount: 80, name: "Sam", email: "sam@example.test",
       description: "Shared Lesson", week: 0, day: 0,
     }, "https://book.example");
-    assert.deepEqual(result, { paid: false, payUrl: "https://pay.stripe.com/plink_booker" });
-    assert.equal(stub.calls.filter((call) => call.method === "POST").length, 0);
+    assert.deepEqual(result, { paid: true, payUrl: "" });
+    assert.equal(stub.calls.filter((call) => call.method !== "GET").length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+const lessonSession = (overrides: Record<string, unknown> = {}) => ({
+  id: "cs_1",
+  payment_status: "paid",
+  payment_intent: "pi_1",
+  amount_total: 16000,
+  metadata: {
+    account_id: "acct-1", lesson_payment: "booking", booking_id: "appt-1", attendee_id: "",
+    amount: "160", name: "Sam Hale", email: "sam@example.test", description: "1 Hour Golf Lesson", week: "0", day: "0",
+  },
+  ...overrides,
+});
+
+test("a lesson paid online is invoiced only now, already paid, against its booking", async () => {
+  const posts: Record<string, string[]> = {};
+  const patches: string[] = [];
+  const stub = stubSupabase([
+    ["settings", "GET", () => []],
+    ["billing_booking_invoice_links", "GET", () => []],
+    ["billing_booking_invoice_links", "POST", () => null],
+    ["billing_invoices", "GET", (call) => {
+      if (call.url.includes("reference=eq.")) return [];
+      if (call.url.includes("select=customer_name")) return [{ customer_name: "Sam Hale" }];
+      if (call.url.includes("invoice_number")) return [];
+      return [{ id: JSON.parse(posts.billing_invoices?.[0] || "[{}]")[0].id, invoice_number: "SHG-0500", status: "sent", total: 160, customer_name: "Sam Hale" }];
+    }],
+    ["billing_invoices", "POST", (call) => { (posts.billing_invoices ||= []).push(call.body); return null; }],
+    ["billing_invoices", "PATCH", (call) => { patches.push(call.body); return [{ id: "x" }]; }],
+    ["billing_invoice_items", "GET", () => []],
+    ["billing_invoice_items", "POST", (call) => { (posts.billing_invoice_items ||= []).push(call.body); return null; }],
+    ["people", "GET", () => []],
+  ]);
+  try {
+    const result = await settleLessonCheckoutFromWebhook("acct-1", lessonSession());
+    assert.equal(result?.paid, 160);
+    const invoice = JSON.parse(posts.billing_invoices[0])[0];
+    assert.equal(invoice.reference, "pi_1");
+    assert.equal(invoice.customer_name, "Sam Hale");
+    const line = JSON.parse(posts.billing_invoice_items[0])[0];
+    assert.equal(line.source_type, "booking");
+    assert.equal(line.source_id, "appt-1");
+    const paid = patches.map((body) => JSON.parse(body)).find((body) => body.status === "paid");
+    assert.equal(paid?.amount_paid, 160);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a lesson payment Stripe delivers twice is invoiced once", async () => {
+  const stub = stubSupabase([["billing_invoices", "GET", () => [{ id: "inv-paid" }]]]);
+  try {
+    assert.deepEqual(await settleLessonCheckoutFromWebhook("acct-1", lessonSession()), { invoice: "inv-paid", alreadySettled: "paid" });
+    assert.equal(stub.calls.filter((call) => call.method !== "GET").length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("an unpaid lesson checkout, or one for another business, writes nothing", async () => {
+  const stub = stubSupabase([]);
+  try {
+    assert.deepEqual(await settleLessonCheckoutFromWebhook("acct-1", lessonSession({ payment_status: "unpaid" })), { ignored: "not_paid", booking: "appt-1" });
+    assert.equal(await settleLessonCheckoutFromWebhook("acct-2", lessonSession()), null);
+    assert.equal(await settleLessonCheckoutFromWebhook("acct-1", { payment_status: "paid", metadata: { invoice_id: "inv-1", account_id: "acct-1" } }), null);
+    assert.equal(stub.calls.length, 0);
   } finally {
     stub.restore();
   }

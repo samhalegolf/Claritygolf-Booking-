@@ -140,7 +140,6 @@ const catalog: Record<string, string> = {
   "Sent": "Lähetetty",
   "Set a password to see your lessons, lesson notes and videos, and to book your next session:": "Aseta salasana, niin näet tuntisi, tuntimuistiinpanosi ja videosi ja voit varata seuraavan tuntisi:",
   "Set your password": "Aseta salasana",
-  "Share for {name}": "Osuus: {name}",
   "Sign in and open Videos to watch it: {url}": "Kirjaudu sisään ja avaa Videot katsoaksesi sen: {url}",
   "Someone": "Joku",
   "Someone asked to reset the password for your {business} player portal.": "Joku pyysi vaihtamaan salasanan {business}-pelaajaportaaliisi.",
