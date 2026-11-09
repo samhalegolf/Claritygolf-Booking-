@@ -5260,5 +5260,8 @@
   "Individual services": "Usługi pojedyncze",
   "Add {item} to the sale": "Dodaj {item} do sprzedaży",
   "Could not load their passes. Pay another way or reopen the checkout.": "Nie udało się wczytać karnetów. Zapłać inaczej lub otwórz kasę ponownie.",
-  "Pay now by card ({amount})": "Zapłać teraz kartą ({amount})"
+  "Pay now by card ({amount})": "Zapłać teraz kartą ({amount})",
+  "Their name": "Imię obdarowanego",
+  "The gift card it comes on": "Karta podarunkowa, na której jest drukowany",
+  "A preview of the gift card": "Podgląd karty podarunkowej"
 }

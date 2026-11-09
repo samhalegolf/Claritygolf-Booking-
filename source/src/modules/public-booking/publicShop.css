@@ -35,3 +35,7 @@
   margin-right: 6px;
   vertical-align: -2px;
 }
+
+.public-booking .shop-gift-card {
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
+}

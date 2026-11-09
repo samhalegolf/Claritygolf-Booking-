@@ -5260,5 +5260,8 @@
   "Individual services": "Yksittäiset palvelut",
   "Add {item} to the sale": "Lisää {item} myyntiin",
   "Could not load their passes. Pay another way or reopen the checkout.": "Heidän korttejaan ei voitu ladata. Maksa muulla tavalla tai avaa kassa uudelleen.",
-  "Pay now by card ({amount})": "Maksa nyt kortilla ({amount})"
+  "Pay now by card ({amount})": "Maksa nyt kortilla ({amount})",
+  "Their name": "Saajan nimi",
+  "The gift card it comes on": "Lahjakortti, jolle se tulostetaan",
+  "A preview of the gift card": "Lahjakortin esikatselu"
 }

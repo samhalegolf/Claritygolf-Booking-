@@ -1,0 +1,19 @@
+.gift-card-face {
+  position: relative;
+  container-type: inline-size;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.gift-card-face img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gift-card-face-text {
+  position: absolute;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}

@@ -6788,25 +6788,29 @@ type OnlineShopState = {
 };
 
 async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
-  const [shippingValue, connection, services, products, currency, methods, branding] = await Promise.all([
+  const [shippingValue, connection, services, products, currency, methods, branding, giftCardValue] = await Promise.all([
     readSettingValue(accountId, ONLINE_SHOP_SHIPPING_SETTING),
     accountStripeConnection(accountId),
     readServiceList(accountId),
     supabase("billing_products_services", {
       query:
-        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,variants,track_stock,stock_level,gift_card_design` +
+        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,variants,track_stock,stock_level,gift_card_design,voucher_item_id,voucher_shows_value` +
         `&account_id=eq.${encodeFilter(accountId)}&sell_online=is.true`,
-    }),
+    }) as Promise<Array<Record<string, unknown>>>,
     resolveDefaultCurrency(accountId),
     listPaymentMethodRows(accountId),
     resolveInvoiceBranding(accountId),
+    readSettingValue(accountId, GIFT_CARD_SETTING),
   ]);
   const shippingFee = round2(cleanNumber(shippingValue, 0, { min: 0, max: 100000 }));
   // Clarity Pay only, like the player portal: a business on its own Stripe
   // takes invoice payments and nothing else.
   const method = methods.find((entry) => entry.kind === "clarity_pay" && entry.active);
   const canTakeCards = stripeCredentialStatus(connection).features.portal && Boolean(method);
-  const items = onlineShopItems(services, products, currency);
+  const items = onlineShopItems(services, products, currency, {
+    standard: parseGiftCardDesign(giftCardValue),
+    itemNames: await voucherItemNames(accountId, services, products),
+  });
   const blocker = !canTakeCards ? "card_payments" : !items.length ? "nothing_for_sale" : "";
   return {
     open: !blocker,
@@ -6817,6 +6821,41 @@ async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
     paymentMethodId: method?.id || "",
     shippingFee,
   };
+}
+
+/**
+ * What the shop's vouchers are for, by till id, so their gift card preview
+ * can print it: lesson types from the service list, products read by id (a
+ * voucher can be for a product that is not on the website itself).
+ */
+async function voucherItemNames(accountId: string, services: unknown[], products: Array<Record<string, unknown>>) {
+  const ids = [
+    ...new Set(
+      products
+        .filter((row) => row.is_voucher === true)
+        .map((row) => cleanString(row.voucher_item_id, "", 160))
+        .filter(Boolean),
+    ),
+  ];
+  const names = new Map<string, string>();
+  for (const id of ids.filter((entry) => entry.startsWith(LESSON_ITEM_PREFIX))) {
+    const service = services.find((entry) => String((entry as Record<string, unknown>)?.id || "") === id.slice(LESSON_ITEM_PREFIX.length));
+    const name = cleanString((service as Record<string, unknown> | undefined)?.name, "", 180);
+    if (name) names.set(id, name);
+  }
+  const productIds = ids.filter((entry) => !entry.startsWith(LESSON_ITEM_PREFIX));
+  if (productIds.length) {
+    const rows = (await supabase("billing_products_services", {
+      query:
+        `select=id,name&account_id=eq.${encodeFilter(accountId)}` +
+        `&id=in.(${encodeURIComponent(productIds.map((id) => `"${id.replace(/"/g, "")}"`).join(","))})`,
+    })) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const name = cleanString(row.name, "", 180);
+      if (name) names.set(String(row.id ?? ""), name);
+    }
+  }
+  return names;
 }
 
 /** The shop as the public page sees it. Closed means no items at all. */
