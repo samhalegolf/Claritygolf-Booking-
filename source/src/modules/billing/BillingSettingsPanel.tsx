@@ -345,7 +345,7 @@ export function BillingSettingsPanel(props: BillingSettingsPanelProps) {
             />
             <span>{t("Money is received straight away")}</span>
           </label>
-          <p className="field-help">{t("Leave that unticked for methods like On account, where the sale is recorded as owed and marked paid later.")}</p>
+          <p className="field-help">{t("Leave that unticked for methods like On account: the sale is saved as a draft invoice under Billing > Invoices, to email and be paid later.")}</p>
           <button
             className="outline-button"
             disabled={posMethodSaveState === "saving"}
@@ -385,7 +385,7 @@ export function BillingSettingsPanel(props: BillingSettingsPanelProps) {
                     <strong>{method.name}</strong>
                     <em>
                       {method.kind === "clarity_pay" ? t("Stripe - card, Apple Pay, Google Pay") : t("Manual")}
-                      {method.settlesImmediately ? "" : t(" - recorded as owed")}
+                      {method.settlesImmediately ? "" : t(" - saved as an invoice")}
                       {method.active ? "" : t(" - inactive")}
                     </em>
                   </span>

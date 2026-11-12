@@ -9610,6 +9610,22 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
   // Called by the checkout modal whenever a sale is created or settles. Both the
   // POS list and the per-lesson paid map need to reflect it immediately.
+  // An invoice raised from either checkout (Invoice, or an On account sale).
+  // Its lessons are on an invoice now, so they leave the till's unpaid list
+  // straight away rather than on the next reload.
+  function handleTillInvoiceSaved(saved: { id: string; invoiceNumber: string; bookingIds: string[] }) {
+    if (saved.bookingIds.length) {
+      setInvoicedBookingIds((current) => {
+        const next = { ...current };
+        for (const bookingId of saved.bookingIds) {
+          next[bookingId] = { invoiceId: saved.id, invoiceNumber: saved.invoiceNumber };
+        }
+        return next;
+      });
+    }
+    void fetchRecentInvoices().catch(() => {});
+  }
+
   function handlePosSaleChanged(sale: PosTransaction) {
     setPosTransactions((current) => {
       const index = current.findIndex((entry) => entry.id === sale.id);
@@ -16815,20 +16831,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               phoneSaleOpen={phoneLayout && sellSaleOpen}
               onPhoneSaleOpenChange={setSellSaleOpen}
               paymentTermsDays={invoiceSettings.paymentTermsDays}
-              onInvoiceSent={(sent) => {
-                // The lessons are on an invoice now, so they leave the till's
-                // unpaid list straight away rather than on the next reload.
-                if (sent.bookingIds.length) {
-                  setInvoicedBookingIds((current) => {
-                    const next = { ...current };
-                    for (const bookingId of sent.bookingIds) {
-                      next[bookingId] = { invoiceId: sent.id, invoiceNumber: sent.invoiceNumber };
-                    }
-                    return next;
-                  });
-                }
-                void fetchRecentInvoices().catch(() => {});
-              }}
+              onInvoiceSaved={handleTillInvoiceSaved}
             />
           </Suspense>
         )}
@@ -18444,6 +18447,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             formatMoney={formatMoney}
             onClose={() => setPosCheckout(null)}
             onCompleted={handlePosSaleChanged}
+            onInvoiceSaved={handleTillInvoiceSaved}
+            paymentTermsDays={invoiceSettings.paymentTermsDays}
+            taxRate={invoiceSettings.taxRate}
             onToast={(message) => setToast({ message })}
             clientNames={clientNamesById}
             onClientEmailSaved={handleClientEmailSaved}

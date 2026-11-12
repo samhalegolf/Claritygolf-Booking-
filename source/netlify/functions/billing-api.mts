@@ -4481,10 +4481,20 @@ export async function createPosTransaction(
     throw Object.assign(new Error("A pass can only settle a lesson with a price."), { status: 400 });
   }
 
+  // Money that is owed belongs on the invoice list, where it is numbered,
+  // chased and aged. The checkouts save an On account sale as a draft invoice
+  // (src/modules/billing/tillInvoice.ts); it is never a POS sale.
+  if (method.kind === "custom" && !method.settlesImmediately) {
+    throw Object.assign(new Error(`${method.name} sales are saved as invoices. Reload and try again.`), {
+      status: 400,
+      code: "ON_ACCOUNT_IS_AN_INVOICE",
+    });
+  }
+
   // Clarity Pay starts pending and only becomes paid once Stripe confirms it.
   // Manual methods are recorded by a human who just took the money, so they are
-  // paid on creation - except "On account", which is money still owed.
-  const status = method.kind === "clarity_pay" ? "pending" : method.settlesImmediately ? "paid" : "pending";
+  // paid on creation.
+  const status = method.kind === "clarity_pay" ? "pending" : "paid";
   const listedAmountRaw = body?.listedAmount;
   const source = origin.online
     ? "online"
@@ -4675,8 +4685,8 @@ export async function createPosTransaction(
 
   await insertPosItems(accountId, String(row.id), items);
   // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
-  // the shelf and the passes and voucher codes are issued now. Clarity Pay and
-  // On account wait for their status change: a pending Clarity Pay payment is
+  // the shelf and the passes and voucher codes are issued now. Clarity Pay
+  // waits for its status change: a pending Clarity Pay payment is
   // not a purchase, and credits or codes handed out before it clears are
   // handed out for nothing.
   const { issuedPasses } = status === "paid" ? await applyPosPaidEffects(accountId, row, items) : { issuedPasses: [] };
@@ -4756,9 +4766,8 @@ export async function updatePosTransactionStatus(accountId: string, id: string, 
     prefer: "return=representation",
   });
   if (!rows.length) throw Object.assign(new Error("Transaction not found."), { status: 404 });
-  // Marking a sale paid takes its items off the shelf and, for an On account
-  // sale, is the moment the package was bought; refunding or voiding puts the
-  // stock back. Each effect happens exactly once however many times the status
+  // Marking a sale paid takes its items off the shelf and issues what it
+  // bought; refunding or voiding puts the stock back. Each effect happens exactly once however many times the status
   // is flipped.
   //
   // Note what is NOT here: refunding or voiding does not take a pass back. A
@@ -4920,8 +4929,8 @@ export async function emailPosReceipt(accountId: string, id: string, body: Recor
 }
 
 // --- Settling a sale ---------------------------------------------------------
-// What "paid" does to a sale, in one place. Manual methods (Cash, On account
-// marked paid) run the effects directly; a card payment goes through
+// What "paid" does to a sale, in one place. Manual methods (Cash, Eftpos)
+// run the effects directly; a card payment goes through
 // settlePosTransaction, which adds the paid transition and the tender records
 // around them. Every effect here is idempotent on its own, so a retry finishes
 // whatever an interrupted call left undone.
