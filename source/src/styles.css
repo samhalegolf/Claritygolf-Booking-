@@ -13456,6 +13456,12 @@
   color: var(--c-muted);
 }
 
+/* What the tile is when the name alone can't say: a pass or a gift voucher. */
+.sell-tile-kind {
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
 .sell-tile-stock.low {
   color: var(--c-danger);
   font-weight: 700;

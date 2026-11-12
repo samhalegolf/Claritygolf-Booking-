@@ -5,6 +5,8 @@
 // the sort that is easy to get wrong invisibly: a coach searching for something
 // that exists and being shown an empty shelf.
 
+import { t } from "../../lib/i18n";
+
 export type CatalogTile = {
   id: string;
   name: string;
@@ -15,6 +17,18 @@ export type CatalogTile = {
 };
 
 const CATALOG_TILE_LIMIT = 120;
+
+/**
+ * What a catalog item actually is, said in words. A package and a gift voucher
+ * can share a name and a price ("5 x 1 Hour Golf Lessons"), but one puts
+ * credits on the client's profile and the other prints a code to give away.
+ */
+export function catalogItemTag(item: { kind: string; isVoucher?: boolean } | undefined) {
+  if (!item) return "";
+  if (item.isVoucher === true) return t("Gift voucher - gives a code");
+  if (item.kind === "package") return t("Pass - credits on their profile");
+  return "";
+}
 
 /**
  * Typing a name is asking for that thing, wherever it lives.

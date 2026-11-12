@@ -1,4 +1,6 @@
-// "Email them a receipt?" on the done screen of both checkouts.
+// "Email them a receipt?" on the done screen of both checkouts. For an On
+// account sale it is "Email them the invoice?" instead: the sale is a draft
+// invoice, and sending it is what moves it to sent.
 //
 // Two shapes. A customer with an address on file gets a yes/no. One without
 // gets the same question with an address field, and when the till attached a
@@ -9,10 +11,15 @@ import { useState } from "react";
 import { Check } from "lucide-react";
 import { ClarityEmail } from "../shared/ClarityIcons";
 import { postPosJson } from "./posCheckoutPoll";
+import { sendTillInvoice } from "./tillInvoice";
 import { t } from "../../lib/i18n";
 
+export type ReceiptEmailTarget =
+  | { kind: "receipt"; transactionId: string }
+  | { kind: "invoice"; invoiceId: string; invoiceNumber: string; includePaymentLink: boolean };
+
 export type ReceiptEmailPromptProps = {
-  transactionId: string;
+  target: ReceiptEmailTarget;
   // What the sale already knows. Empty means ask for one.
   email: string;
   // The attached client, if any. Only a real client can have an email saved to
@@ -23,7 +30,7 @@ export type ReceiptEmailPromptProps = {
 };
 
 export function ReceiptEmailPrompt({
-  transactionId,
+  target,
   email,
   clientId,
   clientName,
@@ -36,7 +43,9 @@ export function ReceiptEmailPrompt({
   const [saved, setSaved] = useState(false);
 
   const onFile = email.trim();
-  const canSave = Boolean(clientId) && !clientId.startsWith("appointment-") && !onFile;
+  const isInvoice = target.kind === "invoice";
+  // Only the receipt endpoint saves a typed address to the client.
+  const canSave = !isInvoice && Boolean(clientId) && !clientId.startsWith("appointment-") && !onFile;
 
   async function send() {
     const to = onFile || address.trim();
@@ -47,7 +56,13 @@ export function ReceiptEmailPrompt({
     setState("sending");
     setError("");
     try {
-      const result = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(transactionId)}/receipt`, {
+      if (target.kind === "invoice") {
+        const result = await sendTillInvoice(target.invoiceId, to, target.includePaymentLink);
+        setSentTo(result.recipient || to);
+        setState("sent");
+        return;
+      }
+      const result = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(target.transactionId)}/receipt`, {
         email: to,
         saveToClient: canSave,
       })) as { recipient?: string; savedToClient?: boolean };
@@ -56,7 +71,13 @@ export function ReceiptEmailPrompt({
       if (result.savedToClient && canSave) onClientEmailSaved?.(clientId, result.recipient || to);
       setState("sent");
     } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : t("The receipt could not be sent."));
+      setError(
+        sendError instanceof Error
+          ? sendError.message
+          : isInvoice
+            ? t("The invoice could not be sent.")
+            : t("The receipt could not be sent."),
+      );
       setState("ask");
     }
   }
@@ -67,7 +88,9 @@ export function ReceiptEmailPrompt({
     return (
       <div className="receipt-email sent" role="status">
         <Check size={15} />
-        <span>{t("Receipt sent to {sentTo}.", { sentTo })}{saved ? (clientName ? t(" Saved to {clientName}'s profile.", { clientName }) : t(" Saved to their profile.")) : ""}
+        <span>{target.kind === "invoice"
+          ? t("Invoice {number} sent to {sentTo}.", { number: target.invoiceNumber, sentTo })
+          : t("Receipt sent to {sentTo}.", { sentTo })}{saved ? (clientName ? t(" Saved to {clientName}'s profile.", { clientName }) : t(" Saved to their profile.")) : ""}
         </span>
       </div>
     );
@@ -77,7 +100,13 @@ export function ReceiptEmailPrompt({
     <div className="receipt-email">
       <p className="receipt-email-question">
         <ClarityEmail size={15} />
-        {onFile ? <>{t("Email a receipt to {onFile}?", { onFile })}</> : <>{t("Email a receipt?")}</>}
+        {target.kind === "invoice"
+          ? onFile
+            ? t("Email invoice {number} to {onFile}?", { number: target.invoiceNumber, onFile })
+            : t("Email invoice {number}?", { number: target.invoiceNumber })
+          : onFile
+            ? t("Email a receipt to {onFile}?", { onFile })
+            : t("Email a receipt?")}
       </p>
       {!onFile && (
         <input
@@ -108,7 +137,7 @@ export function ReceiptEmailPrompt({
           onClick={() => void send()}
           type="button"
         >
-          {state === "sending" ? t("Sending...") : onFile ? t("Yes, send") : t("Send receipt")}
+          {state === "sending" ? t("Sending...") : onFile ? t("Yes, send") : isInvoice ? t("Send invoice") : t("Send receipt")}
         </button>
       </div>
     </div>
