@@ -16814,6 +16814,21 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               onClientEmailSaved={handleClientEmailSaved}
               phoneSaleOpen={phoneLayout && sellSaleOpen}
               onPhoneSaleOpenChange={setSellSaleOpen}
+              paymentTermsDays={invoiceSettings.paymentTermsDays}
+              onInvoiceSent={(sent) => {
+                // The lessons are on an invoice now, so they leave the till's
+                // unpaid list straight away rather than on the next reload.
+                if (sent.bookingIds.length) {
+                  setInvoicedBookingIds((current) => {
+                    const next = { ...current };
+                    for (const bookingId of sent.bookingIds) {
+                      next[bookingId] = { invoiceId: sent.id, invoiceNumber: sent.invoiceNumber };
+                    }
+                    return next;
+                  });
+                }
+                void fetchRecentInvoices().catch(() => {});
+              }}
             />
           </Suspense>
         )}

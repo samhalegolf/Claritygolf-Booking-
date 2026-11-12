@@ -13239,9 +13239,26 @@
 
 .sell-actions {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* Park, Invoice, then Pay taking the rest. */
+  grid-template-columns: auto auto 1fr;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* "Include payment link" on the till's invoice step. */
+.sell-invoice-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--c-size-secondary);
+}
+
+.sell-invoice-link input {
+  margin: 0;
+  accent-color: var(--c-accent);
 }
 
 /* The one button on the screen that has to be findable without looking. */
