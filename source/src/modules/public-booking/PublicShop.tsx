@@ -9,6 +9,8 @@ import { publicApi, publicBookingPath, publicShopBusiness } from "./bookingScree
 import { t, tn } from "../../lib/i18n";
 import { resolvedMarketFromWire } from "../../../netlify/functions/_shared/market-profile.mts";
 import type { BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
+import type { OnlineGiftCard } from "../../../netlify/functions/_shared/online-shop.mts";
+import { GiftCardPreview, shopGiftCardText } from "../shared/GiftCardPreview";
 
 /**
  * The shop beside a business's booking page: packages and gift vouchers,
@@ -33,6 +35,8 @@ type ShopItem = {
   fulfilment: "collect" | "ship" | "download" | "";
   variants: Array<{ id: string; name: string; price: number | null; description: string }>;
   stock: number | null;
+  /** A voucher's gift card, to preview. Null when it has none, and on anything else. */
+  giftCard: OnlineGiftCard | null;
 };
 
 type OrderSummary = {
@@ -294,6 +298,14 @@ export default function PublicShop() {
                       </select>
                     ) : null}
                     {variant?.description ? <p className="shop-fine-print">{variant.description}</p> : null}
+                    {item.giftCard ? (
+                      <GiftCardPreview
+                        className="shop-gift-card"
+                        design={item.giftCard.design}
+                        text={shopGiftCardText(item.giftCard, details.recipientName || details.name, money(price, account))}
+                        label={t("A preview of the gift card")}
+                      />
+                    ) : null}
                     <input autoComplete="name" className="w-name" onChange={set("name")} placeholder={t("Your name *")} value={details.name} />
                     <input autoComplete="email" className="w-email" onChange={set("email")} placeholder={t("Email *")} type="email" value={details.email} />
                     {gift ? (

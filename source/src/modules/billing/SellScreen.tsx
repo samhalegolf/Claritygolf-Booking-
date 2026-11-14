@@ -44,6 +44,9 @@ import { remainingAfterCoupon } from "./couponMath";
 import { canHoldCredit, voucherRedemption, voucherSaleLines } from "../../../netlify/functions/_shared/voucher-redemption.mts";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
+import { catalogItemTag } from "./catalogSearch";
+import { createTillInvoice, invoiceRequest, isOnAccount, localDateValue, sendTillInvoice } from "./tillInvoice";
+import type { TillInvoice, TillInvoiceLine } from "./tillInvoice";
 import { tillLessonGroups, tillLessonIsUpcoming, tillLessonWhen } from "./tillLessons";
 import type { TillLesson } from "./tillLessons";
 import {
@@ -97,7 +100,14 @@ export type SellScreenProps = {
   // between them.
   phoneSaleOpen: boolean;
   onPhoneSaleOpenChange: (open: boolean) => void;
+  // Days from today an invoice from the till is due, from Billing Settings.
+  paymentTermsDays: number;
+  // An invoice was created from the till (Invoice button or On account). App
+  // marks its lessons as invoiced so they drop off the unpaid list, and
+  // refreshes its invoice list.
+  onInvoiceSaved: (saved: { id: string; invoiceNumber: string; bookingIds: string[] }) => void;
 };
+
 
 type TabKey = "all" | BillingCatalogKind;
 
@@ -167,6 +177,8 @@ export function SellScreen({
   onClientEmailSaved,
   phoneSaleOpen,
   onPhoneSaleOpenChange,
+  paymentTermsDays,
+  onInvoiceSaved,
 }: SellScreenProps) {
   const phoneLayout = usePhoneLayout();
   const payPanelRef = useRef<HTMLElement>(null);
@@ -202,8 +214,22 @@ export function SellScreen({
 
   // Payment overlay. "closed" -> "method" -> ("coupon" to confirm a part
   // payment, "cash" for tendering) -> ("tap" in the staff app, else
-  // "qr") -> "done".
-  const [payStage, setPayStage] = useState<"closed" | "method" | "coupon" | "cash" | "tap" | "qr" | "done">("closed");
+  // "qr") -> "done". The Invoice button goes "closed" -> "invoice" ->
+  // "invoiced" instead: nothing is taken at the counter, the customer is
+  // emailed an invoice and pays it later. Choosing On account goes "method" ->
+  // "onAccount": the sale is saved as a draft invoice, and emailing it from
+  // there moves it to sent.
+  const [payStage, setPayStage] = useState<
+    "closed" | "method" | "coupon" | "cash" | "tap" | "qr" | "done" | "invoice" | "invoiced" | "onAccount"
+  >("closed");
+  const [invoiceEmail, setInvoiceEmail] = useState("");
+  const [invoiceDueDate, setInvoiceDueDate] = useState("");
+  const [invoicePayLink, setInvoicePayLink] = useState(false);
+  // Set once the invoice exists, so a failed email is retried as a resend
+  // rather than a second invoice with a second number.
+  const [invoice, setInvoice] = useState<TillInvoice | null>(null);
+  const [invoiceRecipient, setInvoiceRecipient] = useState("");
+  const [invoiceLinked, setInvoiceLinked] = useState(false);
   const tapToPay = useTapToPay();
   const [tenders, setTenders] = useState<PosTender[]>([]);
   const [methodId, setMethodId] = useState("");
@@ -231,6 +257,10 @@ export function SellScreen({
   const redemption = coupon
     ? voucherRedemption(coupon, voucherSaleLines(lines.filter((line) => line.productId)), total, { hasClient: canHoldCredit(customerId) })
     : null;
+  // The pass, lesson or product the held voucher is for, when the till sells it.
+  const coveredItem = coupon?.coversItemId
+    ? catalog.find((item) => item.id === coupon.coversItemId && item.active !== false && item.isVoucher !== true)
+    : undefined;
   const couponAmount = redemption?.pays ?? 0;
   const couponCovers = Boolean(coupon) && couponAmount > 0 && couponAmount >= total;
   // Only credit that has been put down counts against what is owed. A held
@@ -338,6 +368,9 @@ export function SellScreen({
     setCouponApplied(false);
     setIssuedCoupons([]);
     setTenders([]);
+    setInvoice(null);
+    setInvoiceRecipient("");
+    setInvoiceLinked(false);
     setPayStage("closed");
     // A new sale starts at the catalogue on a phone.
     onPhoneSaleOpenChange(false);
@@ -485,6 +518,10 @@ export function SellScreen({
   function chooseMethod(method: PosPaymentMethod, afterpay = false) {
     setMethodId(method.id);
     setError("");
+    if (isOnAccount(method)) {
+      void putOnAccount();
+      return;
+    }
     // Cash is the only method where the till needs to work out change, so it is
     // the only one that gets a tender step.
     if (method.kind === "custom" && /cash/i.test(method.name) && dueNow > 0) {
@@ -637,6 +674,156 @@ export function SellScreen({
     if (result !== "paid") setError(checkAgainMessage(result));
   }
 
+  // --- Invoice ---------------------------------------------------------------
+
+  // A gift voucher's code is minted when the till records the sale, and a paid
+  // invoice has no way to mint one, so vouchers are paid for at the counter.
+  const hasVoucherLine = lines.some(
+    (line) => line.productId && catalog.some((item) => item.id === line.productId && item.isVoucher === true),
+  );
+
+  // Why this docket can't go on an invoice, or "" when it can.
+  function invoiceBlocker() {
+    if (!customerName.trim()) return t("Add the customer first - an invoice is addressed to someone.");
+    if (hasVoucherLine) return t("Gift vouchers can't be invoiced - take payment for them at the till.");
+    if (coupon) return t("Remove the coupon first - it can only be spent on a sale paid at the till.");
+    return "";
+  }
+
+  function invoiceLines(): TillInvoiceLine[] {
+    return lines.map((line) => {
+      const item = line.productId ? catalog.find((entry) => entry.id === line.productId) : undefined;
+      return {
+        // A lesson line is linked to its booking, which is what marks the
+        // lesson invoiced. A package keeps its lesson-type id so paying the
+        // invoice issues the credits.
+        sourceType: line.bookingId ? "booking" : line.productId ? "product" : "manual",
+        sourceId: line.bookingId || item?.sourceServiceId || line.productId || "",
+        description: line.detail ? `${line.name} (${line.detail})` : line.name,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        taxRate: line.taxRate,
+      };
+    });
+  }
+
+  const hasClarityPay = methods.some((method) => method.kind === "clarity_pay");
+
+  // On account: the money is owed, so the sale is saved straight onto the
+  // invoice list as a draft. The done screen offers to email it, which is what
+  // makes it sent; saying no leaves it as a draft to send later.
+  async function putOnAccount() {
+    const blocked = invoiceBlocker();
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await createTillInvoice({
+        customerId,
+        customerName,
+        customerEmail,
+        dueDate: localDateValue(paymentTermsDays),
+        currency,
+        items: invoiceLines(),
+      });
+      setInvoice(created);
+      setPayStage("onAccount");
+      onInvoiceSaved({ id: created.id, invoiceNumber: created.invoiceNumber, bookingIds });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : t("Could not save the invoice."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openInvoice() {
+    if (!lines.length) return;
+    const blocked = invoiceBlocker();
+    if (blocked) {
+      onToast(blocked);
+      return;
+    }
+    setError("");
+    setInvoiceEmail(customerEmail);
+    setInvoiceDueDate(localDateValue(paymentTermsDays));
+    // Same default as the invoice editor: a pay-online link whenever Clarity
+    // Pay is set up.
+    setInvoicePayLink(hasClarityPay);
+    setPayStage("invoice");
+  }
+
+  async function sendAsInvoice() {
+    const email = invoiceEmail.trim();
+    if (!email) {
+      setError(t("Enter the email address to send the invoice to."));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    let created = invoice;
+    try {
+      if (!created) {
+        created = await createTillInvoice({
+          customerId,
+          customerName,
+          customerEmail: email,
+          dueDate: invoiceDueDate,
+          currency,
+          items: invoiceLines(),
+        });
+        setInvoice(created);
+      }
+      const sent = await sendTillInvoice(created.id, email, invoicePayLink);
+      setInvoiceRecipient(sent.recipient || email);
+      setInvoiceLinked(Boolean(sent.paymentLinkUrl));
+      setPayStage("invoiced");
+      onInvoiceSaved({ id: created.id, invoiceNumber: created.invoiceNumber, bookingIds });
+    } catch (invoiceError) {
+      const message = invoiceError instanceof Error ? invoiceError.message : t("Could not send invoice.");
+      setError(
+        created
+          ? `${message} ${t("{number} is saved as a draft - press Send again to retry.", { number: created.invoiceNumber })}`
+          : message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Backing out of an invoice that was created but never emailed deletes it:
+  // it is still a draft, and leaving it would hold this sale's lessons on an
+  // invoice nobody received.
+  async function closeInvoice() {
+    if (invoice) {
+      setBusy(true);
+      try {
+        // Checked first: if the email did go out and only the answer was lost,
+        // the invoice is sent and must stay.
+        const current = (await invoiceRequest(`/api/billing/invoices/${encodeURIComponent(invoice.id)}`, "GET")) as {
+          invoice?: { status?: string };
+        };
+        if (current.invoice?.status === "draft") {
+          await invoiceRequest(`/api/billing/invoices/${encodeURIComponent(invoice.id)}`, "DELETE");
+        } else {
+          onInvoiceSaved({ id: invoice.id, invoiceNumber: invoice.invoiceNumber, bookingIds });
+          onToast(t("{number} was sent.", { number: invoice.invoiceNumber }));
+          setBusy(false);
+          resetSale();
+          return;
+        }
+      } catch {
+        onToast(t("{number} is still saved as a draft under Billing > Invoices.", { number: invoice.invoiceNumber }));
+      }
+      setBusy(false);
+      setInvoice(null);
+    }
+    setError("");
+    setPayStage("closed");
+  }
+
   // A Clarity Pay sale that never cleared has to be voided on the way out,
   // otherwise a pending row and a live Stripe session are left behind with
   // nothing watching them.
@@ -687,7 +874,9 @@ export function SellScreen({
       ? { label: "", go: () => setPayStage("method") }
       : payStage === "method"
         ? { label: "", go: () => setPayStage("closed") }
-        : payStage === "done"
+        : payStage === "invoice"
+          ? { label: "", go: () => void closeInvoice() }
+          : payStage === "done" || payStage === "invoiced" || payStage === "onAccount"
           ? { label: "", go: resetSale }
           : null;
 
@@ -844,6 +1033,7 @@ export function SellScreen({
             return (
               <button key={item.id} className="sell-tile" onClick={() => addItem(item)} type="button">
                 <span className="sell-tile-name">{item.name}</span>
+                {catalogItemTag(item) && <span className="sell-tile-kind">{catalogItemTag(item)}</span>}
                 <span className="sell-tile-price">{formatMoney(item.price, currency)}</span>
                 {item.trackStock && (
                   <span className={`sell-tile-stock${low ? " low" : ""}`}>
@@ -949,7 +1139,12 @@ export function SellScreen({
                 <em>
                   {line.detail
                     ? line.detail
-                    : `${line.sku ? `${line.sku} - ` : ""}${formatMoney(line.unitPrice, currency)} each`}
+                    : [
+                        catalogItemTag(catalog.find((item) => item.id === line.productId)),
+                        `${line.sku ? `${line.sku} - ` : ""}${formatMoney(line.unitPrice, currency)} each`,
+                      ]
+                        .filter(Boolean)
+                        .join(" - ")}
                 </em>
               </div>
               {line.bookingId ? (
@@ -1041,6 +1236,7 @@ export function SellScreen({
             setCoupon(null);
             setCouponApplied(false);
           }}
+          onAddCoveredItem={coveredItem ? () => addItem(coveredItem) : undefined}
         />
         {needsCustomerForPackage && (
           <p className="field-help">{t("A package puts credits on a profile - add the customer before taking payment.")}</p>
@@ -1054,6 +1250,13 @@ export function SellScreen({
             type="button"
             title={t("Put this sale aside and start another. It waits under Parked on this device.")}
           >{t("Park sale")}</button>
+          <button
+            className="outline-button"
+            disabled={!lines.length}
+            onClick={openInvoice}
+            type="button"
+            title={t("Email this sale to the customer as an invoice, with your payment instructions, to pay later.")}
+          >{t("Invoice")}</button>
           <button className="sell-pay-button" disabled={!lines.length} onClick={openPayment} type="button">{t("Pay {dueNow}", { dueNow: formatMoney(dueNow, currency) })}</button>
         </div>
 
@@ -1108,11 +1311,18 @@ export function SellScreen({
                   <ArrowLeft size={22} />
                 </button>
               ) : null}
-              <span>{t("Payment")}</span>
+              <span>{payStage === "invoice" || payStage === "invoiced" || payStage === "onAccount" ? t("Invoice") : t("Payment")}</span>
               {!phoneLayout && payStage !== "qr" && payStage !== "tap" && (
                 <button
                   className="icon-button small"
-                  onClick={() => (payStage === "done" ? resetSale() : setPayStage("closed"))}
+                  disabled={busy && payStage === "invoice"}
+                  onClick={() =>
+                    payStage === "done" || payStage === "invoiced" || payStage === "onAccount"
+                      ? resetSale()
+                      : payStage === "invoice"
+                        ? void closeInvoice()
+                        : setPayStage("closed")
+                  }
                   type="button"
                   aria-label={t("Close payment")}
                 >
@@ -1162,7 +1372,7 @@ export function SellScreen({
                     >
                       {method.kind === "clarity_pay" && <ClarityPayments size={15} />}
                       {method.name}
-                      {!method.settlesImmediately && <span className="pos-method-tag">{t("owed")}</span>}
+                      {isOnAccount(method) && <span className="pos-method-tag">{t("invoice")}</span>}
                     </button>
                   ))}
                   {/* Afterpay goes through Clarity Pay too, but straight to a QR
@@ -1184,6 +1394,110 @@ export function SellScreen({
                     ))}
                 </div>
                 {!payMethods.length && <p className="field-help">{t("No payment methods - add one under Billing > Settings.")}</p>}
+              </>
+            )}
+
+            {payStage === "invoice" && (
+              <>
+                <h2 className="sell-pay-total">{formatMoney(total, currency)}</h2>
+                <p className="field-help">
+                  {t("{name} is emailed an invoice with your payment instructions. Nothing is taken at the counter.", { name: customerName })}
+                </p>
+                <div className="settings-field">
+                  <label htmlFor="sell-invoice-email">{t("Send to")}</label>
+                  <input
+                    id="sell-invoice-email"
+                    type="email"
+                    value={invoiceEmail}
+                    disabled={busy || Boolean(invoice)}
+                    onChange={(event) => setInvoiceEmail(event.target.value)}
+                    placeholder={t("customer@email.com")}
+                    autoFocus={!invoiceEmail}
+                  />
+                </div>
+                <div className="settings-field">
+                  <label htmlFor="sell-invoice-due">{t("Due date")}</label>
+                  <input
+                    id="sell-invoice-due"
+                    type="date"
+                    value={invoiceDueDate}
+                    disabled={busy || Boolean(invoice)}
+                    onChange={(event) => setInvoiceDueDate(event.target.value)}
+                  />
+                </div>
+                <label className="sell-invoice-link" title={t("Email a Clarity Pay link with this invoice so the client can pay it online")}>
+                  <input
+                    checked={invoicePayLink}
+                    disabled={busy}
+                    onChange={(event) => setInvoicePayLink(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{t("Include payment link")}</span>
+                </label>
+                <div className="panel-actions">
+                  <button className="outline-button" disabled={busy} onClick={() => void closeInvoice()} type="button">{t("Back")}</button>
+                  <button
+                    className="primary-button"
+                    disabled={busy || !invoiceEmail.trim()}
+                    onClick={() => void sendAsInvoice()}
+                    type="button"
+                  >
+                    {busy ? t("Sending...") : t("Send invoice")}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {payStage === "invoiced" && invoice && (
+              <>
+                <div className="pos-done">
+                  <Check size={22} />
+                  <div>
+                    <strong>{formatMoney(invoice.total, invoice.currency)}</strong>
+                    <span>{t("Invoice {number}", { number: invoice.invoiceNumber })}</span>
+                  </div>
+                </div>
+                <p className="field-help">
+                  {invoiceLinked
+                    ? t("Emailed to {email} with a link to pay online.", { email: invoiceRecipient })
+                    : t("Emailed to {email}.", { email: invoiceRecipient })}{" "}
+                  {t("It shows as owed under Billing > Invoices until it is paid.")}
+                </p>
+                <div className="panel-actions">
+                  <button className="primary-button" onClick={resetSale} type="button">
+                    <ClarityStore size={16} />{t("New sale")}</button>
+                </div>
+              </>
+            )}
+
+            {payStage === "onAccount" && invoice && (
+              <>
+                <div className="pos-done">
+                  <Check size={22} />
+                  <div>
+                    <strong>{formatMoney(invoice.total, invoice.currency)}</strong>
+                    <span>{t("On account - invoice {number}", { number: invoice.invoiceNumber })}</span>
+                  </div>
+                </div>
+                <p className="field-help">
+                  {t("Saved under Billing > Invoices as a draft. Emailing it now marks it sent; otherwise send it from there later.")}
+                </p>
+                <ReceiptEmailPrompt
+                  key={invoice.id}
+                  target={{
+                    kind: "invoice",
+                    invoiceId: invoice.id,
+                    invoiceNumber: invoice.invoiceNumber,
+                    includePaymentLink: hasClarityPay,
+                  }}
+                  email={customerEmail}
+                  clientId={customerId}
+                  clientName={customerName}
+                />
+                <div className="panel-actions">
+                  <button className="primary-button" onClick={resetSale} type="button">
+                    <ClarityStore size={16} />{t("New sale")}</button>
+                </div>
               </>
             )}
 
@@ -1334,12 +1648,9 @@ export function SellScreen({
                       : t("{issuedPasses} are now on their profile.", { issuedPasses: issuedPasses.join(", ") })}
                   </p>
                 )}
-                {sale.status === "pending" && (
-                  <p className="field-help">{t("Recorded as owed on {paymentMethodName}. Mark it paid from Billing > POS Transactions once it is settled.", { paymentMethodName: sale.paymentMethodName })}</p>
-                )}
                 <ReceiptEmailPrompt
                   key={sale.id}
-                  transactionId={sale.id}
+                  target={{ kind: "receipt", transactionId: sale.id }}
                   email={customerEmail || sale.customerEmail || ""}
                   clientId={customerId}
                   clientName={customerName}

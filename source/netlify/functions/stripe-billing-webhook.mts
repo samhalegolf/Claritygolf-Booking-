@@ -7,6 +7,7 @@ import { getDatabase } from "./_shared/database.mts";
 import {
   refundPosSaleFromStripeCharge,
   settleInvoiceCheckoutFromWebhook,
+  settleLessonCheckoutFromWebhook,
   settlePosCheckoutFromWebhook,
   settleTerminalPaymentFromWebhook,
 } from "./billing-api.mts";
@@ -181,10 +182,12 @@ async function handleEvent(event: Record<string, any>, object: Record<string, an
     case "payment_intent.succeeded":
       return settleTerminalPaymentFromWebhook(accountId, String(object?.id || ""));
     case "checkout.session.completed":
-      // An invoice paid through its pay link or checkout, else a till or
-      // online sale. Each looks for its own id in the session's metadata.
+      // An invoice paid through its pay link or checkout, a lesson paid from
+      // the booking or invite page, else a till or online sale. Each looks for
+      // its own id in the session's metadata.
       return (
         (await settleInvoiceCheckoutFromWebhook(accountId, object)) ||
+        (await settleLessonCheckoutFromWebhook(accountId, object)) ||
         (await settlePosCheckoutFromWebhook(accountId, object)) ||
         { ignored: "not_an_invoice_or_sale" }
       );

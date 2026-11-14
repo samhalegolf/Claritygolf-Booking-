@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canPricePerPerson, cleanService, serviceNumberFieldsShown, servicePriceLabel } from "./serviceModel";
+import { canPricePerPerson, cleanService, hasLiveGroupSchedule, serviceNumberFieldsShown, servicePriceLabel } from "./serviceModel";
 
 test("the per person toggle is offered on private and scheduled group lessons only", () => {
   assert.equal(canPricePerPerson({ lessonFormat: "private" }), true);
@@ -32,4 +32,15 @@ test("saving asks only for the number boxes the format shows", () => {
   assert.deepEqual(serviceNumberFieldsShown({ lessonFormat: "private" }), ["duration", "price"]);
   assert.deepEqual(serviceNumberFieldsShown({ lessonFormat: "group", customGroup: true }), ["duration", "basePrice", "baseParticipants", "extraPersonPrice"]);
   assert.ok(serviceNumberFieldsShown({ lessonFormat: "video-review" }).includes("reviewTurnaroundDays"));
+});
+
+test("an archived or switched-off group lesson stops putting sessions on the calendar", () => {
+  const schedule = { active: true, dayOfWeek: 0, startMinutes: 1140, occurrenceCount: 8 };
+  const live = { lessonFormat: "group" as const, active: true, groupSchedule: schedule };
+  assert.equal(hasLiveGroupSchedule(live), true);
+  assert.equal(hasLiveGroupSchedule({ ...live, archived: true }), false);
+  assert.equal(hasLiveGroupSchedule({ ...live, active: false }), false);
+  assert.equal(hasLiveGroupSchedule({ ...live, groupSchedule: { ...schedule, active: false } }), false);
+  assert.equal(hasLiveGroupSchedule({ ...live, customGroup: true }), false);
+  assert.equal(hasLiveGroupSchedule(undefined), false);
 });

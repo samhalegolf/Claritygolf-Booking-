@@ -8,7 +8,7 @@ import { publicBookingPath } from "./bookingScreen";
  */
 
 const BOOKING_LOGO_PARAM = "logo";
-const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
+const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", PUBLIC_BOOKING_HOST]);
 type BookingScreenDefinition = {
   id: string;
   label: string;

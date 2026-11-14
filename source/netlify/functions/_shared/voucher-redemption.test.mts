@@ -114,3 +114,19 @@ test("only a saved client can hold account credit", () => {
   assert.equal(canHoldCredit(""), false);
   assert.equal(canHoldCredit(null), false);
 });
+
+test("a pass voucher pays for its pass when the pass is rung up at the till", () => {
+  // A pass is a lesson package, so it is in the catalog under the lesson prefix
+  // and goes on a sale as a basket line like any other item.
+  const PASS = "lesson:pass-5-pack";
+  const passVoucher = voucher({ coversItemId: PASS, remainingValue: 400, originalValue: 400 });
+  const lines = voucherSaleLines([
+    { productId: PASS, unitPrice: 450, quantity: 1 },
+    { productId: "glove", unitPrice: 30, quantity: 1 },
+  ]);
+  // Price went up since it was bought: it still pays for the pass, not the glove.
+  assert.deepEqual(voucherRedemption(passVoucher, lines, 480), { pays: 450, takes: 400, credit: 0, coversItem: true });
+  // Without the pass on the sale it is only money.
+  const noPass = voucherSaleLines([{ productId: "glove", unitPrice: 30, quantity: 1 }]);
+  assert.deepEqual(voucherRedemption(passVoucher, noPass, 30), { pays: 30, takes: 30, credit: 0, coversItem: false });
+});

@@ -8,6 +8,7 @@
 import { apiFetch } from "../auth/apiFetch";
 import { t } from "../../lib/i18n";
 import type { SitePage, SitePageCard, SitePageContent, SitePageMeta, SiteSettings } from "../../../netlify/functions/_shared/site/document.mts";
+import type { OnlineGiftCard } from "../../../netlify/functions/_shared/online-shop.mts";
 
 export type SiteDomainView = {
   id: string;
@@ -174,6 +175,8 @@ export type ShopItem = {
   variants: ShopVariant[];
   /** How many are left when the product counts stock; null when it does not. */
   stock: number | null;
+  /** A voucher's gift card, to preview. Null when it has none, and on anything else. */
+  giftCard: OnlineGiftCard | null;
 };
 
 export type ShopShelf = { open: boolean; items: ShopItem[]; currency: string; shipping: number };

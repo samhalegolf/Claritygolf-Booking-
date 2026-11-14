@@ -19,6 +19,7 @@ import {
   readOnlineOrder,
 } from "./online-shop.mts";
 import { createStripeCheckoutSession } from "./stripe.mts";
+import { defaultGiftCardDesign } from "./gift-card.mts";
 
 const lesson = { id: "svc-lesson", name: "1 Hour Lesson", price: 120, lessonFormat: "lesson" };
 const fivePack = {
@@ -71,7 +72,7 @@ test("a pass or voucher not ticked for the website stays off the shelf", () => {
   assert.deepEqual(items.map((item) => item.id), [`${LESSON_ITEM_PREFIX}svc-five`, "prod-voucher"]);
 });
 
-test("a voucher's options share it: one card, priced from the cheapest, its own card's artwork as the picture", () => {
+test("a voucher's options share it: one card, priced from the cheapest, its own gift card to preview", () => {
   const [item] = onlineShopItems(
     [],
     [
@@ -87,11 +88,37 @@ test("a voucher's options share it: one card, priced from the cheapest, its own 
     "NZD",
   );
   assert.equal(item.price, 50);
-  assert.equal(item.image, "https://cdn.example/card.png");
+  // The artwork is the gift card's to show, not a shop picture.
+  assert.equal(item.image, "");
+  assert.equal(item.giftCard?.design.imageUrl, "https://cdn.example/card.png");
   assert.deepEqual(item.variants.map((variant) => [variant.id, variant.price, variant.description]), [
     ["fifty", 50, "Half an hour"],
     ["hundred", 100, ""],
   ]);
+});
+
+test("a voucher previews its own gift card, else the standard one, else none", () => {
+  const standard = { ...defaultGiftCardDesign(), imageUrl: "https://cdn.example/standard.png" };
+  const itemNames = new Map([[`${LESSON_ITEM_PREFIX}svc-lesson`, "1 Hour Lesson"]]);
+  const [own, plain, forLesson, priceless] = onlineShopItems(
+    [],
+    [
+      { ...voucherRow, id: "own", default_price: 10, gift_card_design: { imageUrl: "https://cdn.example/own.png" } },
+      { ...voucherRow, id: "plain", default_price: 20 },
+      { ...voucherRow, id: "lesson", default_price: 30, voucher_item_id: `${LESSON_ITEM_PREFIX}svc-lesson` },
+      { ...voucherRow, id: "priceless", default_price: 40, voucher_item_id: `${LESSON_ITEM_PREFIX}svc-lesson`, voucher_shows_value: false },
+    ],
+    "NZD",
+    { standard, itemNames },
+  );
+  assert.equal(own.giftCard?.design.imageUrl, "https://cdn.example/own.png");
+  assert.deepEqual([plain.giftCard?.design.imageUrl, plain.giftCard?.item, plain.giftCard?.showsValue], ["https://cdn.example/standard.png", "", true]);
+  assert.deepEqual([forLesson.giftCard?.item, forLesson.giftCard?.showsValue], ["1 Hour Lesson", true]);
+  assert.equal(priceless.giftCard?.showsValue, false);
+
+  // No artwork anywhere: nothing to preview.
+  const [bare] = onlineShopItems([], [voucherRow], "NZD", { standard: defaultGiftCardDesign(), itemNames: new Map() });
+  assert.equal(bare.giftCard, null);
 });
 
 test("only active, priced products ticked as vouchers are sold as vouchers", () => {

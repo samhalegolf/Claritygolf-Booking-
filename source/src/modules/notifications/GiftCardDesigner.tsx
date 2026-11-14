@@ -3,9 +3,9 @@
 // the code and the value to where they belong on it; the send path writes each
 // voucher's own onto the same spots (_shared/gift-card-pdf.mts).
 //
-// The preview is HTML over the picture, sized in container units so it scales
-// with the picture the way the PDF does. "Preview PDF" builds the real thing
-// with the same function the email uses, for the last word on how it prints.
+// The stage is the same card face the public shop previews (GiftCardPreview),
+// with each field a handle. "Preview PDF" builds the real thing with the same
+// function the email uses, for the last word on how it prints.
 //
 // Presentational like MessageTemplatesPanel: it is handed the design and
 // reports changes, and App.tsx saves them with the rest of Templates.
@@ -16,24 +16,16 @@ import {
   GIFT_CARD_FIELDS,
   GIFT_CARD_MAX_SIZE,
   GIFT_CARD_MIN_SIZE,
-  type GiftCardAlign,
   type GiftCardDesign,
   type GiftCardField,
   type GiftCardFieldId,
   type GiftCardFont,
 } from "../../../netlify/functions/_shared/gift-card.mts";
+import { GiftCardFace, giftCardFieldStyle } from "../shared/GiftCardPreview";
 import { formatMoney } from "../../lib/money";
 import { t } from "../../lib/i18n";
 import { prepareImage } from "../site-builder/imagePrep";
 import { uploadSiteImage } from "../site-builder/siteApi";
-
-const FONT_FAMILY: Record<GiftCardFont, string> = {
-  sans: "Helvetica, Arial, sans-serif",
-  serif: '"Times New Roman", Times, serif',
-  mono: '"Courier New", Courier, monospace',
-};
-
-const SHIFT: Record<GiftCardAlign, string> = { left: "0%", center: "-50%", right: "-100%" };
 
 function fieldLabel(id: GiftCardFieldId) {
   if (id === "name") return t("Name");
@@ -191,8 +183,7 @@ export function GiftCardDesigner({ design, locked, onChange }: GiftCardDesignerP
 
       {design.imageUrl && (
         <div className="gcd-body">
-          <div className="gcd-stage" ref={stage}>
-            <img src={design.imageUrl} alt="" draggable={false} />
+          <GiftCardFace className="gcd-stage" ref={stage} imageUrl={design.imageUrl}>
             {GIFT_CARD_FIELDS.map((id) => {
               const entry = design.fields[id];
               if (!entry.show) return null;
@@ -201,18 +192,7 @@ export function GiftCardDesigner({ design, locked, onChange }: GiftCardDesignerP
                   key={id}
                   type="button"
                   className={`gcd-field${selected === id ? " is-selected" : ""}`}
-                  style={{
-                    left: `${entry.x * 100}%`,
-                    top: `${entry.y * 100}%`,
-                    // A line-height: 1 box centred on y puts the baseline
-                    // about GIFT_CARD_BASELINE_DROP of the size below y, which
-                    // is where the PDF draws it.
-                    transform: `translate(${SHIFT[entry.align]}, -50%)`,
-                    fontSize: `${entry.size * 100}cqw`,
-                    fontFamily: FONT_FAMILY[entry.font],
-                    fontWeight: entry.bold ? 700 : 400,
-                    color: entry.color,
-                  }}
+                  style={giftCardFieldStyle(entry)}
                   aria-label={t("Move the {field}", { field: fieldLabel(id).toLowerCase() })}
                   onPointerDown={(event) => startDrag(id, event)}
                   onPointerMove={moveDrag}
@@ -225,7 +205,7 @@ export function GiftCardDesigner({ design, locked, onChange }: GiftCardDesignerP
                 </button>
               );
             })}
-          </div>
+          </GiftCardFace>
 
           <div className="gcd-controls">
             <div className="gcd-tabs" role="tablist" aria-label={t("What is printed on the card")}>

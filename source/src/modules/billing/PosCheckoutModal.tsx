@@ -10,8 +10,10 @@ import { Loading } from "../shared/Loading";
 // noise there without making anything reusable. It talks to no other endpoint,
 // so nothing else in the app depends on that state.
 //
-// A sale is never an invoice: it lands in billing_pos_transactions with its own
-// POS-#### receipt number and is never summed into invoice revenue or aging.
+// A sale paid at the counter is never an invoice: it lands in
+// billing_pos_transactions with its own POS-#### receipt number and is never
+// summed into invoice revenue or aging. Money that is owed (On account) is the
+// other way round: it is saved as a draft invoice, never as a POS sale.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Minus, Pencil, Plus, RotateCcw, X } from "lucide-react";
@@ -28,6 +30,9 @@ import { remainingAfterCoupon } from "./couponMath";
 import { canHoldCredit, voucherRedemption, voucherSaleLines } from "../../../netlify/functions/_shared/voucher-redemption.mts";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
+import { catalogItemTag } from "./catalogSearch";
+import { createTillInvoice, isOnAccount, localDateValue } from "./tillInvoice";
+import type { TillInvoice, TillInvoiceLine } from "./tillInvoice";
 import { checkAgainMessage, pollStoppedMessage, postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment, tapIsBusy } from "./TerminalPayment";
 import { onAndroid } from "../../native/clarityTerminal";
@@ -44,6 +49,12 @@ export type PosCheckoutModalProps = {
   // Fired once a sale exists (paid or pending) so the caller can refresh its
   // lists. May fire twice for a Clarity Pay sale: once on create, once on paid.
   onCompleted: (transaction: PosTransaction) => void;
+  // An On account sale was saved as a draft invoice.
+  onInvoiceSaved: (saved: { id: string; invoiceNumber: string; bookingIds: string[] }) => void;
+  // Days from today an On account invoice is due, from Billing Settings.
+  paymentTermsDays: number;
+  // The account's tax rate, for the lesson line of an On account invoice.
+  taxRate: number;
   onToast: (message: string) => void;
   // customerId -> name, so the coupon search finds a voucher by its client.
   clientNames?: ReadonlyMap<string, string>;
@@ -72,6 +83,9 @@ export function PosCheckoutModal({
   formatMoney,
   onClose,
   onCompleted,
+  onInvoiceSaved,
+  paymentTermsDays,
+  taxRate,
   onToast,
   clientNames = NO_CLIENT_NAMES,
   onClientEmailSaved,
@@ -114,7 +128,9 @@ export function PosCheckoutModal({
   const [payByCoupon, setPayByCoupon] = useState(false);
   const [confirmingCoupon, setConfirmingCoupon] = useState(false);
 
-  const [stage, setStage] = useState<"form" | "tap" | "qr" | "done">("form");
+  const [stage, setStage] = useState<"form" | "tap" | "qr" | "done" | "onAccount">("form");
+  // The draft invoice an On account sale became.
+  const [invoice, setInvoice] = useState<TillInvoice | null>(null);
   // Tap to Pay: only ever ready inside the staff app (iPhone or Android). Everywhere else
   // the Clarity Pay route is the QR, exactly as before.
   const tapToPay = useTapToPay();
@@ -223,8 +239,8 @@ export function PosCheckoutModal({
           ? t("Customer taps their card on this phone. The QR is there if they'd rather.")
           : t("Customer taps their card on this iPhone. The QR is there if they'd rather.")
         : t("Shows a QR code the customer scans to pay.")
-      : selectedMethod && !selectedMethod.settlesImmediately
-        ? t("Recorded as owed. Mark it paid from the POS list once settled.")
+      : selectedMethod && isOnAccount(selectedMethod)
+        ? t("Saved as a draft invoice, to email now or later and be paid then.")
         : "";
 
   const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
@@ -275,7 +291,7 @@ export function PosCheckoutModal({
             : `/api/passes?personId=${encodeURIComponent(personId)}&balance=1`,
           { credentials: "same-origin", cache: "no-store" },
         );
-        if (!response.ok) return;
+        if (!response.ok) throw new Error();
         const data = (await response.json()) as {
           options?: PassOption[];
           passes?: { status: string; creditsAvailable: number }[];
@@ -284,7 +300,9 @@ export function PosCheckoutModal({
         setPassOptions(forLesson && Array.isArray(data.options) ? data.options : []);
         setPassBalance(spendableCredits(data.passes));
       } catch {
-        // No passes offered this time; paying by any other method still works.
+        // Paying by any other method still works, but say so rather than leave
+        // a Pass button with nothing behind it.
+        if (!cancelled) setError(t("Could not load their passes. Pay another way or reopen the checkout."));
       }
     })();
     return () => {
@@ -389,6 +407,10 @@ export function PosCheckoutModal({
       setError(t("Enter an amount greater than zero."));
       return;
     }
+    if (isOnAccount(payingMethod)) {
+      void putOnAccount();
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -447,6 +469,76 @@ export function PosCheckoutModal({
       await showQr(sale);
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : t("Payment could not be recorded."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // On account: the money is owed, so the sale is saved onto the invoice list
+  // as a draft rather than recorded here. The done screen offers to email it,
+  // which is what makes it sent.
+  async function putOnAccount() {
+    if (!customerName.trim()) {
+      setEditingCustomer(true);
+      setError(t("Add the customer first - an invoice is addressed to someone."));
+      return;
+    }
+    const catalogItem = (productId: string) => products.find((product) => product.id === productId);
+    if (lines.some((line) => catalogItem(line.productId)?.isVoucher === true)) {
+      setError(t("Gift vouchers can't be invoiced - take payment for them at the till."));
+      return;
+    }
+    if (coupon) {
+      setError(t("Remove the coupon first - it can only be spent on a sale paid at the till."));
+      return;
+    }
+    const items: TillInvoiceLine[] = lines.map((line) => {
+      const item = catalogItem(line.productId);
+      return {
+        // A package keeps its lesson-type id so paying the invoice issues the credits.
+        sourceType: "product",
+        sourceId: item?.sourceServiceId || line.productId,
+        description: line.name,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        taxRate: Number(item?.taxRate ?? taxRate) || 0,
+      };
+    });
+    // Whatever the products don't account for is the lesson (or the free-form
+    // sale). A total typed below the products comes off as a discount.
+    const rest = round2(amount - linesTotal);
+    if (context.bookingId || context.description || !lines.length || rest > 0) {
+      items.unshift({
+        // Linked to the booking, which is what marks the lesson invoiced.
+        sourceType: context.bookingId ? "booking" : "manual",
+        sourceId: context.bookingId || "",
+        description: context.description || description.trim(),
+        quantity: 1,
+        unitPrice: Math.max(0, rest),
+        taxRate,
+      });
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await createTillInvoice({
+        customerId: context.customerId || "",
+        customerName,
+        customerEmail,
+        dueDate: localDateValue(paymentTermsDays),
+        currency,
+        items,
+        discountAmount: Math.max(0, -rest),
+      });
+      setInvoice(created);
+      setStage("onAccount");
+      onInvoiceSaved({
+        id: created.id,
+        invoiceNumber: created.invoiceNumber,
+        bookingIds: context.bookingId ? [context.bookingId] : [],
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : t("Could not save the invoice."));
     } finally {
       setBusy(false);
     }
@@ -536,8 +628,7 @@ export function PosCheckoutModal({
   // A Clarity Pay sale that never cleared has to be voided on the way out,
   // otherwise a pending row and a live Stripe session are left behind with
   // nothing watching them. This covers both walking away from the QR and
-  // abandoning after the Stripe step failed. A pending "On account" sale is the
-  // opposite case - that record is the whole point, so it stays.
+  // abandoning after the Stripe step failed.
   const abandonable =
     Boolean(transaction) && transaction?.status === "pending" && transaction?.paymentMethodKind === "clarity_pay";
 
@@ -552,7 +643,7 @@ export function PosCheckoutModal({
   }
 
   const heading =
-    stage === "done" ? t("Payment recorded") : stage === "qr" || stage === "tap" ? t("Waiting for payment") : t("Checkout");
+    stage === "onAccount" ? t("Saved as an invoice") : stage === "done" ? t("Payment recorded") : stage === "qr" || stage === "tap" ? t("Waiting for payment") : t("Checkout");
 
   // Backdrop dismissal is disabled while the QR is up so a stray tap on a till
   // screen can't void a payment the customer is mid-way through.
@@ -723,6 +814,7 @@ export function PosCheckoutModal({
                           {isLowStock(product) && <AlertTriangle size={12} />}
                         </span>
                         <em>
+                          {catalogItemTag(product) ? `${catalogItemTag(product)} - ` : ""}
                           {formatMoney(product.price, currency)}
                           {product.trackStock ? t(" - {value} left", { value: product.stockLevel ?? 0 }) : ""}
                         </em>
@@ -1039,10 +1131,10 @@ export function PosCheckoutModal({
                           : tapToPay.ready
                             ? tapToPayName()
                             : t("Charge")
-                        : selectedMethod && !selectedMethod.settlesImmediately
+                        : selectedMethod && isOnAccount(selectedMethod)
                           ? amountValid
-                            ? t("Record {amount} as owed", { amount: formatMoney(dueNow, currency) })
-                            : t("Record payment as owed")
+                            ? t("Invoice {amount}", { amount: formatMoney(dueNow, currency) })
+                            : t("Save as invoice")
                           : amountValid
                             ? t("Record {amount}", { amount: formatMoney(dueNow, currency) })
                             : t("Record payment")}
@@ -1128,16 +1220,43 @@ export function PosCheckoutModal({
                 </p>
               )
             )}
-            {transaction.status === "pending" && (
-              <p className="field-help">{t("Recorded as owed on {paymentMethodName}. Mark it paid from the POS list once it is settled.", { paymentMethodName: transaction.paymentMethodName })}</p>
-            )}
             <ReceiptEmailPrompt
               key={transaction.id}
-              transactionId={transaction.id}
+              target={{ kind: "receipt", transactionId: transaction.id }}
               email={customerEmail.trim() || transaction.customerEmail || ""}
               clientId={context.customerId || ""}
               clientName={customerName.trim()}
               onClientEmailSaved={onClientEmailSaved}
+            />
+            <div className="panel-actions">
+              <button className="primary-button" onClick={onClose} type="button">{t("Done")}</button>
+            </div>
+          </>
+        )}
+
+        {stage === "onAccount" && invoice && (
+          <>
+            <div className="pos-done">
+              <Check size={22} />
+              <div>
+                <strong>{formatMoney(invoice.total, invoice.currency)}</strong>
+                <span>{t("On account - invoice {number}", { number: invoice.invoiceNumber })}</span>
+              </div>
+            </div>
+            <p className="field-help">
+              {t("Saved under Billing > Invoices as a draft. Emailing it now marks it sent; otherwise send it from there later.")}
+            </p>
+            <ReceiptEmailPrompt
+              key={invoice.id}
+              target={{
+                kind: "invoice",
+                invoiceId: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                includePaymentLink: methods.some((method) => method.kind === "clarity_pay"),
+              }}
+              email={customerEmail.trim()}
+              clientId={context.customerId || ""}
+              clientName={customerName.trim()}
             />
             <div className="panel-actions">
               <button className="primary-button" onClick={onClose} type="button">{t("Done")}</button>

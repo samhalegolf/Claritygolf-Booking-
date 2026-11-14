@@ -8564,7 +8564,7 @@ export async function handleCustomGroupConfirmRequest(req: Request) {
     const service = (catalogue.services || []).find((candidate) => candidate.id === appointment.serviceId);
     const booker = cleanString(appointment.client, "", 160).split(/\s+/)[0] || "Your friend";
     const share = friendShareAmount(appointment);
-    // As it will be charged: the share invoice adds tax when prices are quoted before it.
+    // As it will be charged: tax is added on top when prices are quoted before it.
     const tax = catalogue.account?.invoiceSettings;
     const taxNote = tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? ` + ${tax.taxName}` : "";
     const shareLabel = share > 0 ? `${accountMoney(share, catalogue.account)}${taxNote}` : "";
@@ -8589,8 +8589,8 @@ export async function handleCustomGroupConfirmRequest(req: Request) {
         attendee = { ...attendee, status: "confirmed" };
       }
       if (action === "pay" && share > 0) {
-        const { ensureGroupShareInvoice } = await import("./billing-api.mts");
-        const invoice = await ensureGroupShareInvoice(accountId, {
+        const { startGroupShareCheckout } = await import("./billing-api.mts");
+        const checkout = await startGroupShareCheckout(accountId, {
           bookingId: appointment.id,
           attendeeId: attendee.id,
           name: attendee.name,
@@ -8599,12 +8599,12 @@ export async function handleCustomGroupConfirmRequest(req: Request) {
           description: `${cleanString(service?.name, "Lesson", 160)} · ${formatBookingDate(appointment.week, appointment.day)} · Share for ${attendee.name}`,
           week: appointment.week,
           day: appointment.day,
-        }, cleanUrl(catalogue.account?.bookingUrl, "") || url.origin).catch((error) => {
-          console.error("custom_group_confirm:share_invoice_failed", appointment.id, error);
+        }, url.toString()).catch((error) => {
+          console.error("custom_group_confirm:share_checkout_failed", appointment.id, error);
           return null;
         });
-        if (invoice?.payUrl) return new Response(null, { status: 303, headers: { Location: invoice.payUrl, "Cache-Control": "no-store" } });
-        notice = "Card payments aren't available right now. You can pay on the day.";
+        if (checkout?.payUrl) return new Response(null, { status: 303, headers: { Location: checkout.payUrl, "Cache-Control": "no-store" } });
+        if (!checkout?.paid) notice = "Card payments aren't available right now. You can pay on the day.";
       }
     }
 

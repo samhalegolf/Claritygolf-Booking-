@@ -3038,10 +3038,9 @@
   opacity: 0.6;
 }
 
-/* "Who's paying?" under a group's price, and "Pay now / on the day" before
-   the confirm button and again after booking: the same pair of large choices. */
-.booking-group-payment,
-.booking-pay-choice {
+/* "Who's paying?" under a group's price, and "Pay now / on the day" after
+   booking: the same pair of large choices. */
+.booking-group-payment {
   display: grid;
   gap: 8px;
   margin: 6px 0 0;
@@ -3049,12 +3048,26 @@
   border: 0;
 }
 
-.booking-pay-choice {
-  margin: 14px 0 4px;
+/* Paying online ahead is an option, not a step: one quiet line above the
+   confirm button. Left alone, the booker pays on the day. */
+.booking-pay-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 2px;
+  color: var(--booking-muted, var(--c-text-soft));
+  font-size: var(--c-size-meta);
+  cursor: pointer;
 }
 
-.booking-group-payment legend,
-.booking-pay-choice legend {
+.booking-pay-now input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--coach-primary);
+}
+
+.booking-group-payment legend {
   margin-bottom: 6px;
   font-size: var(--c-size-meta);
   font-weight: 700;
@@ -10792,6 +10805,19 @@
   font-size: 12px;
 }
 
+/* Headline cards open to the invoices / expenses behind their figure. Same
+   card look; the button only adds the pointer and an ink edge while open. */
+.report-stat-button {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.report-stat-button.active {
+  border-color: var(--c-accent);
+}
+
 /* Profit and loss, so these say which one. --c-accent is the app's ink, and a
    net loss printed in ink reads as just another figure. */
 .report-positive {
@@ -13213,9 +13239,26 @@
 
 .sell-actions {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* Park, Invoice, then Pay taking the rest. */
+  grid-template-columns: auto auto 1fr;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* "Include payment link" on the till's invoice step. */
+.sell-invoice-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--c-size-secondary);
+}
+
+.sell-invoice-link input {
+  margin: 0;
+  accent-color: var(--c-accent);
 }
 
 /* The one button on the screen that has to be findable without looking. */
@@ -13409,6 +13452,12 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+/* What the tile is when the name alone can't say: a pass or a gift voucher. */
+.sell-tile-kind {
   font-size: 11px;
   color: var(--c-muted);
 }
@@ -14785,21 +14834,12 @@
   }
 }
 
-/* Sized in container units so text scales with the picture, as on the PDF. */
-.gcd-stage {
-  position: relative;
-  container-type: inline-size;
+/* The card face itself is GiftCardPreview's (shared/giftCardPreview.css). */
+.gift-card-face.gcd-stage {
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
-  overflow: hidden;
   touch-action: none;
   user-select: none;
-}
-
-.gcd-stage img {
-  display: block;
-  width: 100%;
-  height: auto;
 }
 
 .gcd-field {
@@ -17034,6 +17074,16 @@
 
 .coupon-held > button:last-child {
   margin-left: auto;
+}
+
+.coupon-held .coupon-held-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .sell-coupon-pay {
