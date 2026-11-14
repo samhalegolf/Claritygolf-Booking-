@@ -14834,21 +14834,12 @@
   }
 }
 
-/* Sized in container units so text scales with the picture, as on the PDF. */
-.gcd-stage {
-  position: relative;
-  container-type: inline-size;
+/* The card face itself is GiftCardPreview's (shared/giftCardPreview.css). */
+.gift-card-face.gcd-stage {
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
-  overflow: hidden;
   touch-action: none;
   user-select: none;
-}
-
-.gcd-stage img {
-  display: block;
-  width: 100%;
-  height: auto;
 }
 
 .gcd-field {

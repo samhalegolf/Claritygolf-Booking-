@@ -5252,5 +5252,8 @@
   "Individual services": "Enskilda tjänster",
   "Add {item} to the sale": "Lägg till {item} i försäljningen",
   "Could not load their passes. Pay another way or reopen the checkout.": "Det gick inte att läsa in deras klippkort. Betala på annat sätt eller öppna kassan igen.",
-  "Pay now by card ({amount})": "Betala nu med kort ({amount})"
+  "Pay now by card ({amount})": "Betala nu med kort ({amount})",
+  "Their name": "Mottagarens namn",
+  "The gift card it comes on": "Presentkortet det skrivs ut på",
+  "A preview of the gift card": "En förhandsvisning av presentkortet"
 }

@@ -5252,5 +5252,8 @@
   "Individual services": "Einzelleistungen",
   "Add {item} to the sale": "{item} zum Verkauf hinzufügen",
   "Could not load their passes. Pay another way or reopen the checkout.": "Ihre Pässe konnten nicht geladen werden. Zahlen Sie anders oder öffnen Sie die Kasse erneut.",
-  "Pay now by card ({amount})": "Jetzt mit Karte bezahlen ({amount})"
+  "Pay now by card ({amount})": "Jetzt mit Karte bezahlen ({amount})",
+  "Their name": "Ihr Name",
+  "The gift card it comes on": "Die Geschenkkarte, auf der er gedruckt wird",
+  "A preview of the gift card": "Eine Vorschau der Geschenkkarte"
 }

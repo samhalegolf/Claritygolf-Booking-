@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { SiteShopBlock } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
+import { GiftCardPreview, shopGiftCardText } from "../shared/GiftCardPreview";
 import { cancelShopOrder, confirmShopOrder, fetchShop, startShopCheckout, type ShopItem, type ShopOrder, type ShopShelf } from "./siteApi";
 import { addToCart, cartCount, readCart, setCartQuantity, writeCart, type CartLine } from "./siteCart";
 import { shopPageUrl } from "./siteTheme";
@@ -135,6 +136,8 @@ export function ShopBlock({
   const shipping = needsShipping && shelf ? shelf.shipping : 0;
   const total = itemsTotal + shipping;
   const gift = lines.some((line) => line.item.kind === "voucher");
+  // The card the first voucher in the cart comes on, with the name as it is typed.
+  const giftLine = lines.find((line) => line.item.giftCard) || null;
   const count = cartCount(cart);
 
   function updateCart(next: CartLine[]) {
@@ -236,7 +239,16 @@ export function ShopBlock({
               const price = chosen?.price ?? entry.price;
               return (
                 <div className={`site-shop-card${entry.image ? " has-image" : ""}`} key={entry.id}>
-                  {entry.image ? <img className="site-shop-image" src={entry.image} alt="" loading="lazy" /> : null}
+                  {entry.image ? (
+                    <img className="site-shop-image" src={entry.image} alt="" loading="lazy" />
+                  ) : entry.giftCard ? (
+                    <GiftCardPreview
+                      className="site-shop-gift-card"
+                      design={entry.giftCard.design}
+                      text={shopGiftCardText(entry.giftCard, "", money(price, entry.currency || currency))}
+                      label={t("The gift card it comes on")}
+                    />
+                  ) : null}
                   <strong>{entry.name}</strong>
                   {itemDetail(entry) ? <span className="site-shop-detail">{itemDetail(entry)}</span> : null}
                   {entry.description ? <p>{entry.description}</p> : null}
@@ -337,6 +349,14 @@ export function ShopBlock({
               </p>
               {gift ? (
                 <>
+                  {giftLine?.item.giftCard ? (
+                    <GiftCardPreview
+                      className="site-shop-gift-card"
+                      design={giftLine.item.giftCard.design}
+                      text={shopGiftCardText(giftLine.item.giftCard, details.recipientName || details.name, money(giftLine.unitPrice, currency))}
+                      label={t("A preview of the gift card")}
+                    />
+                  ) : null}
                   <label>
                     <span>{t("Who is it for? (optional)")}</span>
                     <input value={details.recipientName} maxLength={120} onChange={(event) => setDetails({ ...details, recipientName: event.target.value })} />

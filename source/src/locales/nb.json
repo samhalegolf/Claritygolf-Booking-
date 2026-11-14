@@ -5252,5 +5252,8 @@
   "Individual services": "Enkelttjenester",
   "Add {item} to the sale": "Legg {item} til salget",
   "Could not load their passes. Pay another way or reopen the checkout.": "Kunne ikke laste inn klippekortene deres. Betal på en annen måte, eller åpne kassen på nytt.",
-  "Pay now by card ({amount})": "Betal nå med kort ({amount})"
+  "Pay now by card ({amount})": "Betal nå med kort ({amount})",
+  "Their name": "Navnet deres",
+  "The gift card it comes on": "Gavekortet det skrives ut på",
+  "A preview of the gift card": "En forhåndsvisning av gavekortet"
 }

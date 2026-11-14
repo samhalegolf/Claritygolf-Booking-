@@ -23,6 +23,7 @@
  * order form is complete. billing-api.mts does the reading and writing.
  */
 
+import { cleanOwnGiftCardDesign, type GiftCardDesign } from "./gift-card.mts";
 import { playerShopItems } from "./player-shop.mts";
 
 /** The flat fee charged on an order with something to post, in major units. "" or 0: posted free. */
@@ -52,6 +53,14 @@ export const ONLINE_FULFILMENTS: readonly OnlineFulfilment[] = ["collect", "ship
  */
 export type OnlineVariant = { id: string; name: string; price: number | null; description: string };
 
+/**
+ * The card a voucher is printed on, for the shop to preview: its own card, or
+ * else the business's standard one. `item` is what a voucher for a lesson or
+ * product is for ("" on an amount voucher); `showsValue` is whether its value
+ * is printed. The same three the send path prints (billing-api giftCardAttachment).
+ */
+export type OnlineGiftCard = { design: GiftCardDesign; item: string; showsValue: boolean };
+
 export type OnlineShopItem = {
   /** The till's catalog id: a product id, or LESSON_ITEM_PREFIX + service id. */
   id: string;
@@ -72,6 +81,15 @@ export type OnlineShopItem = {
   variants: OnlineVariant[];
   /** What is on the shelf when the product counts stock; null when it does not. */
   stock: number | null;
+  /** A voucher's gift card, when one with artwork is set up. Null otherwise, and on anything else. */
+  giftCard: OnlineGiftCard | null;
+};
+
+export type OnlineShopCards = {
+  /** The business's standard gift card, from Settings › Templates. */
+  standard: GiftCardDesign | null;
+  /** What a voucher can be for, by its till id: lesson types and products, named as they are now. */
+  itemNames: Map<string, string>;
 };
 
 const text = (value: unknown, max = 200) => String(value ?? "").trim().slice(0, max);
@@ -117,7 +135,12 @@ export function cleanFulfilment(value: unknown): OnlineFulfilment {
  * one that counts stock and has none is listed as sold out, not hidden, so a
  * page does not lose a card the moment the last one goes.
  */
-export function onlineShopItems(services: unknown, products: unknown, currency: string): OnlineShopItem[] {
+export function onlineShopItems(
+  services: unknown,
+  products: unknown,
+  currency: string,
+  cards: OnlineShopCards = { standard: null, itemNames: new Map() },
+): OnlineShopItem[] {
   const listed = Array.isArray(services)
     ? services.filter((service) => (service as Record<string, unknown>)?.archived !== true)
     : [];
@@ -137,6 +160,7 @@ export function onlineShopItems(services: unknown, products: unknown, currency: 
       fulfilment: "" as const,
       variants: [],
       stock: null,
+      giftCard: null,
     }));
   const rows = (Array.isArray(products) ? products : []).map((row) => (row || {}) as Record<string, unknown>).filter((row) => row.active !== false);
   const priced = (row: Record<string, unknown>) => {
@@ -149,7 +173,9 @@ export function onlineShopItems(services: unknown, products: unknown, currency: 
     .filter((row) => row.is_voucher === true && row.sell_online === true)
     .map((row) => {
       const { variants, price } = priced(row);
-      const card = (row.gift_card_design || {}) as Record<string, unknown>;
+      const design = cleanOwnGiftCardDesign(row.gift_card_design) || cards.standard;
+      // Named as the send path names it: a lesson or product that is gone makes it an amount voucher.
+      const item = cards.itemNames.get(text(row.voucher_item_id, 160)) || "";
       return {
         id: text(row.id, 160),
         kind: "voucher" as const,
@@ -159,11 +185,11 @@ export function onlineShopItems(services: unknown, products: unknown, currency: 
         currency: money,
         credits: 0,
         includes: [] as string[],
-        // Its own shop picture, or else its own gift card's artwork.
-        image: text(row.image_url, 600) || text(card.imageUrl, 600),
+        image: text(row.image_url, 600),
         fulfilment: "" as const,
         variants,
         stock: null,
+        giftCard: design?.imageUrl ? { design, item, showsValue: !item || row.voucher_shows_value !== false } : null,
       };
     })
     .filter((item) => item.id && item.price > 0)
@@ -185,6 +211,7 @@ export function onlineShopItems(services: unknown, products: unknown, currency: 
         fulfilment: cleanFulfilment(row.fulfilment),
         variants,
         stock: row.track_stock === true ? Math.max(0, Math.round(Number(row.stock_level) || 0)) : null,
+        giftCard: null,
       };
     })
     .filter((item) => item.id && item.name && item.price > 0);
