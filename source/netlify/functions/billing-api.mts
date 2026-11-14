@@ -7315,35 +7315,91 @@ async function onlineOrderFulfilment(accountId: string, id: string) {
 }
 
 /**
- * The business's copy of an order with something to do: post it or have it
- * ready to collect. A voucher or package needs nothing of the coach, so an
- * order of only those sends no email.
+ * The business's copy of every paid online order: who bought what, who it is
+ * for, the voucher codes it issued, and anything to post or have ready to
+ * collect. The coach hears about every sale, not only the ones that need them
+ * to do something - a voucher or package bought online is still money in.
  */
 async function emailOrderToBusiness(accountId: string, id: string) {
   const row = await posTransactionRow(accountId, id);
   if (!row) return;
-  const fulfilment = await onlineOrderFulfilment(accountId, id);
-  if (!fulfilment.ship.length && !fulfilment.collect.length) return;
   const branding = await resolveInvoiceBranding(accountId);
   const to = cleanString(branding.contactEmail, "", 180) || cleanString(await readSettingValue(accountId, "notificationEmail"), "", 180) || cleanString(process.env.CLARITY_NOTIFICATION_EMAIL, "", 180);
   if (!to) return;
+  const [fulfilment, coupons] = await Promise.all([onlineOrderFulfilment(accountId, id), couponsForSale(accountId, id)]);
+  // The same gift card PDF the buyer was sent, so the coach sees what went out.
+  const giftCards = coupons.length ? (await giftVoucherEmail(accountId, row, coupons, branding)).attachments : [];
   const currency = String(row.currency || "NZD");
+  const buyer = cleanString(row.customer_name, "", 140) || "A customer";
+  const buyerEmail = cleanString(row.customer_email, "", 180);
+  const recipient = cleanString(row.gift_recipient_name, "", 140);
+  const message = cleanString(row.gift_message, "", 500);
   const address = cleanString(row.shipping_address, "", 600);
-  const lines = [
-    `Receipt ${String(row.receipt_number ?? "")} - ${formatMoney(row.amount, currency)}`,
-    `From ${String(row.customer_name ?? "")} <${String(row.customer_email ?? "")}>`,
-    "",
-    ...(fulfilment.ship.length ? ["To post:", ...fulfilment.ship.map((item) => `  ${item.name} x${item.quantity}`), address ? `Send to:\n${address}` : "No address was collected.", ""] : []),
-    ...(fulfilment.collect.length ? ["To collect:", ...fulfilment.collect.map((item) => `  ${item.name} x${item.quantity}`), ""] : []),
-    "The sale is under Billing › Sales.",
+  const shipping = Number(row.shipping_amount) || 0;
+  const packages = fulfilment.items.filter((item) => item.productId.startsWith(LESSON_ITEM_PREFIX));
+  const itemLine = (item: { name: string; quantity: number; lineTotal?: number }) =>
+    `${item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name}: ${formatMoney(item.lineTotal ?? 0, currency)}`;
+  const voucherLine = (coupon: (typeof coupons)[number]) =>
+    [coupon.code, formatMoney(coupon.originalValue, coupon.currency), coupon.coversItemName ? `for ${coupon.coversItemName}` : ""]
+      .filter(Boolean)
+      .join(" - ");
+
+  const sections: Array<{ title: string; lines: string[] }> = [
+    {
+      title: "Order",
+      lines: [
+        ...fulfilment.items.map(itemLine),
+        ...(shipping > 0 ? [`Shipping: ${formatMoney(shipping, currency)}`] : []),
+        `Total paid by card: ${formatMoney(row.amount, currency)}`,
+      ],
+    },
+    { title: "Bought by", lines: [buyerEmail ? `${buyer} <${buyerEmail}>` : buyer] },
+    ...(recipient || message
+      ? [{ title: "Gift", lines: [recipient ? `For ${recipient}` : "", message ? `Message: "${message}"` : ""].filter(Boolean) }]
+      : []),
+    ...(coupons.length
+      ? [{ title: "Voucher codes issued", lines: [...coupons.map(voucherLine), ...(giftCards.length ? ["The gift card the buyer received is attached."] : [])] }]
+      : []),
+    ...(packages.length
+      ? [{ title: "Lesson packages", lines: packages.map((item) => `${item.name} - credits added to ${buyer}'s profile`) }]
+      : []),
+    ...(fulfilment.ship.length
+      ? [{ title: "To post", lines: [...fulfilment.ship.map((item) => `${item.name} x${item.quantity}`), address ? `Send to: ${address}` : "No address was collected."] }]
+      : []),
+    ...(fulfilment.collect.length
+      ? [{ title: "To have ready to collect", lines: fulfilment.collect.map((item) => `${item.name} x${item.quantity}`) }]
+      : []),
   ];
+
+  const receipt = String(row.receipt_number ?? "");
+  const text = [
+    `${buyer} made a purchase in your online shop (${receipt}).`,
+    "",
+    ...sections.flatMap((section) => [`${section.title}:`, ...section.lines.map((line) => `  ${line}`), ""]),
+    "The sale is under Billing > Sales.",
+  ].join("\n");
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f;max-width:480px">` +
+    `<p style="margin:0 0 16px">${escapeHtml(`${buyer} made a purchase in your online shop (${receipt}).`)}</p>` +
+    sections
+      .map(
+        (section) =>
+          `<p style="margin:0 0 4px;font-weight:600">${escapeHtml(section.title)}</p>` +
+          `<p style="margin:0 0 16px;white-space:pre-line">${escapeHtml(section.lines.join("\n"))}</p>`,
+      )
+      .join("") +
+    `<p style="margin:0;color:#5b6068">The sale is under Billing &rsaquo; Sales.</p>` +
+    `</div>`;
+
   const result = await deliverEmail({
     accountId,
     to,
-    subject: `New order ${String(row.receipt_number ?? "")} from ${String(row.customer_name ?? "a customer")}`,
-    text: lines.join("\n"),
-    replyTo: cleanString(row.customer_email, "", 180) || undefined,
+    subject: `New purchase: ${buyer} - ${formatMoney(row.amount, currency)}`,
+    text,
+    html,
+    replyTo: buyerEmail || undefined,
     idempotencyKey: `online-order-business-${id}`,
+    attachments: giftCards.length ? giftCards : undefined,
   });
   if (!result.sent) console.error("billing_api:online_order_business_email_not_sent", accountId, id, result.reason);
 }
