@@ -218,7 +218,6 @@ import type {
   PosCheckoutContext,
   StockMovement,
   BillingCoupon,
-  CouponRedemption,
 } from "./modules/billing/types";
 import { defaultInvoiceSettings, printableInvoiceCustomFields } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, lineDiscountAmount } from "./modules/billing/invoiceMath";
@@ -640,6 +639,7 @@ const ClientsPanel = lazy(() =>
 const SellScreen = lazy(() => import("./modules/billing/SellScreen").then((module) => ({ default: module.SellScreen })));
 const ProductsPanel = lazy(() => import("./modules/billing/ProductsPanel").then((module) => ({ default: module.ProductsPanel })));
 const CouponsPanel = lazy(() => import("./modules/billing/CouponsPanel").then((module) => ({ default: module.CouponsPanel })));
+const VoucherPreviewModal = lazy(() => import("./modules/billing/VoucherPreview").then((module) => ({ default: module.VoucherPreviewModal })));
 const BillingReportsPanel = lazy(() =>
   import("./modules/billing/BillingReportsPanel").then((module) => ({ default: module.BillingReportsPanel })),
 );
@@ -1961,6 +1961,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // Gift vouchers. Separate from billing discounts on purpose: a coupon is money
   // someone has already paid, a discount preset is just a label on a price.
   const [coupons, setCoupons] = useState<BillingCoupon[]>([]);
+  // The voucher whose card is open over Transactions, from a code on a sale.
+  const [voucherPreviewId, setVoucherPreviewId] = useState("");
   const [couponsLoadState, setCouponsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
@@ -9784,6 +9786,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           // default for something already paid for.
           expiresAt: values.expiresAt ? new Date(`${values.expiresAt}T23:59:59`).toISOString() : null,
           note: values.note.trim(),
+          giftMessage: values.giftMessage.trim(),
         }),
       });
       if (!response.ok) throw new Error(await readApiFailure(response, t("Could not issue the coupon.")));
@@ -9816,21 +9819,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setToast({ message: `${coupon.code} ${isVoid ? "cancelled" : "restored"}.` });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : t("Could not update the coupon.") });
-    }
-  }
-
-  async function fetchCouponRedemptions(couponId: string) {
-    try {
-      const response = await fetch(`/api/billing/coupons/${encodeURIComponent(couponId)}/redemptions`, {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error("history");
-      const data = (await response.json()) as { redemptions?: CouponRedemption[] };
-      return Array.isArray(data.redemptions) ? data.redemptions : [];
-    } catch {
-      // The history is context, not the point of the row.
-      return [];
     }
   }
 
@@ -16039,7 +16027,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           onReload={() => void fetchCoupons()}
           onIssue={issueCoupon}
           onSetVoid={setCouponVoid}
-          onLoadRedemptions={fetchCouponRedemptions}
           onScanStripe={findStripeCouponCandidates}
           onImport={importStripeCoupons}
           rules={voucherRules}
@@ -17611,6 +17598,20 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                               <td>
                                 {row.sale.description}
                                 {row.sale.isLessonPass && <span className="pos-lesson-tag">{t("Lesson pass")}</span>}
+                                {(row.sale.vouchers?.length ?? 0) > 0 && (
+                                  <span className="pos-voucher-codes">
+                                    {row.sale.vouchers?.map((voucher) => (
+                                      <button
+                                        key={voucher.id}
+                                        className="link-button coupon-code"
+                                        onClick={() => setVoucherPreviewId(voucher.id)}
+                                        type="button"
+                                      >
+                                        {voucher.code}
+                                      </button>
+                                    ))}
+                                  </span>
+                                )}
                                 {row.sale.shippingAddress && (
                                   <em className="pos-adjusted-note">{t("Post to: {address}", { address: row.sale.shippingAddress.replace(/\n/g, ", ") })}</em>
                                 )}
@@ -17651,6 +17652,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     </table>
                   )}
                 </article>
+                {voucherPreviewId && (
+                  <Suspense fallback={null}>
+                    <VoucherPreviewModal couponId={voucherPreviewId} formatMoney={formatMoney} onClose={() => setVoucherPreviewId("")} />
+                  </Suspense>
+                )}
               </div>
             )}
 

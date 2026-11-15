@@ -13,7 +13,8 @@ import { Loading } from "../shared/Loading";
 import { Fragment, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
-import type { BillingCoupon, CouponImportCandidate, CouponRedemption, VoucherAmountRule } from "./types";
+import type { BillingCoupon, CouponImportCandidate, VoucherAmountRule } from "./types";
+import { VoucherDetails, VoucherPreviewModal, useVoucherDetails } from "./VoucherPreview";
 import { t, tn, readerLocale } from "../../lib/i18n";
 
 /** What a scan came back with. `scannedCount` is how many charges were read,
@@ -33,6 +34,7 @@ export type CouponIssueValues = {
   issuedToEmail: string;
   expiresAt: string;
   note: string;
+  giftMessage: string;
 };
 
 export type CouponsPanelView = "issue" | "records" | "integrations";
@@ -46,7 +48,6 @@ export type CouponsPanelProps = {
   onReload: () => void;
   onIssue: (values: CouponIssueValues) => Promise<boolean>;
   onSetVoid: (coupon: BillingCoupon, isVoid: boolean) => Promise<void>;
-  onLoadRedemptions: (couponId: string) => Promise<CouponRedemption[]>;
   onScanStripe: () => Promise<CouponScanResult | null>;
   onImport: (chargeIds: string[], addBuyersAsClients: boolean) => Promise<number>;
   /** The coach's price rules, and saving a changed list of them. */
@@ -74,7 +75,7 @@ const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
 };
 
 function emptyIssueForm() {
-  return { value: "", code: "", issuedToName: "", issuedToEmail: "", expiresAt: "", note: "" };
+  return { value: "", code: "", issuedToName: "", issuedToEmail: "", expiresAt: "", note: "", giftMessage: "" };
 }
 
 function statusLabel(coupon: BillingCoupon) {
@@ -93,7 +94,6 @@ export function CouponsPanel({
   onReload,
   onIssue,
   onSetVoid,
-  onLoadRedemptions,
   onScanStripe,
   onImport,
   rules,
@@ -105,9 +105,10 @@ export function CouponsPanel({
   const [search, setSearch] = useState("");
   const [showSpent, setShowSpent] = useState(false);
 
+  /** The row opened in place, and the voucher whose card is showing. */
   const [openCoupon, setOpenCoupon] = useState("");
-  const [redemptions, setRedemptions] = useState<CouponRedemption[]>([]);
-  const [redemptionsLoading, setRedemptionsLoading] = useState(false);
+  const [previewCoupon, setPreviewCoupon] = useState("");
+  const { details: openDetails, state: openDetailsState } = useVoucherDetails(openCoupon);
 
   /** null until a scan has been run: "not looked yet" is not "nothing found". */
   const [scan, setScan] = useState<CouponScanResult | null>(null);
@@ -375,19 +376,8 @@ export function CouponsPanel({
     }
   }
 
-  async function toggleCoupon(coupon: BillingCoupon) {
-    if (openCoupon === coupon.id) {
-      setOpenCoupon("");
-      return;
-    }
-    setOpenCoupon(coupon.id);
-    setRedemptions([]);
-    setRedemptionsLoading(true);
-    try {
-      setRedemptions(await onLoadRedemptions(coupon.id));
-    } finally {
-      setRedemptionsLoading(false);
-    }
+  function toggleCoupon(coupon: BillingCoupon) {
+    setOpenCoupon((current) => (current === coupon.id ? "" : coupon.id));
   }
 
   return (
@@ -830,11 +820,21 @@ export function CouponsPanel({
             />
           </label>
           <label className="settings-field product-notes-field">
+            <span>{t("Message for them")}</span>
+            <textarea
+              rows={3}
+              maxLength={500}
+              value={form.giftMessage}
+              onChange={(event) => setForm((current) => ({ ...current, giftMessage: event.target.value }))}
+              placeholder={t("Optional - a few words to go with the voucher")}
+            />
+          </label>
+          <label className="settings-field product-notes-field">
             <span>{t("Note")}</span>
             <input
               value={form.note}
               onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))}
-              placeholder={t("Optional - why it was issued")}
+              placeholder={t("Optional - why it was issued, only you see this")}
             />
           </label>
         </div>
@@ -889,7 +889,11 @@ export function CouponsPanel({
                   <Fragment key={coupon.id}>
                     <tr className={coupon.spendable ? "" : "product-row-inactive"}>
                       <td>
-                        <button className="link-button coupon-code" onClick={() => void toggleCoupon(coupon)} type="button">
+                        <button
+                          className="link-button coupon-code"
+                          onClick={() => (coupon.kind === "credit" ? toggleCoupon(coupon) : setPreviewCoupon(coupon.id))}
+                          type="button"
+                        >
                           {coupon.kind === "credit" ? t("Account credit") : coupon.code}
                         </button>
                         <em className="product-row-meta">
@@ -908,8 +912,8 @@ export function CouponsPanel({
                       <td>{formatMoney(coupon.originalValue, coupon.currency)}</td>
                       <td>{SOURCE_LABELS[coupon.source] || coupon.source}</td>
                       <td className="product-row-actions">
-                        <button className="link-button" onClick={() => void toggleCoupon(coupon)} type="button">
-                          {open ? t("Close") : t("History")}
+                        <button className="link-button" onClick={() => toggleCoupon(coupon)} type="button">
+                          {open ? t("Close") : t("Details")}
                         </button>
                         <button
                           className="text-link-button"
@@ -923,25 +927,11 @@ export function CouponsPanel({
                     {open && (
                       <tr className="product-stock-row">
                         <td colSpan={6}>
-                          <div className="product-movement-list">
-                            {redemptionsLoading && <Loading what={t("history")} className="field-help" />}
-                            {!redemptionsLoading && !redemptions.length && (
-                              <p className="field-help">{t("Not used yet.")}</p>
-                            )}
-                            {!redemptionsLoading &&
-                              redemptions.map((entry) => (
-                                <div key={entry.id} className="product-movement">
-                                  <strong className={entry.amount > 0 ? "negative" : "positive"}>
-                                    {entry.amount > 0 ? `-${entry.amount}` : `+${Math.abs(entry.amount)}`}
-                                  </strong>
-                                  <span>{entry.note || (entry.amount > 0 ? t("Redeemed") : t("Put back"))}</span>
-                                  <em>
-                                    {entry.createdAt ? new Date(entry.createdAt).toLocaleString(readerLocale()) : ""}
-                                    {entry.resultingBalance === null ? "" : ` - left ${entry.resultingBalance}`}
-                                  </em>
-                                </div>
-                              ))}
-                          </div>
+                          {openDetailsState === "loading" && <Loading what={t("details")} className="field-help" />}
+                          {openDetailsState === "error" && <p className="field-help">{t("Could not load this voucher.")}</p>}
+                          {openDetailsState === "loaded" && openDetails?.coupon.id === coupon.id && (
+                            <VoucherDetails details={openDetails} formatMoney={formatMoney} />
+                          )}
                         </td>
                       </tr>
                     )}
@@ -952,6 +942,9 @@ export function CouponsPanel({
           </table>
         )}
       </article>
+      )}
+      {previewCoupon && (
+        <VoucherPreviewModal couponId={previewCoupon} formatMoney={formatMoney} onClose={() => setPreviewCoupon("")} />
       )}
     </div>
   );

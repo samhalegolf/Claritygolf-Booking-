@@ -4142,8 +4142,15 @@ async function listPosTransactions(accountId: string, url: URL) {
     query: `select=*&${filters.join("&")}&order=created_at.desc&limit=${limit}`,
   });
   const transactions = rows.map(posRowToApi);
-  const itemsByTransaction = await posItemsForTransactions(accountId, transactions.map((entry) => entry.id));
-  const counter = transactions.map((entry) => ({ ...entry, items: itemsByTransaction[entry.id] || [] }));
+  const [itemsByTransaction, vouchersBySale] = await Promise.all([
+    posItemsForTransactions(accountId, transactions.map((entry) => entry.id)),
+    vouchersForSales(accountId, transactions),
+  ]);
+  const counter = transactions.map((entry) => ({
+    ...entry,
+    items: itemsByTransaction[entry.id] || [],
+    vouchers: vouchersBySale[entry.id] || [],
+  }));
   const optix = await listOptixPosRecords(accountId, { from, to, limit, customerId });
   // Newest first across both sources, held to the same limit as before.
   const merged = [...counter, ...optix]
@@ -4214,6 +4221,7 @@ async function listOptixPosRecords(accountId: string, range: { from: string; to:
       updatedAt: String(row.purchased_at ?? ""),
       isLessonPass: row.is_pass === true,
       items: [] as ReturnType<typeof posItemRowToApi>[],
+      vouchers: [] as Array<{ id: string; code: string }>,
     };
   });
 }
@@ -4251,6 +4259,12 @@ function saleCouponRef(transactionId: string, productId = "", unit = 0) {
   return productId ? `pos:${transactionId}:${productId}:${unit}` : `pos:${transactionId}:`;
 }
 
+/** The sale a voucher was issued by, from its saleCouponRef, or "". */
+function saleIdFromCouponRef(ref: unknown) {
+  const match = /^pos:([^:]+):/.exec(String(ref ?? ""));
+  return match ? match[1] : "";
+}
+
 async function issueCouponsForSale(
   accountId: string,
   row: Record<string, unknown>,
@@ -4274,6 +4288,7 @@ async function issueCouponsForSale(
           issuedToName: String(row.gift_recipient_name || row.customer_name || ""),
           issuedToEmail: String(row.customer_email ?? ""),
           customerId: String(row.customer_id ?? ""),
+          giftMessage: String(row.gift_message ?? ""),
           source: row.source === "online" ? "online" : "pos",
           productId: item.productId,
           sourceLineId: saleCouponRef(transactionId, item.productId, unit),
@@ -5965,6 +5980,10 @@ function couponRowToApi(row: Record<string, unknown>) {
     expired,
     spendable: row.status === "active" && remaining > 0 && !expired,
     note: String(row.note ?? ""),
+    // The words for the person it is for, as against the coach's own note.
+    giftMessage: String(row.gift_message ?? ""),
+    // The till or online sale that paid for it, when one did.
+    saleId: saleIdFromCouponRef(row.source_line_id),
     issuedAt: String(row.issued_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -6065,6 +6084,7 @@ async function issueCoupon(
     sourceInvoiceId?: string;
     expiresAt?: string | null;
     note?: string;
+    giftMessage?: string;
   },
 ) {
   const value = round2(cleanNumber(input.value, 0, { min: 0 }));
@@ -6097,6 +6117,7 @@ async function issueCoupon(
     covers_item_name: terms?.itemName || null,
     shows_value: terms ? terms.showsValue : true,
     note: cleanString(input.note, "", 400) || null,
+    gift_message: cleanString(input.giftMessage, "", 500) || null,
     issued_at: nowIso(),
     created_at: nowIso(),
     updated_at: nowIso(),
@@ -6194,6 +6215,83 @@ async function listCouponRedemptions(accountId: string, id: string, url: URL) {
       createdAt: String(row.created_at ?? ""),
     })),
   };
+}
+
+/**
+ * Everything worth knowing about one voucher, for its preview: the gift card
+ * as it prints, the sale that paid for it (who bought it, who it is for, the
+ * message with it), and where it has been spent.
+ */
+async function couponDetails(accountId: string, id: string, url: URL) {
+  const row = await couponRowById(accountId, id);
+  if (!row) throw Object.assign(new Error("Voucher not found."), { status: 404 });
+  const coupon = couponRowToApi(row);
+  const [saleRow, productRows, designValue, history] = await Promise.all([
+    coupon.saleId ? posTransactionRow(accountId, coupon.saleId) : Promise.resolve(null),
+    coupon.productId
+      ? (supabase("billing_products_services", {
+          query: `select=gift_card_design&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(coupon.productId)}&limit=1`,
+        }) as Promise<Array<Record<string, unknown>>>)
+      : Promise.resolve([] as Array<Record<string, unknown>>),
+    readSettingValue(accountId, GIFT_CARD_SETTING),
+    listCouponRedemptions(accountId, id, url),
+  ]);
+  // The voucher's own card when its product has one, else the standard card:
+  // the same choice giftVoucherEmail makes for the PDF.
+  const design = cleanOwnGiftCardDesign(productRows[0]?.gift_card_design) || parseGiftCardDesign(designValue);
+  return {
+    coupon,
+    sale: saleRow
+      ? {
+          id: String(saleRow.id ?? ""),
+          receiptNumber: String(saleRow.receipt_number ?? ""),
+          status: String(saleRow.status ?? ""),
+          source: String(saleRow.source ?? ""),
+          amount: Number(saleRow.amount) || 0,
+          currency: String(saleRow.currency ?? coupon.currency),
+          customerId: String(saleRow.customer_id ?? ""),
+          customerName: String(saleRow.customer_name ?? ""),
+          customerEmail: String(saleRow.customer_email ?? ""),
+          recipientName: String(saleRow.gift_recipient_name ?? ""),
+          giftMessage: String(saleRow.gift_message ?? ""),
+          paidAt: String(saleRow.paid_at ?? saleRow.created_at ?? ""),
+        }
+      : null,
+    giftCard: {
+      design,
+      text: {
+        name: coupon.issuedToName,
+        item: coupon.coversItemName,
+        code: coupon.code,
+        value: coupon.showsValue ? formatMoney(coupon.originalValue, coupon.currency) : "",
+      },
+    },
+    redemptions: history.redemptions,
+  };
+}
+
+/**
+ * The codes each listed sale issued, so the sales list can show and open them.
+ * Read in one pass by date: a sale's vouchers are issued when it is paid, which
+ * is never before it was created.
+ */
+async function vouchersForSales(accountId: string, sales: Array<{ id: string; createdAt: string }>) {
+  const bySale: Record<string, Array<{ id: string; code: string }>> = {};
+  if (!sales.length) return bySale;
+  const ids = new Set(sales.map((sale) => sale.id));
+  const earliest = sales.reduce((min, sale) => (sale.createdAt && sale.createdAt < min ? sale.createdAt : min), sales[0].createdAt || "");
+  const rows = (await supabase("billing_coupons", {
+    query:
+      `select=id,code,source_line_id&account_id=eq.${encodeFilter(accountId)}` +
+      `&source_line_id=like.${encodeFilter("pos:*")}` +
+      (earliest ? `&issued_at=gte.${encodeFilter(earliest)}` : "") +
+      `&order=created_at.asc&limit=5000`,
+  })) as Array<Record<string, unknown>>;
+  for (const row of rows) {
+    const saleId = saleIdFromCouponRef(row.source_line_id);
+    if (ids.has(saleId)) (bySale[saleId] ||= []).push({ id: String(row.id ?? ""), code: String(row.code ?? "") });
+  }
+  return bySale;
 }
 
 // Take value off a coupon. Returns the new balance, or null when the coupon is
@@ -7762,8 +7860,8 @@ export default async function handler(req: Request) {
     if (action === "coupons/lookup" && req.method === "GET") {
       return json(await lookupCoupon(accountId, url.searchParams.get("code") || ""));
     }
-    if (action.startsWith("coupons/") && action.endsWith("/redemptions") && req.method === "GET") {
-      return json(await listCouponRedemptions(accountId, action.slice("coupons/".length, -"/redemptions".length), url));
+    if (action.startsWith("coupons/") && action.split("/").length === 2 && req.method === "GET") {
+      return json(await couponDetails(accountId, action.slice("coupons/".length), url));
     }
     if (action.startsWith("coupons/") && (req.method === "PUT" || req.method === "PATCH")) {
       return json(await updateCoupon(accountId, action.slice("coupons/".length), await parseBody(req)));
