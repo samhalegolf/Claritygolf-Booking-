@@ -5097,7 +5097,6 @@
   "Inside {page}": "Sivulla {page}",
   "{count} inside": "{count} sisällä",
   "[recipient name]": "[saajan nimi]",
-  "One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.": "Yksi viesti jokaista varaukselle tai lahjakortille tapahtuvaa asiaa kohden, ja sanamuoto on sinun. Kaikki, mihin et koske, säilyttää Clarityn sanamuodon, joten avaamatonkin viesti on hyvin kirjoitettu.",
   "Recipient name": "Saajan nimi",
   "Could not make the preview. Try uploading the picture again.": "Esikatselua ei voitu luoda. Yritä ladata kuva uudelleen.",
   "Gift card": "Tulostettava lahjakortti",
@@ -5270,5 +5269,10 @@
   "Left to spend": "Jäljellä käytettäväksi",
   "Their message": "Heidän viestinsä",
   "Gift voucher {code}": "Lahjakortti {code}",
-  "voucher": "lahjakortti"
+  "voucher": "lahjakortti",
+  "Gift voucher template": "Lahjakorttipohja",
+  "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "Sähköposti, jonka ostaja saa ostaessaan lahjakortin verkkokaupastasi, ja siihen liitetty lahjakortti. Lahjakortilla voi sen sijaan olla oma korttinsa ja tekstinsä, asetettuna kohdassa Luo tai muokkaa lahjakortteja.",
+  "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Yksi viesti jokaista varaukselle tapahtuvaa asiaa kohden, ja sanamuoto on sinun. Mihin et koske, pitää Clarityn sanamuodon, joten koskaan avaamatonkin viesti on hyvä lukea. Lahjakortin sähköposti ja kortti ovat kohdassa Laskutus › Lahjakortit › Pohjat.",
+  "Edit the standard gift card and email (Vouchers › Templates)": "Muokkaa vakiolahjakorttia ja sähköpostia (Lahjakortit › Pohjat)",
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Tämä on vakiolahjakorttisi ja -sähköpostisi. Lahjakortilla voi olla omansa, asetettuna siellä missä sitä muokataan kohdassa Laskutus › Lahjakortit › Luo tai muokkaa lahjakortteja. Koodit, kuitti ja lahjakortti täytetään tilauskohtaisesti."
 }

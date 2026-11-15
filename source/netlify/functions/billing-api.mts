@@ -276,7 +276,7 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     // Shown on the website store: a voucher or goods alike.
     sell_online: raw?.sellOnline === true,
     // A voucher's own gift card and email wording. Null: it uses the standard
-    // ones under Settings › Templates › Gift voucher. Its options (variants)
+    // ones under Billing › Vouchers › Templates. Its options (variants)
     // all share these.
     gift_card_design: (() => {
       const design = raw?.isVoucher === true ? cleanOwnGiftCardDesign(raw?.giftCardDesign) : null;
@@ -7585,7 +7585,7 @@ export async function settlePosCheckoutFromWebhook(accountId: string, session: R
  * The words are the coach's: the first voucher in the order with its own email
  * wording supplies it line by line, and any line it leaves blank (or every
  * line, for a voucher with none) comes from the standard gift voucher template
- * under Settings › Templates. Each voucher is printed on its own gift card when
+ * under Billing › Vouchers › Templates. Each voucher is printed on its own gift card when
  * it has one, else the standard card, as one PDF per card with a page per
  * voucher. No artwork, no card: the codes are in the email either way.
  */

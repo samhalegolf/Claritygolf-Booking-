@@ -5097,7 +5097,6 @@
   "Inside {page}": "W {page}",
   "{count} inside": "{count} wewnątrz",
   "[recipient name]": "[imię i nazwisko odbiorcy]",
-  "One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.": "Jedna wiadomość na każde zdarzenie dotyczące rezerwacji lub bonu podarunkowego, a treść należy do Ciebie. Wszystko, czego nie zmienisz, zachowuje treść Clarity, więc wiadomość, której nigdy nie otworzysz, nadal dobrze się czyta.",
   "Recipient name": "Imię i nazwisko odbiorcy",
   "Could not make the preview. Try uploading the picture again.": "Nie udało się utworzyć podglądu. Spróbuj ponownie przesłać zdjęcie.",
   "Gift card": "Karta podarunkowa",
@@ -5270,5 +5269,10 @@
   "Left to spend": "Pozostało do wykorzystania",
   "Their message": "Ich wiadomość",
   "Gift voucher {code}": "Bon podarunkowy {code}",
-  "voucher": "bon"
+  "voucher": "bon",
+  "Gift voucher template": "Szablon bonu podarunkowego",
+  "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "E-mail, który kupujący dostaje po zakupie bonu podarunkowego w Twoim sklepie internetowym, oraz załączona karta podarunkowa. Bon może zamiast tego mieć własną kartę i treść, ustawione w Utwórz lub edytuj bony.",
+  "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Jedna wiadomość na każde zdarzenie dotyczące rezerwacji, a treść należy do Ciebie. To, czego nie zmienisz, zachowuje treść Clarity, więc nawet nieotwierana wiadomość dobrze się czyta. E-mail i karta bonu podarunkowego są w Rozliczenia › Bony › Szablony.",
+  "Edit the standard gift card and email (Vouchers › Templates)": "Edytuj standardową kartę podarunkową i e-mail (Bony › Szablony)",
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "To jest Twoja standardowa karta podarunkowa i e-mail. Bon może mieć własne, ustawione tam, gdzie jest edytowany w Rozliczenia › Bony › Utwórz lub edytuj bony. Kody, paragon i karta podarunkowa są uzupełniane dla każdego zamówienia."
 }

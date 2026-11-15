@@ -1346,6 +1346,9 @@ const defaultNotificationSettings: NotificationSettings = {
  * So a block sends only the keys it owns. The write path keys off
  * `hasOwnProperty`, so a partial body leaves everything else alone.
  */
+/** Settings › Templates shows the booking messages; the gift voucher one is under Billing › Vouchers › Templates. */
+const BOOKING_MESSAGE_VARIANTS = NOTIFICATION_VARIANTS.map((variant) => variant.id).filter((id) => id !== "giftVoucher");
+
 const NOTIFICATION_BLOCK_KEYS = {
   /** Settings › Email / SMS › Sender & delivery. Text, behind Edit/Save. */
   emailSender: [
@@ -1369,11 +1372,12 @@ const NOTIFICATION_BLOCK_KEYS = {
   templates: [
     "notificationTemplates",
     "mapLinkLabel",
-    "giftCardDesign",
     "notificationSubjectLine",
     "adminEmailSubject",
     "adminEmailIntro",
   ],
+  /** Billing › Vouchers › Templates. The gift voucher email lives in notificationTemplates with the booking ones. */
+  giftVoucherTemplates: ["notificationTemplates", "giftCardDesign"],
   bookingNotice: ["minBookingNoticeMinutes"],
   lookBusy: ["publicBookingLookBusy"],
   playerBookingEmbed: [
@@ -2309,6 +2313,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     value: notificationSettings,
     onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.templates),
   });
+  const giftVoucherTemplatesEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.giftVoucherTemplates),
+  });
   const bookingNoticeEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
     onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.bookingNotice),
@@ -2338,6 +2346,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       { id: "email-notifications", title: t("Email"), editor: emailNotificationsEditor },
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
       { id: "message-templates", title: t("Templates"), editor: messageTemplatesEditor },
+      { id: "gift-voucher-templates", title: t("Gift voucher template"), editor: giftVoucherTemplatesEditor },
       { id: "booking-page-notice", title: t("Booking Page notice"), editor: bookingNoticeEditor },
       { id: "booking-page-look-busy", title: t("Look busy"), editor: lookBusyEditor },
       { id: "booking-screen-name", title: t("Booking Page screen name"), editor: bookingScreenNameEditor },
@@ -2361,12 +2370,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // Empty for every other route in, so Settings still opens with nothing
   // expanded (see SettingsGroups).
   const [requestedSettingsGroup, setRequestedSettingsGroup] = useState("");
-  // Which Templates tab opens first: the gift voucher one when a voucher's
-  // "Edit the standard gift card and email" link brought the coach here.
-  const [templatesStartOnGift, setTemplatesStartOnGift] = useState(false);
-  useEffect(() => {
-    if (settingsTab !== "notifications") setTemplatesStartOnGift(false);
-  }, [settingsTab]);
   // A section of the workspace opened over the coach profile rather than
   // navigated to. Null when Settings or Billing is being used as a page.
   //
@@ -2433,6 +2436,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const messageTemplatesDraft = messageTemplatesEditor.draftValue;
   const messageTemplatesIsLocked =
     messageTemplatesEditor.status !== "editing" && messageTemplatesEditor.status !== "error";
+  const giftVoucherTemplatesDraft = giftVoucherTemplatesEditor.draftValue;
+  const giftVoucherTemplatesIsLocked =
+    giftVoucherTemplatesEditor.status !== "editing" && giftVoucherTemplatesEditor.status !== "error";
   const bookingNoticeDraft = bookingNoticeEditor.draftValue;
   const bookingNoticeIsLocked = bookingNoticeEditor.status !== "editing" && bookingNoticeEditor.status !== "error";
   const lookBusyIsLocked = lookBusyEditor.status !== "editing" && lookBusyEditor.status !== "error";
@@ -15996,10 +16002,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           onEditLessonTypes={() =>
             openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)
           }
-          onOpenGiftTemplates={() => {
-            setTemplatesStartOnGift(true);
-            openProfileTarget({ kind: "settings", tab: "notifications", group: "message-templates" }, t("Templates"));
-          }}
+          onOpenGiftTemplates={() => setBillingSection("vouchers-templates")}
         />
       </Suspense>
     )}
@@ -16034,6 +16037,49 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           onRepairOwners={repairVoucherOwners}
         />
       </Suspense>
+    )}
+
+    {/* The gift voucher email and the standard gift card. Saved with the
+        other message templates (notificationTemplates, giftCardDesign), but
+        edited here, beside the vouchers it goes out with. */}
+    {billingSection === "vouchers-templates" && (
+      <div className="billing-dashboard">
+        <article className="data-card wide">
+          <p className="field-help">{t("The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.")}</p>
+          <EditableSettingsBlock
+            id="gift-voucher-templates-block"
+            title={t("Gift voucher template")}
+            status={giftVoucherTemplatesEditor.status}
+            dirty={giftVoucherTemplatesEditor.dirty}
+            errorMessage={giftVoucherTemplatesEditor.errorMessage}
+            onEdit={() => startEditableBlock("gift-voucher-templates")}
+            onCancel={() => cancelEditableBlock("gift-voucher-templates")}
+            onSave={() => void saveEditableBlock("gift-voucher-templates")}
+          >
+            <Suspense fallback={<Loading what={t("templates")} />}>
+              <MessageTemplatesPanel
+                templates={giftVoucherTemplatesDraft.notificationTemplates}
+                mapLinkLabel={giftVoucherTemplatesDraft.mapLinkLabel}
+                locked={giftVoucherTemplatesIsLocked}
+                businessName={coachAccount.businessName}
+                messageLanguage={coachAccount.messageLanguage}
+                logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
+                venueName={coachAccount.venueShortName || coachAccount.venueName}
+                renderPreview={(template) => fillMergeFields(template, emailTemplateVariables)}
+                onChange={(templates) =>
+                  updateNotificationBlockDraft(giftVoucherTemplatesEditor, "notificationTemplates", templates)
+                }
+                onMapLinkLabelChange={() => undefined}
+                variants={["giftVoucher"]}
+                giftCardDesign={giftVoucherTemplatesDraft.giftCardDesign}
+                onGiftCardDesignChange={(design) =>
+                  updateNotificationBlockDraft(giftVoucherTemplatesEditor, "giftCardDesign", design)
+                }
+              />
+            </Suspense>
+          </EditableSettingsBlock>
+        </article>
+      </div>
     )}
 
     {billingSection.startsWith("passes-") && (
@@ -18107,7 +18153,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 title={t("Templates")}
                 className="notification-card message-templates-card"
               >
-                <p className="settings-note">{t("One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.")}</p>
+                <p className="settings-note">{t("One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.")}</p>
                 <EditableSettingsBlock
                   id="message-templates-block"
                   title={t("Templates")}
@@ -18134,11 +18180,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       onMapLinkLabelChange={(label) =>
                         updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
                       }
-                      initialVariant={templatesStartOnGift ? "giftVoucher" : "booked"}
-                      giftCardDesign={messageTemplatesDraft.giftCardDesign}
-                      onGiftCardDesignChange={(design) =>
-                        updateNotificationBlockDraft(messageTemplatesEditor, "giftCardDesign", design)
-                      }
+                      variants={BOOKING_MESSAGE_VARIANTS}
                     />
                   </Suspense>
                 {/* The two pieces of wording that are not one message: a

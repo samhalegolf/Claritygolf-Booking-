@@ -5097,7 +5097,6 @@
   "Inside {page}": "Dentro {page}",
   "{count} inside": "{count} all'interno",
   "[recipient name]": "[nome del destinatario]",
-  "One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.": "Un messaggio per ogni cosa che succede a una prenotazione o a un buono regalo, con il testo che scegli tu. Ciò che non modifichi mantiene il testo di Clarity, così anche un messaggio che non apri mai si legge bene.",
   "Recipient name": "Nome del destinatario",
   "Could not make the preview. Try uploading the picture again.": "Impossibile creare l’anteprima. Prova a caricare di nuovo l’immagine.",
   "Gift card": "Biglietto regalo",
@@ -5270,5 +5269,10 @@
   "Left to spend": "Ancora da spendere",
   "Their message": "Il loro messaggio",
   "Gift voucher {code}": "Buono regalo {code}",
-  "voucher": "buono"
+  "voucher": "buono",
+  "Gift voucher template": "Modello buono regalo",
+  "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "L'email che un acquirente riceve quando compra un buono regalo nel tuo negozio online, e la gift card allegata. Un buono può avere invece una propria carta e un proprio testo, impostati in Crea o modifica buoni.",
+  "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Un messaggio per ogni cosa che succede a una prenotazione, e il testo è tuo. Ciò che non tocchi mantiene il testo di Clarity, quindi anche un messaggio mai aperto si legge bene. Email e carta del buono regalo sono in Fatturazione › Buoni › Modelli.",
+  "Edit the standard gift card and email (Vouchers › Templates)": "Modifica la gift card e l'email standard (Buoni › Modelli)",
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Questa è la tua gift card e la tua email standard. Un buono può avere i propri, impostati dove viene modificato in Fatturazione › Buoni › Crea o modifica buoni. Codici, ricevuta e gift card vengono compilati per ogni ordine."
 }

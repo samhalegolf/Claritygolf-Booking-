@@ -5097,7 +5097,6 @@
   "Inside {page}": "Inuti {page}",
   "{count} inside": "{count} inuti",
   "[recipient name]": "[mottagarens namn]",
-  "One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.": "Ett meddelande per händelse för en bokning eller ett presentkort, och formuleringen är din. Det du inte rör behåller Claritys formulering, så ett meddelande du aldrig öppnar låter ändå bra.",
   "Recipient name": "Mottagarens namn",
   "Could not make the preview. Try uploading the picture again.": "Förhandsvisningen kunde inte skapas. Prova att ladda upp bilden igen.",
   "Gift card": "Utskrivbart presentkort",
@@ -5270,5 +5269,10 @@
   "Left to spend": "Kvar att använda",
   "Their message": "Deras meddelande",
   "Gift voucher {code}": "Presentkort {code}",
-  "voucher": "presentkort"
+  "voucher": "presentkort",
+  "Gift voucher template": "Mall för presentkort",
+  "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "Mejlet en köpare får när de köper ett presentkort i din webbutik, och presentkortet som bifogas. Ett presentkort kan i stället ha ett eget kort och egen text, inställt under Skapa eller redigera presentkort.",
+  "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Ett meddelande per sak som händer en bokning, och formuleringen är din. Det du låter vara behåller Claritys formulering, så ett meddelande du aldrig öppnar läser ändå bra. Presentkortets mejl och kort finns under Fakturering › Presentkort › Mallar.",
+  "Edit the standard gift card and email (Vouchers › Templates)": "Redigera standardpresentkortet och mejlet (Presentkort › Mallar)",
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Detta är ditt standardpresentkort och -mejl. Ett presentkort kan ha egna, inställda där det redigeras under Fakturering › Presentkort › Skapa eller redigera presentkort. Koderna, kvittot och presentkortet fylls i per beställning."
 }

@@ -5097,7 +5097,6 @@
   "Inside {page}": "In {page}",
   "{count} inside": "{count} erin",
   "[recipient name]": "[naam ontvanger]",
-  "One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.": "Eén bericht per gebeurtenis bij een boeking of een cadeaubon, en de tekst bepaal jij. Alles wat je niet aanpast, houdt de tekst van Clarity, dus een bericht dat je nooit opent, leest nog steeds goed.",
   "Recipient name": "Naam ontvanger",
   "Could not make the preview. Try uploading the picture again.": "Het voorbeeld kon niet worden gemaakt. Probeer de afbeelding opnieuw te uploaden.",
   "Gift card": "Cadeaukaart",
@@ -5270,5 +5269,10 @@
   "Left to spend": "Nog te besteden",
   "Their message": "Hun bericht",
   "Gift voucher {code}": "Waardebon {code}",
-  "voucher": "waardebon"
+  "voucher": "waardebon",
+  "Gift voucher template": "Sjabloon waardebon",
+  "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "De e-mail die een koper krijgt als die een waardebon koopt in je webwinkel, en de cadeaukaart als bijlage. Een waardebon kan ook een eigen kaart en tekst hebben, ingesteld onder Waardebonnen maken of bewerken.",
+  "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Eén bericht per gebeurtenis bij een boeking, en de tekst is van jou. Wat je laat staan houdt de tekst van Clarity, dus ook een bericht dat je nooit opent leest goed. De e-mail en kaart voor waardebonnen staan onder Facturatie › Waardebonnen › Sjablonen.",
+  "Edit the standard gift card and email (Vouchers › Templates)": "Standaard cadeaukaart en e-mail bewerken (Waardebonnen › Sjablonen)",
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dit is je standaard cadeaukaart en e-mail. Een waardebon kan een eigen hebben, ingesteld waar hij wordt bewerkt onder Facturatie › Waardebonnen › Waardebonnen maken of bewerken. De codes, het bonnetje en de cadeaukaart worden per bestelling ingevuld."
 }

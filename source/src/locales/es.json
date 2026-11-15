@@ -5097,7 +5097,6 @@
   "Inside {page}": "Dentro de {page}",
   "{count} inside": "{count} dentro",
   "[recipient name]": "[nombre del destinatario]",
-  "One message per thing that happens to a booking or a gift voucher, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.": "Un mensaje por cada cosa que le pasa a una reserva o a una tarjeta regalo, y el texto lo decides tú. Lo que no toques mantiene el texto de Clarity, así que un mensaje que nunca abras se lee bien igualmente.",
   "Recipient name": "Nombre del destinatario",
   "Could not make the preview. Try uploading the picture again.": "No se pudo crear la vista previa. Prueba a subir la imagen de nuevo.",
   "Gift card": "Tarjeta regalo imprimible",
@@ -5270,5 +5269,10 @@
   "Left to spend": "Saldo disponible",
   "Their message": "Su mensaje",
   "Gift voucher {code}": "Vale regalo {code}",
-  "voucher": "vale"
+  "voucher": "vale",
+  "Gift voucher template": "Plantilla de vale regalo",
+  "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "El correo que recibe un comprador cuando compra un vale regalo en tu tienda online, y la tarjeta regalo adjunta. Un vale puede tener su propia tarjeta y texto, configurados en Crear o editar vales.",
+  "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Un mensaje por cada cosa que le pasa a una reserva, y el texto es tuyo. Lo que no toques conserva el texto de Clarity, así que un mensaje que nunca abras se sigue leyendo bien. El correo y la tarjeta del vale regalo están en Facturación › Vales › Plantillas.",
+  "Edit the standard gift card and email (Vouchers › Templates)": "Editar la tarjeta regalo y el correo estándar (Vales › Plantillas)",
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Esta es tu tarjeta regalo y tu correo estándar. Un vale puede tener los suyos, configurados donde se edita en Facturación › Vales › Crear o editar vales. Los códigos, el recibo y la tarjeta regalo se rellenan en cada pedido."
 }

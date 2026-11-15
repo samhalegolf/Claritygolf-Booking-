@@ -96,7 +96,7 @@ export type BillingCatalogItem = {
   downloadUrl?: string;
   variants?: Array<{ id: string; name: string; price: number | null; description: string }>;
   // A voucher's own gift card and email wording; null uses the standard ones
-  // under Settings › Templates › Gift voucher. Its options all share them.
+  // under Billing › Vouchers › Templates. Its options all share them.
   giftCardDesign?: GiftCardDesign | null;
   giftEmail?: GiftEmailWording | null;
   // A lesson type, shown in the catalog but owned by Settings > Services. It

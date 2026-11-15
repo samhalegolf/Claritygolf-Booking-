@@ -86,7 +86,7 @@ export type OnlineShopItem = {
 };
 
 export type OnlineShopCards = {
-  /** The business's standard gift card, from Settings › Templates. */
+  /** The business's standard gift card, from Billing › Vouchers › Templates. */
   standard: GiftCardDesign | null;
   /** What a voucher can be for, by its till id: lesson types and products, named as they are now. */
   itemNames: Map<string, string>;

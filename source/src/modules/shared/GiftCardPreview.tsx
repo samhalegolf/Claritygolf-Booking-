@@ -1,5 +1,5 @@
 // A gift card as it prints: the coach's artwork with the voucher's own words
-// written on where the coach put them (Settings › Templates, or the voucher's
+// written on where the coach put them (Billing › Vouchers › Templates, or the voucher's
 // own card under Billing). The designer edits on top of the same face, and the
 // public shop shows it to a buyer before they pay.
 //
