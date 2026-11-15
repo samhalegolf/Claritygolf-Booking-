@@ -1,4 +1,5 @@
-// Settings > Notifications > Templates. The coach writes what a client
+// Settings > Notifications > Templates, and Billing > Vouchers > Templates for
+// the gift voucher email and card. The coach writes what a client
 // reads, on a preview of the message itself rather than in a column of labelled
 // boxes — so the length of a subject line and the tone of a sign-off are judged
 // where they will actually be seen.
@@ -134,11 +135,11 @@ export type MessageTemplatesPanelProps = {
   renderPreview: (template: string) => string;
   onChange: (templates: NotificationTemplates) => void;
   onMapLinkLabelChange: (label: string) => void;
-  /** The tab that opens first. */
-  initialVariant?: NotificationVariantId;
+  /** The messages shown, as tabs; the first opens first. One shows no tabs. */
+  variants: NotificationVariantId[];
   /** The card the gift voucher email attaches. Edited on that tab. */
-  giftCardDesign: GiftCardDesign;
-  onGiftCardDesignChange: (design: GiftCardDesign) => void;
+  giftCardDesign?: GiftCardDesign;
+  onGiftCardDesignChange?: (design: GiftCardDesign) => void;
 };
 
 export function MessageTemplatesPanel({
@@ -152,11 +153,12 @@ export function MessageTemplatesPanel({
   renderPreview,
   onChange,
   onMapLinkLabelChange,
-  initialVariant = "booked",
+  variants,
   giftCardDesign,
   onGiftCardDesignChange,
 }: MessageTemplatesPanelProps) {
-  const [variant, setVariant] = useState<NotificationVariantId>(initialVariant);
+  const shown = NOTIFICATION_VARIANTS.filter((entry) => variants.includes(entry.id));
+  const [variant, setVariant] = useState<NotificationVariantId>(shown[0]?.id ?? "booked");
   const [channel, setChannel] = useState<"email" | "text">("email");
   const [narrow, setNarrow] = useState(false);
   // Which field is open, and the uncommitted text in it. One at a time: the
@@ -164,7 +166,7 @@ export function MessageTemplatesPanel({
   const [editing, setEditing] = useState<NotificationTemplateField | "mapLink" | "">("");
   const [draft, setDraft] = useState("");
 
-  const active = NOTIFICATION_VARIANTS.find((entry) => entry.id === variant) ?? NOTIFICATION_VARIANTS[0];
+  const active = shown.find((entry) => entry.id === variant) ?? shown[0] ?? NOTIFICATION_VARIANTS[0];
   const activeScreen = variantScreenText(active.id);
   // An email-only message has no text to write, whichever channel was last open.
   const isText = channel === "text" && !active.emailOnly;
@@ -314,8 +316,9 @@ export function MessageTemplatesPanel({
           <RotateCcw size={14} />{t("Reset {label}", { label: activeScreen.label.toLowerCase() })}</button>
       </div>
 
+      {shown.length > 1 && (
       <div className="mt-tabs" role="tablist" aria-label={t("What happened")}>
-        {NOTIFICATION_VARIANTS.map((entry) => (
+        {shown.map((entry) => (
           <button
             key={entry.id}
             className={entry.id === variant ? "is-active" : ""}
@@ -332,6 +335,7 @@ export function MessageTemplatesPanel({
           </button>
         ))}
       </div>
+      )}
 
       <div className="mt-stage">
         <p className="mt-when">{activeScreen.when}</p>
@@ -434,11 +438,13 @@ export function MessageTemplatesPanel({
           </div>
         </div>
 
-        {giftVoucher && <GiftCardDesigner design={giftCardDesign} locked={locked} onChange={onGiftCardDesignChange} />}
+        {giftVoucher && giftCardDesign && onGiftCardDesignChange && (
+          <GiftCardDesigner design={giftCardDesign} locked={locked} onChange={onGiftCardDesignChange} />
+        )}
 
         <p className="mt-note">
           {giftVoucher
-            ? t("This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers. The codes, the receipt and the gift card are filled in per order.")
+            ? t("This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.")
             : isText
             ? t("Links and merge fields are filled in per lesson. What you write is saved against {label} only.", { label: activeScreen.label })
             : t("The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against {label} only.", { label: activeScreen.label })}

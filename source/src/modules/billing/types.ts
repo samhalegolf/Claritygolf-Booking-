@@ -8,7 +8,7 @@
 // The persisted, backend-owned shapes (Billing*Record / report / preset types)
 // mirror what netlify/functions/billing-api.mts returns.
 
-import type { GiftCardDesign, GiftEmailWording } from "../../../netlify/functions/_shared/gift-card.mts";
+import type { GiftCardDesign, GiftCardText, GiftEmailWording } from "../../../netlify/functions/_shared/gift-card.mts";
 
 export type InvoiceCustomFieldPlacement = "header" | "bill-to" | "payment" | "footer";
 
@@ -96,7 +96,7 @@ export type BillingCatalogItem = {
   downloadUrl?: string;
   variants?: Array<{ id: string; name: string; price: number | null; description: string }>;
   // A voucher's own gift card and email wording; null uses the standard ones
-  // under Settings › Templates › Gift voucher. Its options all share them.
+  // under Billing › Vouchers › Templates. Its options all share them.
   giftCardDesign?: GiftCardDesign | null;
   giftEmail?: GiftEmailWording | null;
   // A lesson type, shown in the catalog but owned by Settings > Services. It
@@ -409,6 +409,8 @@ export type PosTransaction = {
   // Empty for a plain lesson or free-form sale; populated when products were
   // rung up. Stock moves off these lines, not off the amount.
   items?: PosTransactionItem[];
+  // The voucher codes the sale issued, when it sold any.
+  vouchers?: Array<{ id: string; code: string }>;
 };
 
 // bookingId -> the paid sale that settled it. Drives the "paid at POS" badge on
@@ -539,9 +541,35 @@ export type BillingCoupon = {
   expired: boolean;
   spendable: boolean;
   note: string;
+  // The words for the person it is for (the coach's own words go in note).
+  giftMessage?: string;
+  // The till or online sale that paid for it. Empty for one issued by hand or
+  // imported from Stripe.
+  saleId?: string;
   issuedAt: string;
   createdAt: string;
   updatedAt: string;
+};
+
+/** One voucher in full, for its preview: GET /api/billing/coupons/:id. */
+export type CouponDetails = {
+  coupon: BillingCoupon;
+  sale: {
+    id: string;
+    receiptNumber: string;
+    status: string;
+    source: string;
+    amount: number;
+    currency: string;
+    customerId: string;
+    customerName: string;
+    customerEmail: string;
+    recipientName: string;
+    giftMessage: string;
+    paidAt: string;
+  } | null;
+  giftCard: { design: GiftCardDesign; text: GiftCardText };
+  redemptions: CouponRedemption[];
 };
 
 // Append-only. Negative amounts are value put back by a refunded or voided sale.

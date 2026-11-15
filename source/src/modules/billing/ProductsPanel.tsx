@@ -12,7 +12,7 @@ import { Loading } from "../shared/Loading";
 //
 // A gift voucher is set up whole here: its options ($50, $100, ...), whether
 // it shows on the website store, and its gift card and email -- its own, or
-// the standard ones under Settings › Templates › Gift voucher. Every option of
+// the standard ones under Billing › Vouchers › Templates. Every option of
 // a voucher shares its card and email.
 //
 // Presentational, like BillingReportsPanel: App.tsx owns the list and every
@@ -163,7 +163,7 @@ export type ProductsPanelProps = {
   // Takes the coach to where lesson types are edited. Services in this list
   // are only shown here; they belong to that screen.
   onEditLessonTypes: () => void;
-  // Takes the coach to the standard gift card and email, Settings › Templates › Gift voucher.
+  // Takes the coach to the standard gift card and email, Billing › Vouchers › Templates.
   onOpenGiftTemplates: () => void;
 };
 
@@ -806,7 +806,7 @@ export function ProductsPanel({
                   <p className="field-help">{t("It uses your standard gift voucher email.")}</p>
                 )}
                 <button className="text-link-button" type="button" onClick={onOpenGiftTemplates}>
-                  {t("Edit the standard gift card and email (Settings › Templates › Gift voucher)")}
+                  {t("Edit the standard gift card and email (Vouchers › Templates)")}
                 </button>
               </div>
             )}

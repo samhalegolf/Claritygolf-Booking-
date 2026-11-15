@@ -6,6 +6,7 @@ import { t } from "../../lib/i18n";
 import {
   ClarityBookingPages,
   ClarityDashboardHome,
+  ClarityEmail,
   ClarityIntegrations,
   ClarityInvoices,
   ClarityPassesCredits,
@@ -34,6 +35,7 @@ export type BillingSection =
   | "vouchers-edit"
   | "vouchers-records"
   | "vouchers-integrations"
+  | "vouchers-templates"
   | "passes-issue"
   | "passes-edit"
   | "passes-records"
@@ -76,6 +78,7 @@ export const BILLING_SECTION_NAV: Array<{
   { key: "vouchers-issue", label: t("Issue Voucher"), icon: Plus, group: "vouchers" },
   { key: "vouchers-edit", label: t("Create or Edit Vouchers"), icon: ClarityProducts, group: "vouchers" },
   { key: "vouchers-records", label: t("Voucher Records"), icon: ClarityPassesCredits, group: "vouchers" },
+  { key: "vouchers-templates", label: t("Templates"), icon: ClarityEmail, group: "vouchers" },
   { key: "vouchers-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "vouchers" },
   { key: "passes-issue", label: t("Issue or Redeem Passes"), icon: Plus, group: "passes" },
   { key: "passes-edit", label: t("Create or Edit Passes"), icon: ClarityProducts, group: "passes" },

@@ -1,4 +1,4 @@
-// Settings › Templates › Gift voucher: the card a voucher bought online is
+// Billing › Vouchers › Templates: the card a voucher bought online is
 // printed on. The coach uploads their artwork and drags the recipient's name,
 // the code and the value to where they belong on it; the send path writes each
 // voucher's own onto the same spots (_shared/gift-card-pdf.mts).

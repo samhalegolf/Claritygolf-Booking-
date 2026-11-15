@@ -19022,3 +19022,120 @@
   color: var(--c-muted);
   font-size: 0.92rem;
 }
+
+/* --- A voucher in full (VoucherPreview.tsx) --- */
+
+.voucher-preview-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.voucher-preview-modal h2.coupon-code {
+  margin: 12px 0;
+  font-size: 20px;
+}
+
+.voucher-preview-card {
+  margin-bottom: 16px;
+  border: 1px solid var(--c-border);
+}
+
+.voucher-preview-plain {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  margin-bottom: 16px;
+  padding: 28px 20px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+  text-align: center;
+}
+
+.voucher-preview-plain span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.voucher-preview-plain strong {
+  font-size: 18px;
+}
+
+.voucher-preview-plain b {
+  font-size: 22px;
+}
+
+.voucher-preview-plain em {
+  font-style: normal;
+  color: var(--c-text-soft);
+}
+
+.voucher-details {
+  display: grid;
+  gap: 14px;
+}
+
+.voucher-details-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.voucher-details-facts > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.voucher-details-facts dt {
+  color: var(--c-muted);
+}
+
+.voucher-details-facts dd {
+  margin: 0;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+
+.voucher-details-words {
+  display: grid;
+  gap: 4px;
+}
+
+.voucher-details-words > span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.voucher-details-words p,
+.voucher-details-words blockquote {
+  margin: 0;
+  font-size: 13px;
+  white-space: pre-line;
+}
+
+.voucher-details-words blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--c-border);
+  font-style: italic;
+}
+
+.pos-voucher-codes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 2px;
+}
+
+.pos-voucher-codes .link-button {
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .voucher-details-facts > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
