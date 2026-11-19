@@ -307,6 +307,12 @@ page and writes the title, description, Open Graph tags and canonical
 link into the served HTML. On a business's own domain, `/sitemap.xml`
 lists its published pages (`GET /api/site/public/sitemap`).
 
+A page with FAQ blocks also carries its questions and answers as
+schema.org `FAQPage` data (`sitePageFaqSchema` in `document.mts`), in a
+`<script type="application/ld+json" id="site-faq-schema">` tag written
+the same two ways: by the edge function into the served HTML, and by the
+browser when the page changes. A question with no answer is left out.
+
 ## Embeds and the live preview
 
 An embed block, and a venue's "other booking system" field, take an
