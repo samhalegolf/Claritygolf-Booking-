@@ -183,6 +183,20 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   const notLive = isPublic && Boolean(state?.site && state.site.updatedAt > (state.site.publishedAt || ""));
   const canSave = dirty || notLive;
 
+  /**
+   * Whether visitors can see a page. Publish is site-wide, so a page is
+   * Published once it has a live copy on a public site, and stays a Draft
+   * until then (a new page, or every page while the site is not public).
+   * A published page with edits not yet live says so.
+   */
+  const pageStatus = (page: SitePage): { label: string; live: boolean } => {
+    const view = page.id ? state?.pages.find((candidate) => candidate.id === page.id) : undefined;
+    if (!isPublic || !view?.isPublished) return { label: t("Draft"), live: false };
+    const savedPage = saved?.pages.find((candidate) => candidate.id === page.id);
+    const changed = notLive || JSON.stringify(savedPage) !== JSON.stringify(page);
+    return { label: changed ? t("Changes not live yet") : t("Published"), live: true };
+  };
+
   /** Save, Squarespace's way: on a public site the changes go live at once. */
   async function save(): Promise<SiteView | null> {
     const sending = draftRef.current;
@@ -677,6 +691,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
       }}
     >
       {page.title || page.slug}
+      {pageStatus(page).live ? null : <span className="site-page-status">{t("Draft")}</span>}
     </button>
   );
 
@@ -684,6 +699,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
   const pageRow = (page: SitePage, note: string) => {
     const { siblings, at, first } = siblingsOf(page);
     const kind = page.kind === "article" ? t("Article") : page.kind === "video" ? t("Video") : "";
+    const status = pageStatus(page);
     return (
       <div key={page.slug} className={`site-outline-row${page.slug === currentPage?.slug ? " is-current" : ""}`}>
         <button
@@ -699,6 +715,7 @@ export default function SiteBuilderPanel({ onToast, brandLogo, brandShowLogo, ed
             <strong>{page.title || page.slug}</strong>
             {note || kind ? <em>{[kind, note].filter(Boolean).join(" · ")}</em> : null}
           </span>
+          <span className={`site-page-status${status.live ? " is-live" : ""}`}>{status.label}</span>
         </button>
         <span className="site-outline-actions">
           {page.slug !== HOME_PAGE_SLUG ? (
