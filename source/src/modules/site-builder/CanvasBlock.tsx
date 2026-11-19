@@ -33,6 +33,7 @@ import {
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { CANVAS_RESIZE_HANDLES, addItem, dragBox, duplicateItem, placeItem, readingOrder, restackItem, type CanvasBox, type CanvasHandle } from "./canvasLayout";
 import { EditableText } from "./EditableText";
+import { LinkedLine } from "./LinkedText";
 import type { SiteEditorHooks } from "./SiteRenderer";
 
 /** The editor's hooks, for a free layout drawn in edit mode. Null on the public page and in the plain preview. */
@@ -307,7 +308,7 @@ export function CanvasBlock({
 function lines(text: string): ReactNode {
   return text.split("\n").map((line, index, all) => (
     <span key={index}>
-      {line}
+      <LinkedLine text={line} />
       {index < all.length - 1 ? <br /> : null}
     </span>
   ));

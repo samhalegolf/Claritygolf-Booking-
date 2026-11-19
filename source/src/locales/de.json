@@ -4856,7 +4856,6 @@
   "Tall": "Hoch",
   "Picture": "Bild",
   "Add a second button": "Zweite Schaltfläche hinzufügen",
-  "Blank lines start new paragraphs.": "Leerzeilen beginnen neue Absätze.",
   "Alignment": "Ausrichtung",
   "Columns": "Spalten",
   "Caption": "Bildunterschrift",
@@ -5274,5 +5273,9 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "Die E-Mail, die ein Käufer erhält, wenn er in deinem Onlineshop einen Gutschein kauft, und die angehängte Geschenkkarte. Ein Gutschein kann stattdessen eine eigene Karte und eigenen Text haben, festgelegt unter Gutscheine erstellen oder bearbeiten.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Eine Nachricht für alles, was mit einer Buchung passiert, und der Wortlaut gehört dir. Was du nicht änderst, behält Claritys Wortlaut, sodass sich auch eine nie geöffnete Nachricht gut liest. E-Mail und Karte für Gutscheine findest du unter Abrechnung › Gutscheine › Vorlagen.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Standard-Geschenkkarte und E-Mail bearbeiten (Gutscheine › Vorlagen)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Das ist deine Standard-Geschenkkarte und -E-Mail. Ein Gutschein kann stattdessen eigene haben, festgelegt dort, wo er unter Abrechnung › Gutscheine › Gutscheine erstellen oder bearbeiten bearbeitet wird. Codes, Beleg und Geschenkkarte werden pro Bestellung ausgefüllt."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Das ist deine Standard-Geschenkkarte und -E-Mail. Ein Gutschein kann stattdessen eigene haben, festgelegt dort, wo er unter Abrechnung › Gutscheine › Gutscheine erstellen oder bearbeiten bearbeitet wird. Codes, Beleg und Geschenkkarte werden pro Bestellung ausgefüllt.",
+  "Blank lines start new paragraphs. For a link, choose some words and press Add link.": "Leerzeilen beginnen neue Absätze. Für einen Link markiere ein paar Wörter und tippe auf Link hinzufügen.",
+  "Link to": "Link zu",
+  "Link the chosen words": "Ausgewählte Wörter verlinken",
+  "Add link": "Link hinzufügen"
 }

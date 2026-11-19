@@ -4856,7 +4856,6 @@
   "Tall": "高い",
   "Picture": "写真",
   "Add a second button": "2つ目のボタンを追加",
-  "Blank lines start new paragraphs.": "空行で新しい段落になります。",
   "Alignment": "配置",
   "Columns": "列数",
   "Caption": "キャプション",
@@ -5274,5 +5273,9 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "オンラインショップでギフト券を購入した購入者に届くメールと、添付されるギフトカード。ギフト券ごとに独自のカードと文面を「ギフト券の作成・編集」で設定することもできます。",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "予約に起きる出来事ごとに1通のメッセージ。文面はあなたのものです。手を付けない部分は Clarity の文面のままなので、開かないメッセージも読みやすいままです。ギフト券のメールとカードは「請求 › ギフト券 › テンプレート」にあります。",
   "Edit the standard gift card and email (Vouchers › Templates)": "標準のギフトカードとメールを編集（ギフト券 › テンプレート）",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "これは標準のギフトカードとメールです。ギフト券ごとに独自のものを「請求 › ギフト券 › ギフト券の作成・編集」で設定できます。コード、領収書、ギフトカードは注文ごとに入力されます。"
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "これは標準のギフトカードとメールです。ギフト券ごとに独自のものを「請求 › ギフト券 › ギフト券の作成・編集」で設定できます。コード、領収書、ギフトカードは注文ごとに入力されます。",
+  "Blank lines start new paragraphs. For a link, choose some words and press Add link.": "空行で新しい段落になります。リンクを付けるには、文字を選んで「リンクを追加」を押してください。",
+  "Link to": "リンク先",
+  "Link the chosen words": "選んだ文字にリンクを付ける",
+  "Add link": "リンクを追加"
 }

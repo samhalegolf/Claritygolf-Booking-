@@ -4856,7 +4856,6 @@
   "Tall": "Hoog",
   "Picture": "Afbeelding",
   "Add a second button": "Tweede knop toevoegen",
-  "Blank lines start new paragraphs.": "Lege regels beginnen nieuwe alinea’s.",
   "Alignment": "Uitlijning",
   "Columns": "Kolommen",
   "Caption": "Bijschrift",
@@ -5274,5 +5273,9 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "De e-mail die een koper krijgt als die een waardebon koopt in je webwinkel, en de cadeaukaart als bijlage. Een waardebon kan ook een eigen kaart en tekst hebben, ingesteld onder Waardebonnen maken of bewerken.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Eén bericht per gebeurtenis bij een boeking, en de tekst is van jou. Wat je laat staan houdt de tekst van Clarity, dus ook een bericht dat je nooit opent leest goed. De e-mail en kaart voor waardebonnen staan onder Facturatie › Waardebonnen › Sjablonen.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Standaard cadeaukaart en e-mail bewerken (Waardebonnen › Sjablonen)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dit is je standaard cadeaukaart en e-mail. Een waardebon kan een eigen hebben, ingesteld waar hij wordt bewerkt onder Facturatie › Waardebonnen › Waardebonnen maken of bewerken. De codes, het bonnetje en de cadeaukaart worden per bestelling ingevuld."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dit is je standaard cadeaukaart en e-mail. Een waardebon kan een eigen hebben, ingesteld waar hij wordt bewerkt onder Facturatie › Waardebonnen › Waardebonnen maken of bewerken. De codes, het bonnetje en de cadeaukaart worden per bestelling ingevuld.",
+  "Blank lines start new paragraphs. For a link, choose some words and press Add link.": "Lege regels beginnen een nieuwe alinea. Voor een link selecteer je een paar woorden en druk je op Link toevoegen.",
+  "Link to": "Link naar",
+  "Link the chosen words": "Gekozen woorden linken",
+  "Add link": "Link toevoegen"
 }

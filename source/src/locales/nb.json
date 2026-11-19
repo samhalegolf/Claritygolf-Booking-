@@ -4856,7 +4856,6 @@
   "Tall": "Høy",
   "Picture": "Bilde",
   "Add a second button": "Legg til en knapp til",
-  "Blank lines start new paragraphs.": "Tomme linjer starter nye avsnitt.",
   "Alignment": "Justering",
   "Columns": "Kolonner",
   "Caption": "Bildetekst",
@@ -5274,5 +5273,9 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "E-posten en kjøper får når de kjøper et gavekort i nettbutikken din, og gavekortet som er vedlagt. Et gavekort kan i stedet ha sitt eget kort og sin egen tekst, angitt under Opprett eller rediger gavekort.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Én melding for hver ting som skjer med en booking, og ordlyden er din. Det du lar være, beholder Claritys ordlyd, så en melding du aldri åpner, leses fortsatt godt. Gavekortets e-post og kort finner du under Fakturering › Gavekort › Maler.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Rediger standard gavekort og e-post (Gavekort › Maler)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dette er ditt standard gavekort og din standard e-post. Et gavekort kan i stedet ha sitt eget, angitt der det redigeres under Fakturering › Gavekort › Opprett eller rediger gavekort. Kodene, kvitteringen og gavekortet fylles ut per bestilling."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dette er ditt standard gavekort og din standard e-post. Et gavekort kan i stedet ha sitt eget, angitt der det redigeres under Fakturering › Gavekort › Opprett eller rediger gavekort. Kodene, kvitteringen og gavekortet fylles ut per bestilling.",
+  "Blank lines start new paragraphs. For a link, choose some words and press Add link.": "Tomme linjer starter nye avsnitt. For å lage en lenke, marker noen ord og trykk Legg til lenke.",
+  "Link to": "Lenke til",
+  "Link the chosen words": "Lenk de valgte ordene",
+  "Add link": "Legg til lenke"
 }

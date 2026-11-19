@@ -4856,7 +4856,6 @@
   "Tall": "Alta",
   "Picture": "Immagine",
   "Add a second button": "Aggiungi un secondo pulsante",
-  "Blank lines start new paragraphs.": "Le righe vuote iniziano nuovi paragrafi.",
   "Alignment": "Allineamento",
   "Columns": "Colonne",
   "Caption": "Didascalia",
@@ -5274,5 +5273,9 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "L'email che un acquirente riceve quando compra un buono regalo nel tuo negozio online, e la gift card allegata. Un buono può avere invece una propria carta e un proprio testo, impostati in Crea o modifica buoni.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Un messaggio per ogni cosa che succede a una prenotazione, e il testo è tuo. Ciò che non tocchi mantiene il testo di Clarity, quindi anche un messaggio mai aperto si legge bene. Email e carta del buono regalo sono in Fatturazione › Buoni › Modelli.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Modifica la gift card e l'email standard (Buoni › Modelli)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Questa è la tua gift card e la tua email standard. Un buono può avere i propri, impostati dove viene modificato in Fatturazione › Buoni › Crea o modifica buoni. Codici, ricevuta e gift card vengono compilati per ogni ordine."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Questa è la tua gift card e la tua email standard. Un buono può avere i propri, impostati dove viene modificato in Fatturazione › Buoni › Crea o modifica buoni. Codici, ricevuta e gift card vengono compilati per ogni ordine.",
+  "Blank lines start new paragraphs. For a link, choose some words and press Add link.": "Le righe vuote iniziano nuovi paragrafi. Per un link, seleziona alcune parole e premi Aggiungi link.",
+  "Link to": "Link a",
+  "Link the chosen words": "Collega le parole scelte",
+  "Add link": "Aggiungi link"
 }
