@@ -70,6 +70,7 @@ import {
 import { CanvasBlock, CanvasEditor } from "./CanvasBlock";
 import { canArrangeFreely } from "./canvasLayout";
 import { EditableText } from "./EditableText";
+import { LinkedLine, TextLinks } from "./LinkedText";
 import { FormBlock } from "./FormBlock";
 import { ShopBlock } from "./ShopBlock";
 import { CART_EVENT, cartCount, readCart } from "./siteCart";
@@ -235,7 +236,7 @@ function Paragraphs({ text, className = "", field }: { text: string; className?:
         <p className={className} key={index}>
           {paragraph.split("\n").map((line, lineIndex, lines) => (
             <span key={lineIndex}>
-              {line}
+              <LinkedLine text={line} />
               {lineIndex < lines.length - 1 ? <br /> : null}
             </span>
           ))}
@@ -534,6 +535,7 @@ export function SiteRenderer({
       )}
 
       <CanvasEditor.Provider value={editor ?? null}>
+      <TextLinks.Provider value={linkProps}>
       <main className="site-main">
         {missingPage ? (
           <section className="site-container site-missing">
@@ -583,6 +585,7 @@ export function SiteRenderer({
           </div>
         ) : null}
       </main>
+      </TextLinks.Provider>
       </CanvasEditor.Provider>
 
       {frame(

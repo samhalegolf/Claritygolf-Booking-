@@ -54,6 +54,18 @@
   color: inherit;
 }
 
+/* A link inside a paragraph (textLinks): underlined in the words' own colour,
+   so it reads on every section colour a coach can pick. */
+.site-text-link {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.site-text-link:hover {
+  text-decoration-thickness: 2px;
+}
+
 .site-container {
   width: min(var(--site-max-width), 100% - 40px);
   margin-inline: auto;

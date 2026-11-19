@@ -1,11 +1,12 @@
 // The inspector's fields. Small, and the same everywhere in the editor.
-import { ArrowDown, ArrowUp, ImagePlus, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ImagePlus, Link as LinkIcon, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
-import { pageHref, pageSlugFromHref, type SiteButton, type SiteImage } from "../../../netlify/functions/_shared/site/document.mts";
+import { cleanSiteHref, pageHref, pageSlugFromHref, type SiteButton, type SiteImage } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
 import { prepareImage } from "./imagePrep";
 import { uploadSiteImage } from "./siteApi";
+import { addTextLink } from "./textLinks";
 
 /** What a link may point at: one of the site's pages, by address and name. */
 export type PageOption = { slug: string; title: string };
@@ -63,6 +64,82 @@ export function TextArea({
     <Field label={label} help={help}>
       <textarea value={value} rows={rows} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} />
     </Field>
+  );
+}
+
+/**
+ * Paragraphs that can carry links. Choose some words, pick where they go,
+ * and they become [words](address) in the text, which the page draws as a
+ * link (see textLinks). The words can also be typed that way by hand.
+ */
+export function LinkedTextArea({
+  label,
+  value,
+  onChange,
+  rows = 4,
+  maxLength = 8000,
+  pages,
+  bookingHref,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  rows?: number;
+  maxLength?: number;
+  pages: PageOption[];
+  bookingHref: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [adding, setAdding] = useState(false);
+  const [href, setHref] = useState("");
+
+  function addLink() {
+    const area = ref.current;
+    const address = cleanSiteHref(href);
+    if (!area || !address) return;
+    const next = addTextLink(value, area.selectionStart, area.selectionEnd, address);
+    onChange(next.value);
+    setAdding(false);
+    setHref("");
+    requestAnimationFrame(() => {
+      area.focus();
+      area.setSelectionRange(next.caret, next.caret);
+    });
+  }
+
+  return (
+    <>
+      <Field label={label} help={t("Blank lines start new paragraphs. For a link, choose some words and press Add link.")}>
+        <textarea ref={ref} value={value} rows={rows} maxLength={maxLength} onChange={(event) => onChange(event.target.value)} />
+      </Field>
+      {adding ? (
+        <div className="site-list-item">
+          <LinkInput label={t("Link to")} value={href} onChange={setHref} pages={pages} bookingHref={bookingHref} />
+          <div className="site-inline-actions">
+            <button type="button" className="primary-button" disabled={!cleanSiteHref(href)} onClick={addLink}>
+              {t("Link the chosen words")}
+            </button>
+            <button type="button" className="outline-button" onClick={() => setAdding(false)}>
+              {t("Cancel")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="outline-button"
+          // Keep the chosen words chosen: the press must not take the focus from the text first.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setHref(pages[0] ? pageHref(pages[0].slug) : "");
+            setAdding(true);
+          }}
+        >
+          <LinkIcon size={15} />
+          {t("Add link")}
+        </button>
+      )}
+    </>
   );
 }
 

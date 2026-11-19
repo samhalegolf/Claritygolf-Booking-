@@ -35,7 +35,7 @@ import {
 } from "../../../netlify/functions/_shared/site/document.mts";
 import { t } from "../../lib/i18n";
 import { BOOKING_SCREENS } from "../public-booking/bookingScreens";
-import { ButtonInput, ColorInput, DateInput, ImageInput, LinkInput, ListEditor, NumberInput, SelectInput, TextArea, TextInput, ToggleInput, type PageOption } from "./fields";
+import { ButtonInput, ColorInput, DateInput, ImageInput, LinkInput, LinkedTextArea, ListEditor, NumberInput, SelectInput, TextArea, TextInput, ToggleInput, type PageOption } from "./fields";
 import { fetchCoachShop, updateCoachShop, type CoachShop } from "./siteApi";
 import { money } from "./ShopBlock";
 import { addItem } from "./canvasLayout";
@@ -479,7 +479,7 @@ export function BlockContentFields({ block, onChange, pages, bookingHref, onErro
       return (
         <>
           <TextInput label={t("Heading")} value={block.heading} maxLength={160} onChange={(heading) => set({ heading })} />
-          <TextArea label={t("Text")} value={block.body} rows={10} onChange={(body) => set({ body })} help={t("Blank lines start new paragraphs.")} />
+          <LinkedTextArea label={t("Text")} value={block.body} rows={10} onChange={(body) => set({ body })} pages={pages} bookingHref={bookingHref} />
           <SelectInput label={t("Alignment")} value={block.align} onChange={(align) => set({ align })} options={alignOptions()} />
           <SelectInput
             label={t("Columns")}
@@ -1034,7 +1034,7 @@ function CanvasItemFields({ item, update, pages, bookingHref, onError }: { item:
     case "text":
       return (
         <>
-          <TextArea label={t("Words")} value={item.text} rows={4} maxLength={4000} onChange={(text) => update({ text })} help={t("Blank lines start new paragraphs.")} />
+          <LinkedTextArea label={t("Words")} value={item.text} rows={4} maxLength={4000} onChange={(text) => update({ text })} pages={pages} bookingHref={bookingHref} />
           <SelectInput
             label={t("Size")}
             value={item.size}
