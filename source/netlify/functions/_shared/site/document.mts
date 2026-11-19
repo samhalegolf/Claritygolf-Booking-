@@ -960,6 +960,29 @@ export function sitePageMeta(site: {
   return { title: title.slice(0, 200), description: description.slice(0, 500), image };
 }
 
+/**
+ * A page's questions and answers in the form search engines and AI tools read
+ * (schema.org FAQPage), built from its FAQ blocks. Null for a page with none.
+ * Like sitePageMeta, the public page sets it in the browser and the edge
+ * function writes it into the HTML it serves.
+ */
+export function sitePageFaqSchema(page: { content: { blocks: ReadonlyArray<SiteBlock> } }): Record<string, unknown> | null {
+  const questions = page.content.blocks
+    .flatMap((block) => (block.type === "faq" ? block.items : []))
+    .filter((item) => item.question.trim() && item.answer.trim())
+    .map((item) => ({
+      "@type": "Question",
+      name: item.question.trim(),
+      acceptedAnswer: { "@type": "Answer", text: item.answer.trim() },
+    }));
+  return questions.length ? { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: questions } : null;
+}
+
+/** JSON for a <script type="application/ld+json">: no "<", so nothing in it can close the tag. */
+export function jsonLdText(schema: Record<string, unknown>): string {
+  return JSON.stringify(schema).replace(/</g, "\\u003c");
+}
+
 /** The picture YouTube keeps for a video, for a card with no cover of its own. */
 export function youtubeThumbnail(videoId: string): string {
   return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : "";

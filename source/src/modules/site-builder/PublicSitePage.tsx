@@ -21,11 +21,13 @@ import { customDomainPageSlug, publicSiteRoute } from "../public-booking/booking
 import { Loading } from "../shared/Loading";
 import { fetchPublicSite, type PublicSite } from "./siteApi";
 import { SiteRenderer } from "./SiteRenderer";
-import { sitePageMeta } from "./siteTheme";
+import { jsonLdText, sitePageFaqSchema, sitePageMeta } from "./siteTheme";
 import { bookingHousePagePath, bookingHouseRootSlug, customDomainPagePath, publicSitePath } from "./siteTheme";
 import "./site.css";
 
 const FONT_LINK_ID = "site-fonts";
+/** The same id the edge function gives the tag it serves, so there is only ever one. */
+const FAQ_SCHEMA_ID = "site-faq-schema";
 
 /** A <meta name> or, for the og:* family, <meta property>. An empty content removes the tag. */
 function setMeta(name: string, content: string) {
@@ -132,6 +134,19 @@ export default function PublicSitePage({
     setMeta("og:image", meta.image);
     setMeta("og:url", window.location.origin + pagePath(site.page.slug));
     setMeta("twitter:card", meta.image ? "summary_large_image" : "summary");
+    const faqSchema = sitePageFaqSchema(site.page);
+    let schemaTag = document.getElementById(FAQ_SCHEMA_ID);
+    if (faqSchema) {
+      if (!schemaTag) {
+        schemaTag = document.createElement("script");
+        schemaTag.id = FAQ_SCHEMA_ID;
+        schemaTag.setAttribute("type", "application/ld+json");
+        document.head.appendChild(schemaTag);
+      }
+      schemaTag.textContent = jsonLdText(faqSchema);
+    } else {
+      schemaTag?.remove();
+    }
     const fonts = googleFontsUrl(site.settings.theme);
     let link = document.getElementById(FONT_LINK_ID) as HTMLLinkElement | null;
     if (fonts) {

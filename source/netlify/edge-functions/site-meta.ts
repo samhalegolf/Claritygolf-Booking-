@@ -83,7 +83,7 @@ export default async function handler(request: Request, context: Context): Promi
   if (!site) return context.next();
 
   const [response, page] = await Promise.all([context.next(), fetchJson(`${url.origin}/api/site/public?${site.query.toString()}`)]);
-  const meta = page?.meta as { title?: string; description?: string; image?: string; kind?: string } | undefined;
+  const meta = page?.meta as { title?: string; description?: string; image?: string; kind?: string; faqSchema?: Record<string, unknown> | null } | undefined;
   if (!meta || !(response.headers.get("content-type") || "").includes("text/html")) return response;
 
   const canonical = `${url.origin}${path === "/" ? "/" : path.replace(/\/$/, "")}`;
@@ -96,6 +96,9 @@ export default async function handler(request: Request, context: Context): Promi
     meta.image ? `<meta property="og:image" content="${escapeHtml(meta.image)}">` : "",
     `<meta name="twitter:card" content="${meta.image ? "summary_large_image" : "summary"}">`,
     `<link rel="canonical" href="${escapeHtml(canonical)}">`,
+    // The page's questions and answers (FAQ blocks) for search engines and AI tools.
+    // The id matches PublicSitePage's, so the browser updates this tag rather than adding a second.
+    meta.faqSchema ? `<script type="application/ld+json" id="site-faq-schema">${JSON.stringify(meta.faqSchema).replace(/</g, "\\u003c")}</script>` : "",
   ]
     .filter(Boolean)
     .join("\n");
