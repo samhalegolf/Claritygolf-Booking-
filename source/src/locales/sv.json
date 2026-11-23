@@ -1490,6 +1490,8 @@
   "Paid · {amount}": "Betald · {amount}",
   "Mark bookings completed from the calendar to pull them into invoices.": "Markera bokningar som genomförda i kalendern för att hämta in dem i fakturor.",
   "Catalog": "Katalog",
+  "Hide lessons and catalog": "Dölj lektioner och katalog",
+  "Show lessons and catalog": "Visa lektioner och katalog",
   "Search products and packages": "Sök produkter och paket",
   "Search the catalog": "Sök i katalogen",
   "Nothing matches that.": "Inget matchar.",

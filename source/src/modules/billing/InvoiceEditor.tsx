@@ -5,7 +5,8 @@
 import { t } from "../../lib/i18n";
 import { currencySymbol, formatMoney, parseMoneyInput, parseQuantityInput } from "../../lib/money";
 import { formatDateForDisplay } from "../../lib/date";
-import { ChevronDown, ChevronUp, Download, Pencil, Plus, Search, Send, X } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronUp, Download, PanelRightClose, PanelRightOpen, Pencil, Plus, Search, Send, X } from "lucide-react";
 import { ClarityCalendar, ClarityEmail, ClarityPassesCredits, ClarityPayments, ClarityProducts, ClarityProfile, ClarityStore } from "../shared/ClarityIcons";
 import { invoiceLineGross, invoiceLineNet, lineDiscountAmount } from "./invoiceMath";
 import { buildWeekDays, formatRange, itemService, itemWeek } from "../calendar/calendarModel";
@@ -18,6 +19,8 @@ import type { BrandSettings, CoachAccount } from "../workspace/workspaceModel";
 import type { BookingPullFilter } from "./billingSections";
 import type { BillingCatalogItem, BillingDiscount, BillingInvoiceStatus, InvoiceCustomField, InvoiceDraft, InvoiceLine, InvoiceLineTag, InvoicePaymentSource, InvoiceSettings, PosBookingPayment } from "./types";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
+
+const RAIL_HIDDEN_STORAGE_KEY = "clarity-booking-invoice-rail-hidden";
 
 export type InvoiceEditorProps = {
   invoiceSettings: InvoiceSettings;
@@ -231,6 +234,27 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
     sendOpenedInvoice,
     saveNewInvoiceCustomer,
   } = props;
+
+  // The rail folds away so the sheet can take the full width and the line
+  // descriptions stop being cut short. Remembered per browser. A phone never
+  // folds it: there the rail sits under the sheet and costs no width.
+  const [railHidden, setRailHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_HIDDEN_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const railFolded = railHidden && !phoneLayout;
+  function toggleRail() {
+    const next = !railHidden;
+    setRailHidden(next);
+    try {
+      window.localStorage.setItem(RAIL_HIDDEN_STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      // Private mode: the choice just lasts for this visit.
+    }
+  }
   return (
     /* The invoice as a sheet of paper on a mat, with the things you
        pull onto it in a rail alongside. Everything you can type into
@@ -258,6 +282,12 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
       <div className="ip-actionbar">
         <p>{t("You are typing on the invoice itself. Dashed is editable; everything else comes from your template.")}</p>
         <div className="ip-actionbar-buttons">
+          {!phoneLayout && (
+            <button className="outline-button ip-rail-toggle" onClick={toggleRail} aria-pressed={railFolded} type="button">
+              {railFolded ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+              {railFolded ? t("Show lessons and catalog") : t("Hide lessons and catalog")}
+            </button>
+          )}
           {activeInvoiceId && (
             /* Rule 10: Delete and Void are text, not a filled red
                button sitting in the same row as Publish & Send. */
@@ -402,7 +432,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
         )}
       </div>
 
-      <div className="ip-grid">
+      <div className={railFolded ? "ip-grid is-rail-hidden" : "ip-grid"}>
         <div className="ip-mat">
           <article className="ip-paper" aria-label={t("Invoice editor")}>
             <header className="ip-paper-head">
@@ -1037,6 +1067,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
           </article>
         </div>
 
+        {!railFolded && (
         <aside className="ip-rail">
           <article className="card ip-card" id="ip-rail-lessons">
             <strong className="ip-card-title">{t("Completed lessons")}</strong>
@@ -1213,6 +1244,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
               <Pencil size={13} />{t("Edit the template")}</button>
           </article>
         </aside>
+        )}
       </div>
     </div>
   );
