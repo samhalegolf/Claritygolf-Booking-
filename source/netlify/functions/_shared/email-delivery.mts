@@ -116,11 +116,17 @@ async function fromIdentity(accountId: string): Promise<{
   }
 }
 
-export type EmailAttachment = {
-  filename: string;
-  /** Base64. The caller encodes -- this module does not know what a PDF is. */
-  content: string;
-};
+export type EmailAttachment =
+  | {
+      filename: string;
+      /** Base64. The caller encodes -- this module does not know what a PDF is. */
+      content: string;
+    }
+  | {
+      filename: string;
+      /** An https address the provider fetches the file from itself, for one too big to carry through a function. */
+      path: string;
+    };
 
 export type DeliverEmailInput = {
   /** Whose business this is sent as. Decides the From header. */

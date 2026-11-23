@@ -38,6 +38,7 @@ import { isLowStock } from "./stockMath";
 import { t, readerLocale } from "../../lib/i18n";
 import { prepareImage } from "../site-builder/imagePrep";
 import { uploadSiteImage } from "../site-builder/siteApi";
+import { PRODUCT_FILE_ACCEPT, fileFormat, fileSizeLabel, uploadProductFile, type ProductFile } from "./productFiles";
 import { GiftCardDesigner } from "../notifications/GiftCardDesigner";
 import {
   GIFT_EMAIL_FIELDS,
@@ -71,12 +72,12 @@ export type ProductFormValues = {
   voucherShowsValue: boolean;
   voucherExpiryMonths: number;
   // The website's shop: on the shelf, how it reaches the buyer, its picture,
-  // its download, and its options (a size, a pack, a $50 voucher) each with
+  // the files a download hands over, and its options (a size, a pack, a $50 voucher) each with
   // its own price and description or not.
   sellOnline: boolean;
   fulfilment: "collect" | "ship" | "download";
   imageUrl: string;
-  downloadUrl: string;
+  downloadFiles: ProductFile[];
   variants: ProductVariant[];
   // A voucher's own gift card and email. Null: the standard ones.
   giftCardDesign: GiftCardDesign | null;
@@ -215,7 +216,7 @@ function emptyForm(taxRate: number, view: ProductsPanelView): ProductFormDraft {
     sellOnline: false,
     fulfilment: "collect",
     imageUrl: "",
-    downloadUrl: "",
+    downloadFiles: [],
     variants: [],
     giftCardDesign: null,
     giftEmail: null,
@@ -243,7 +244,7 @@ function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFo
     sellOnline: product.sellOnline === true,
     fulfilment: product.fulfilment || "collect",
     imageUrl: product.imageUrl || "",
-    downloadUrl: product.downloadUrl || "",
+    downloadFiles: product.downloadFiles || [],
     variants: variantDrafts(product.variants),
     giftCardDesign: product.giftCardDesign || null,
     giftEmail: product.giftEmail || null,
@@ -350,6 +351,28 @@ export function ProductsPanel({
   // another voucher.
   // What a voucher can be for, grouped the way a coach thinks of them: passes
   // (lesson packages), single lessons, then things off the shelf.
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [fileError, setFileError] = useState("");
+  // A download's file goes straight to private storage (see productFiles.ts).
+  // One file per format: a new PDF replaces the PDF, so uploading a corrected
+  // edition is the same button as uploading the first one.
+  async function uploadDownload(file: File | undefined) {
+    if (!file) return;
+    setUploadingFile(true);
+    setFileError("");
+    try {
+      const uploaded = await uploadProductFile(file);
+      setForm((current) => ({
+        ...current,
+        downloadFiles: [...current.downloadFiles.filter((entry) => fileFormat(entry.name) !== fileFormat(uploaded.name)), uploaded],
+      }));
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : t("Could not upload that file. Check your connection and try again."));
+    } finally {
+      setUploadingFile(false);
+    }
+  }
+
   const voucherItemGroups = useMemo(() => {
     const choices = products
       .filter((product) => product.active !== false && product.isVoucher !== true && product.id !== form.id)
@@ -659,14 +682,49 @@ export function ProductsPanel({
                   <select value={form.fulfilment} onChange={(event) => updateForm("fulfilment", event.target.value as ProductFormDraft["fulfilment"])}>
                     <option value="collect">{t("Collected in person")}</option>
                     <option value="ship">{t("Posted (the payment page asks for an address)")}</option>
-                    <option value="download">{t("Downloaded (a link in the receipt)")}</option>
+                    <option value="download">{t("Digital download (files emailed to the buyer)")}</option>
                   </select>
                 </label>
                 {form.fulfilment === "download" && (
-                  <label className="settings-field">
-                    <span>{t("Download link")}</span>
-                    <input value={form.downloadUrl} onChange={(event) => updateForm("downloadUrl", event.target.value)} placeholder="https://…" />
-                  </label>
+                  <div className="settings-field product-notes-field">
+                    <span>{t("Files the buyer gets")}</span>
+                    {form.downloadFiles.length ? (
+                      <ul className="product-download-files">
+                        {form.downloadFiles.map((file) => (
+                          <li key={file.path}>
+                            <strong>{fileFormat(file.name)}</strong>
+                            <span>{file.name}</span>
+                            <span className="product-download-size">{fileSizeLabel(file.bytes)}</span>
+                            <button
+                              className="text-link-button"
+                              type="button"
+                              aria-label={t("Remove")}
+                              onClick={() => updateForm("downloadFiles", form.downloadFiles.filter((entry) => entry.path !== file.path))}
+                            >
+                              <X size={15} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <div className="product-picture-actions">
+                      <label className="outline-button logo-upload">
+                        {uploadingFile ? t("Uploading…") : t("Upload file")}
+                        <input
+                          accept={PRODUCT_FILE_ACCEPT}
+                          type="file"
+                          disabled={uploadingFile}
+                          onChange={(event) => { void uploadDownload(event.target.files?.[0]); event.target.value = ""; }}
+                        />
+                      </label>
+                    </div>
+                    <p className="field-help">
+                      {form.downloadFiles.length
+                        ? t("The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.")
+                        : t("Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.")}
+                    </p>
+                    {fileError && <p className="field-help">{fileError}</p>}
+                  </div>
                 )}
               </>
             )}

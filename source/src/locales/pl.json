@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Jak trafia do kupującego",
   "Collected in person": "Odbiór osobisty",
   "Posted (the payment page asks for an address)": "Wysyłka pocztą (strona płatności poprosi o adres)",
-  "Downloaded (a link in the receipt)": "Pobranie (link w paragonie)",
-  "Download link": "Link do pobrania",
   "Posted to you": "Wysyłany do Ciebie",
   "Collect in person": "Odbiór osobisty",
   "Sold out": "Wyprzedane",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "E-mail, który kupujący dostaje po zakupie bonu podarunkowego w Twoim sklepie internetowym, oraz załączona karta podarunkowa. Bon może zamiast tego mieć własną kartę i treść, ustawione w Utwórz lub edytuj bony.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Jedna wiadomość na każde zdarzenie dotyczące rezerwacji, a treść należy do Ciebie. To, czego nie zmienisz, zachowuje treść Clarity, więc nawet nieotwierana wiadomość dobrze się czyta. E-mail i karta bonu podarunkowego są w Rozliczenia › Bony › Szablony.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Edytuj standardową kartę podarunkową i e-mail (Bony › Szablony)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "To jest Twoja standardowa karta podarunkowa i e-mail. Bon może mieć własne, ustawione tam, gdzie jest edytowany w Rozliczenia › Bony › Utwórz lub edytuj bony. Kody, paragon i karta podarunkowa są uzupełniane dla każdego zamówienia."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "To jest Twoja standardowa karta podarunkowa i e-mail. Bon może mieć własne, ustawione tam, gdzie jest edytowany w Rozliczenia › Bony › Utwórz lub edytuj bony. Kody, paragon i karta podarunkowa są uzupełniane dla każdego zamówienia.",
+  "Could not upload that file. Check your connection and try again.": "Nie udało się przesłać pliku. Sprawdź połączenie i spróbuj ponownie.",
+  "Digital download (files emailed to the buyer)": "Produkt cyfrowy (pliki wysyłane kupującemu e-mailem)",
+  "Files the buyer gets": "Pliki, które otrzymuje kupujący",
+  "Upload file": "Prześlij plik",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "Kupujący otrzymuje te pliki e-mailem razem z paragonem oraz prywatny link do ponownego pobrania. Nowy plik tego samego typu zastępuje poprzedni.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Prześlij każdy sprzedawany format, na przykład PDF i EPUB. Produkt pojawi się w sklepie, gdy będzie miał plik."
 }

@@ -172,6 +172,8 @@ export type ShopItem = {
   image: string;
   /** How a product reaches its buyer. "" for a package or voucher: they go by email. */
   fulfilment: "collect" | "ship" | "download" | "";
+  /** What a download comes as: ["PDF", "EPUB"]. Empty on anything else. */
+  formats: string[];
   variants: ShopVariant[];
   /** How many are left when the product counts stock; null when it does not. */
   stock: number | null;

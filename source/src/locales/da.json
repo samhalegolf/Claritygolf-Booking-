@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Sådan når det køberen",
   "Collected in person": "Afhentet personligt",
   "Posted (the payment page asks for an address)": "Sendt med posten (betalingssiden beder om en adresse)",
-  "Downloaded (a link in the receipt)": "Downloadet (et link i kvitteringen)",
-  "Download link": "Downloadlink",
   "Posted to you": "Sendes til dig",
   "Collect in person": "Afhent personligt",
   "Sold out": "Udsolgt",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "Den e-mail, en køber får, når de køber et gavekort i din onlinebutik, og det vedhæftede gavekort. Et gavekort kan i stedet have sit eget kort og sin egen tekst, angivet under Opret eller rediger gavekort.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Én besked for hver ting, der sker med en booking, og ordlyden er din. Alt, du lader være, beholder Claritys ordlyd, så en besked, du aldrig åbner, stadig læser godt. Gavekortets e-mail og kort findes under Fakturering › Gavekort › Skabeloner.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Rediger standardgavekortet og e-mailen (Gavekort › Skabeloner)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dette er dit standardgavekort og din standard-e-mail. Et gavekort kan i stedet have sit eget, angivet hvor det redigeres under Fakturering › Gavekort › Opret eller rediger gavekort. Koderne, kvitteringen og gavekortet udfyldes for hver ordre."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dette er dit standardgavekort og din standard-e-mail. Et gavekort kan i stedet have sit eget, angivet hvor det redigeres under Fakturering › Gavekort › Opret eller rediger gavekort. Koderne, kvitteringen og gavekortet udfyldes for hver ordre.",
+  "Could not upload that file. Check your connection and try again.": "Filen kunne ikke uploades. Tjek din forbindelse, og prøv igen.",
+  "Digital download (files emailed to the buyer)": "Digital download (filer sendes til køberen på e-mail)",
+  "Files the buyer gets": "Filer, køberen får",
+  "Upload file": "Upload fil",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "Køberen får disse filer på e-mail sammen med kvitteringen og et privat link til at downloade dem igen. Hvis du uploader en ny fil af samme type, erstatter den den gamle.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Upload hvert format, du sælger, f.eks. en PDF og en EPUB. Produktet vises i butikken, når det har en fil."
 }

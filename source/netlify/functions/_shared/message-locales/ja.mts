@@ -221,6 +221,7 @@ const catalog: Record<string, string> = {
   "Order from {businessName}": "{businessName}でのご注文",
   "We will post it to:": "お届け先：",
   "Your downloads:": "ダウンロード：",
+  "Your files are attached. You can also download them here at any time:": "ファイルを添付しました。こちらからいつでもダウンロードすることもできます：",
   "Your gift voucher from {{business}}": "{{business}}からのギフトバウチャー",
   "Here's your gift voucher": "ギフトバウチャーをお届けします",
   "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "{{firstName}}さん、ありがとうございます。{{recipient}}様宛てのギフトバウチャーをお送りします。お支払いの際にコードを提示すると、その金額が差し引かれます。",

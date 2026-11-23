@@ -25,6 +25,7 @@
 
 import { cleanOwnGiftCardDesign, type GiftCardDesign } from "./gift-card.mts";
 import { playerShopItems } from "./player-shop.mts";
+import { cleanShopFiles, shopFileFormat } from "./shop-file-rules.mts";
 
 /** The flat fee charged on an order with something to post, in major units. "" or 0: posted free. */
 export const ONLINE_SHOP_SHIPPING_SETTING = "onlineShopShippingFee";
@@ -78,6 +79,8 @@ export type OnlineShopItem = {
   image: string;
   /** How a product reaches its buyer. "" for a package or voucher: they go by email. */
   fulfilment: OnlineFulfilment | "";
+  /** What a download comes as, for the shelf to say: ["PDF", "EPUB"]. Empty on anything else. */
+  formats: string[];
   variants: OnlineVariant[];
   /** What is on the shelf when the product counts stock; null when it does not. */
   stock: number | null;
@@ -131,8 +134,10 @@ export function cleanFulfilment(value: unknown): OnlineFulfilment {
  * the website; so is a voucher or product, by its sell_online. A bundle still
  * reads the whole list, so a pass inside it need not be on the shelf itself.
  * A voucher with options ($50, $100, $200) is one card on the shelf; every
- * option shares the voucher's gift card and email.
- * one that counts stock and has none is listed as sold out, not hidden, so a
+ * option shares the voucher's gift card and email. A download is on the shelf
+ * once it has a file to hand over (so its rows must carry account_id and
+ * download_files). A product
+ * that counts stock and has none is listed as sold out, not hidden, so a
  * page does not lose a card the moment the last one goes.
  */
 export function onlineShopItems(
@@ -158,6 +163,7 @@ export function onlineShopItems(
       includes: item.includes,
       image: "",
       fulfilment: "" as const,
+      formats: [] as string[],
       variants: [],
       stock: null,
       giftCard: null,
@@ -187,6 +193,7 @@ export function onlineShopItems(
         includes: [] as string[],
         image: text(row.image_url, 600),
         fulfilment: "" as const,
+        formats: [] as string[],
         variants,
         stock: null,
         giftCard: design?.imageUrl ? { design, item, showsValue: !item || row.voucher_shows_value !== false } : null,
@@ -198,6 +205,8 @@ export function onlineShopItems(
     .filter((row) => row.is_voucher !== true && row.sell_online === true)
     .map((row) => {
       const { variants, price } = priced(row);
+      const fulfilment = cleanFulfilment(row.fulfilment);
+      const formats = fulfilment === "download" ? cleanShopFiles(row.download_files, text(row.account_id, 160)).map((file) => shopFileFormat(file.name)) : [];
       return {
         id: text(row.id, 160),
         kind: "product" as const,
@@ -208,13 +217,15 @@ export function onlineShopItems(
         credits: 0,
         includes: [] as string[],
         image: text(row.image_url, 600),
-        fulfilment: cleanFulfilment(row.fulfilment),
+        fulfilment,
+        formats,
         variants,
         stock: row.track_stock === true ? Math.max(0, Math.round(Number(row.stock_level) || 0)) : null,
         giftCard: null,
       };
     })
-    .filter((item) => item.id && item.name && item.price > 0);
+    // A download with no file uploaded would take the money and hand over nothing.
+    .filter((item) => item.id && item.name && item.price > 0 && (item.fulfilment !== "download" || item.formats.length > 0));
 
   return [...packages, ...vouchers, ...goods];
 }

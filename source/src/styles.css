@@ -6397,6 +6397,34 @@
   gap: 8px;
 }
 
+/* A download's files: format, name, size, remove. */
+.product-download-files {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.product-download-files li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.product-download-files li span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-download-size {
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
 /* A product's or voucher's options: name, price, description, remove. */
 .product-variant-rows {
   display: grid;

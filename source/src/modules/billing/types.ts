@@ -88,12 +88,12 @@ export type BillingCatalogItem = {
   voucherShowsValue?: boolean;
   voucherExpiryMonths?: number;
   // The website's shop: on the shelf, how it reaches the buyer, its picture,
-  // its download and its options (sizes, packs). A variant priced null sells
+  // the files a download hands over and its options (sizes, packs). A variant priced null sells
   // at the product's own price.
   sellOnline?: boolean;
   fulfilment?: "collect" | "ship" | "download";
   imageUrl?: string;
-  downloadUrl?: string;
+  downloadFiles?: Array<{ path: string; name: string; bytes: number }>;
   variants?: Array<{ id: string; name: string; price: number | null; description: string }>;
   // A voucher's own gift card and email wording; null uses the standard ones
   // under Billing › Vouchers › Templates. Its options all share them.

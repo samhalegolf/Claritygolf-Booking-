@@ -221,6 +221,7 @@ const catalog: Record<string, string> = {
   "Order from {businessName}": "Encomenda em {businessName}",
   "We will post it to:": "Vamos enviá-lo para:",
   "Your downloads:": "As suas descargas:",
+  "Your files are attached. You can also download them here at any time:": "Os seus ficheiros seguem em anexo. Também os pode descarregar aqui em qualquer altura:",
   "Your gift voucher from {{business}}": "O seu vale de oferta de {{business}}",
   "Here's your gift voucher": "Aqui está o seu vale de oferta",
   "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "Obrigado, {{firstName}}. Aqui está o seu vale de oferta para {{recipient}}. Mostre o código quando pagar e o valor é descontado na conta.",

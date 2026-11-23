@@ -221,6 +221,7 @@ const catalog: Record<string, string> = {
   "Order from {businessName}": "Tilaus: {businessName}",
   "We will post it to:": "Postitamme sen osoitteeseen:",
   "Your downloads:": "Latauksesi:",
+  "Your files are attached. You can also download them here at any time:": "Tiedostosi ovat liitteenä. Voit myös ladata ne täältä milloin tahansa:",
   "Your gift voucher from {{business}}": "Lahjakorttisi: {{business}}",
   "Here's your gift voucher": "Tässä on lahjakorttisi",
   "Thanks {{firstName}}. Here is your gift voucher for {{recipient}}. Show the code when you pay and its value comes off the bill.": "Kiitos, {{firstName}}. Tässä on lahjakorttisi saajalle {{recipient}}. Näytä koodi maksaessasi, niin sen arvo vähennetään laskusta.",

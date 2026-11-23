@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Como chega ao comprador",
   "Collected in person": "Levantado pessoalmente",
   "Posted (the payment page asks for an address)": "Enviado pelo correio (a página de pagamento pede uma morada)",
-  "Downloaded (a link in the receipt)": "Descarregado (um link no recibo)",
-  "Download link": "Link de descarga",
   "Posted to you": "Enviado para si",
   "Collect in person": "Levantar pessoalmente",
   "Sold out": "Esgotado",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "O email que um comprador recebe ao comprar um vale-presente na tua loja online, e o cartão-presente anexado. Um vale pode ter o seu próprio cartão e texto, definidos em Criar ou editar vales.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Uma mensagem por cada coisa que acontece a uma reserva, e o texto é teu. O que não alterares mantém o texto da Clarity, por isso uma mensagem que nunca abras continua a ler-se bem. O email e o cartão do vale-presente estão em Faturação › Vales › Modelos.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Editar o cartão-presente e o email padrão (Vales › Modelos)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Este é o teu cartão-presente e email padrão. Um vale pode ter os seus, definidos onde é editado em Faturação › Vales › Criar ou editar vales. Os códigos, o recibo e o cartão-presente são preenchidos em cada encomenda."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Este é o teu cartão-presente e email padrão. Um vale pode ter os seus, definidos onde é editado em Faturação › Vales › Criar ou editar vales. Os códigos, o recibo e o cartão-presente são preenchidos em cada encomenda.",
+  "Could not upload that file. Check your connection and try again.": "Não foi possível carregar o ficheiro. Verifique a ligação e tente novamente.",
+  "Digital download (files emailed to the buyer)": "Transferência digital (ficheiros enviados por email ao comprador)",
+  "Files the buyer gets": "Ficheiros que o comprador recebe",
+  "Upload file": "Carregar ficheiro",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "O comprador recebe estes ficheiros por email com o recibo, juntamente com uma ligação privada para os voltar a descarregar. Um novo ficheiro do mesmo tipo substitui o anterior.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Carregue cada formato que vende, por exemplo um PDF e um EPUB. O produto aparece na loja assim que tiver um ficheiro."
 }

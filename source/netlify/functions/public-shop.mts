@@ -1,11 +1,11 @@
 import type { Config } from "@netlify/functions";
 
-import { cancelOnlineOrder, confirmOnlineOrder, publicOnlineShop, startOnlineOrder } from "./billing-api.mts";
+import { cancelOnlineOrder, confirmOnlineOrder, onlineOrderDownload, publicOnlineShop, startOnlineOrder } from "./billing-api.mts";
 import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { json } from "./_shared/http.mts";
 import { cleanString } from "./_shared/values.mts";
 
-// The public shop page's four calls. Unauthenticated by design -- the buyer is
+// The public shop page's four calls, and a paid order's downloads. Unauthenticated by design -- the buyer is
 // a stranger -- so the business always comes from the page's own URL
 // (?business=<slug>) and never from the body. Unlike the booking page there is
 // no "the only business" fallback for a bare link: this route takes money, and
@@ -15,6 +15,10 @@ import { cleanString } from "./_shared/values.mts";
 //   POST /api/public-shop/checkout   start an order, get the Stripe page
 //   POST /api/public-shop/order      the return page's poll: paid yet?
 //   POST /api/public-shop/cancel     came back from Stripe without paying
+//   GET  /api/public-shop/download   a paid order's file (?order&product&format)
+//
+// The download is the one call that names no business: its link sits in an
+// email for years, and the order id it carries says whose sale it is.
 //
 // The work is in billing-api.mts (Online shop), next to the till it reuses.
 
@@ -43,6 +47,22 @@ export default async function handler(req: Request) {
   const url = new URL(req.url);
   const action = url.pathname.replace(/^\/api\/public-shop\/?/, "").replace(/\/$/, "");
   try {
+    if (action === "download" && req.method === "GET") {
+      const query = url.searchParams;
+      try {
+        const location = await onlineOrderDownload(query.get("order"), query.get("product"), query.get("format"));
+        return new Response(null, { status: 302, headers: { location, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+      } catch (error) {
+        // Someone clicked a link in an email: they get a sentence, not JSON.
+        const status = Number((error as { status?: unknown })?.status);
+        const known = Number.isInteger(status) && status >= 400 && status < 500;
+        if (!known) console.error("public_shop:download_failed", error);
+        return new Response(known && error instanceof Error ? error.message : "That download is unavailable right now. Please try again in a moment.", {
+          status: known ? status : 500,
+          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+        });
+      }
+    }
     const business = cleanString(url.searchParams.get("business"), "", 120);
     const account = business ? await resolvePublicAccount(business) : null;
     if (!account) return json({ error: "unknown_business", message: "This shop was not found." }, 404);
@@ -85,5 +105,5 @@ export default async function handler(req: Request) {
 }
 
 export const config: Config = {
-  path: ["/api/public-shop", "/api/public-shop/checkout", "/api/public-shop/order", "/api/public-shop/cancel"],
+  path: ["/api/public-shop", "/api/public-shop/checkout", "/api/public-shop/order", "/api/public-shop/cancel", "/api/public-shop/download"],
 };
