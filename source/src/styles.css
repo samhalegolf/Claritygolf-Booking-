@@ -8920,6 +8920,16 @@
   align-items: start;
 }
 
+/* Rail folded away: the sheet takes the row and grows, so a line's
+   description can be read without clicking into it. */
+.ip-grid.is-rail-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ip-grid.is-rail-hidden .ip-paper {
+  max-width: 1040px;
+}
+
 /* The mat. --c-page against the shell's lighter ground gives the sheet
    something to lie on without inventing a colour for it. */
 .ip-mat {

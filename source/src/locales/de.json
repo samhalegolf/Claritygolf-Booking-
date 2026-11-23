@@ -1490,6 +1490,8 @@
   "Paid · {amount}": "Bezahlt · {amount}",
   "Mark bookings completed from the calendar to pull them into invoices.": "Markiere Buchungen im Kalender als abgeschlossen, um sie in Rechnungen zu übernehmen.",
   "Catalog": "Katalog",
+  "Hide lessons and catalog": "Stunden und Katalog ausblenden",
+  "Show lessons and catalog": "Stunden und Katalog einblenden",
   "Search products and packages": "Produkte und Pakete suchen",
   "Search the catalog": "Katalog durchsuchen",
   "Nothing matches that.": "Keine Treffer.",
