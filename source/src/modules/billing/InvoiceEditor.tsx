@@ -5,7 +5,8 @@
 import { t } from "../../lib/i18n";
 import { currencySymbol, formatMoney, parseMoneyInput, parseQuantityInput } from "../../lib/money";
 import { formatDateForDisplay } from "../../lib/date";
-import { ChevronDown, ChevronUp, Download, Pencil, Plus, Search, Send, X } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronUp, Download, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, Pencil, Plus, Search, Send, X } from "lucide-react";
 import { ClarityCalendar, ClarityEmail, ClarityPassesCredits, ClarityPayments, ClarityProducts, ClarityProfile, ClarityStore } from "../shared/ClarityIcons";
 import { invoiceLineGross, invoiceLineNet, lineDiscountAmount } from "./invoiceMath";
 import { buildWeekDays, formatRange, itemService, itemWeek } from "../calendar/calendarModel";
@@ -18,6 +19,8 @@ import type { BrandSettings, CoachAccount } from "../workspace/workspaceModel";
 import type { BookingPullFilter } from "./billingSections";
 import type { BillingCatalogItem, BillingDiscount, BillingInvoiceStatus, InvoiceCustomField, InvoiceDraft, InvoiceLine, InvoiceLineTag, InvoicePaymentSource, InvoiceSettings, PosBookingPayment } from "./types";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
+
+const RAIL_HIDDEN_STORAGE_KEY = "clarity-booking-invoice-rail-hidden";
 
 export type InvoiceEditorProps = {
   invoiceSettings: InvoiceSettings;
@@ -231,6 +234,31 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
     sendOpenedInvoice,
     saveNewInvoiceCustomer,
   } = props;
+
+  // The rail folds down to a strip of icons so the sheet can take the width
+  // and the line descriptions stop being cut short. Lessons and the catalog
+  // stay one click away: each icon opens its card over the edge of the sheet.
+  // Remembered per browser. A phone never folds it: there the rail sits under
+  // the sheet and costs no width.
+  const [railHidden, setRailHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_HIDDEN_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [railPanel, setRailPanel] = useState<"lessons" | "catalog" | null>(null);
+  const railFolded = railHidden && !phoneLayout;
+  function toggleRail() {
+    const next = !railHidden;
+    setRailHidden(next);
+    setRailPanel(null);
+    try {
+      window.localStorage.setItem(RAIL_HIDDEN_STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      // Private mode: the choice just lasts for this visit.
+    }
+  }
   return (
     /* The invoice as a sheet of paper on a mat, with the things you
        pull onto it in a rail alongside. Everything you can type into
@@ -258,6 +286,17 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
       <div className="ip-actionbar">
         <p>{t("You are typing on the invoice itself. Dashed is editable; everything else comes from your template.")}</p>
         <div className="ip-actionbar-buttons">
+          {!phoneLayout && (
+            <button
+              className="icon-button"
+              onClick={toggleRail}
+              aria-label={railFolded ? t("Exit full screen") : t("Full screen")}
+              title={railFolded ? t("Exit full screen") : t("Full screen")}
+              type="button"
+            >
+              {railFolded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          )}
           {activeInvoiceId && (
             /* Rule 10: Delete and Void are text, not a filled red
                button sitting in the same row as Publish & Send. */
@@ -402,7 +441,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
         )}
       </div>
 
-      <div className="ip-grid">
+      <div className={railFolded ? "ip-grid is-rail-hidden" : "ip-grid"}>
         <div className="ip-mat">
           <article className="ip-paper" aria-label={t("Invoice editor")}>
             <header className="ip-paper-head">
@@ -1037,9 +1076,48 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
           </article>
         </div>
 
-        <aside className="ip-rail">
+        <aside className={railFolded ? "ip-rail is-folded" : "ip-rail"}>
+          {railFolded && (
+            <div className="ip-rail-tools">
+              <button className="icon-button small" onClick={toggleRail} aria-label={t("Expand")} title={t("Expand")} type="button">
+                <PanelRightOpen size={16} />
+              </button>
+              <button
+                className={railPanel === "lessons" ? "icon-button small is-active" : "icon-button small"}
+                onClick={() => setRailPanel(railPanel === "lessons" ? null : "lessons")}
+                aria-expanded={railPanel === "lessons"}
+                aria-label={t("Completed lessons")}
+                title={t("Completed lessons")}
+                type="button"
+              >
+                <ClarityCalendar size={16} />
+              </button>
+              <button
+                className={railPanel === "catalog" ? "icon-button small is-active" : "icon-button small"}
+                onClick={() => setRailPanel(railPanel === "catalog" ? null : "catalog")}
+                aria-expanded={railPanel === "catalog"}
+                aria-label={t("Catalog")}
+                title={t("Catalog")}
+                type="button"
+              >
+                <ClarityProducts size={16} />
+              </button>
+            </div>
+          )}
+          {(!railFolded || railPanel === "lessons") && (
           <article className="card ip-card" id="ip-rail-lessons">
-            <strong className="ip-card-title">{t("Completed lessons")}</strong>
+            <div className="ip-card-head">
+              <strong className="ip-card-title">{t("Completed lessons")}</strong>
+              {railFolded ? (
+                <button className="icon-button small" onClick={() => setRailPanel(null)} aria-label={t("Close")} title={t("Close")} type="button">
+                  <X size={14} />
+                </button>
+              ) : !phoneLayout ? (
+                <button className="icon-button small" onClick={toggleRail} aria-label={t("Collapse")} title={t("Collapse")} type="button">
+                  <PanelRightClose size={16} />
+                </button>
+              ) : null}
+            </div>
             {/* Same bookingPullFilter the Dashboard's list reads, so the
                 two can still never disagree about what they are showing -
                 only the control is chips here instead of a select. */}
@@ -1157,9 +1235,18 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
               )}
             </div>
           </article>
+          )}
 
+          {(!railFolded || railPanel === "catalog") && (
           <article className="card ip-card" id="ip-rail-catalog">
-            <strong className="ip-card-title">{t("Catalog")}</strong>
+            <div className="ip-card-head">
+              <strong className="ip-card-title">{t("Catalog")}</strong>
+              {railFolded && (
+                <button className="icon-button small" onClick={() => setRailPanel(null)} aria-label={t("Close")} title={t("Close")} type="button">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
             <label className="ip-search">
               <Search size={14} />
               <input
@@ -1205,13 +1292,16 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
               )}
             </div>
           </article>
+          )}
 
+          {!railFolded && (
           <article className="card ip-card">
             <strong className="ip-card-title">{t("From your template")}</strong>
             <p className="ip-card-note">{t("Logo, address, {taxName} number, bank account and footer are already on this invoice.", { taxName: invoiceSettings.taxName })}</p>
             <button className="outline-button" onClick={openInvoiceCoachSettings} type="button">
               <Pencil size={13} />{t("Edit the template")}</button>
           </article>
+          )}
         </aside>
       </div>
     </div>

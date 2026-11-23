@@ -8920,6 +8920,17 @@
   align-items: start;
 }
 
+/* Rail folded to its strip of icons: the sheet takes the row and grows, so a
+   line's description can be read without clicking into it. */
+.ip-grid.is-rail-hidden {
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 12px;
+}
+
+.ip-grid.is-rail-hidden .ip-paper {
+  max-width: 1040px;
+}
+
 /* The mat. --c-page against the shell's lighter ground gives the sheet
    something to lie on without inventing a colour for it. */
 .ip-mat {
@@ -9725,6 +9736,43 @@
 
 .ip-card-title {
   font-size: 15px;
+}
+
+.ip-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Folded: a strip of icons that follows the scroll. A card opened from it
+   lies over the edge of the mat rather than pushing the sheet narrow again. */
+.ip-rail.is-folded {
+  position: sticky;
+  top: 12px;
+  display: block;
+}
+
+.ip-rail-tools {
+  display: grid;
+  gap: 8px;
+}
+
+.ip-rail-tools .icon-button.is-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.ip-rail.is-folded > .ip-card {
+  position: absolute;
+  top: 0;
+  right: 46px;
+  z-index: 5;
+  width: 328px;
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(8, 18, 12, 0.14);
 }
 
 .ip-card-note {

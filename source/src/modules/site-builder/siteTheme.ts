@@ -146,7 +146,7 @@ export { googleFontsUrl };
  * cannot serve the widget itself, and a page previewed inside the coach app
  * must not point at the coach app.
  */
-export { sitePageMeta } from "../../../netlify/functions/_shared/site/document.mts";
+export { jsonLdText, sitePageFaqSchema, sitePageMeta } from "../../../netlify/functions/_shared/site/document.mts";
 
 export function bookingPageUrl(businessSlug: string, screen: SiteBookingScreen = "main"): string {
   const url = new URL(`https://${PUBLIC_BOOKING_HOST}${publicBookingPath(businessSlug, screen)}`);

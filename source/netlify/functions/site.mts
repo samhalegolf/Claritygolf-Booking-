@@ -8,7 +8,7 @@ import { readSandboxAccount } from "./_shared/sandbox.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { db, readSettingsMap } from "./_shared/settings-store.mts";
 import { cleanEmail, cleanString } from "./_shared/values.mts";
-import { BUSINESS_ONLY_PRESETS, HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageMeta } from "./_shared/site/document.mts";
+import { BUSINESS_ONLY_PRESETS, HOME_PAGE_SLUG, SITE_PAGE_PRESETS, cleanPageSlug, sitePageFaqSchema, sitePageMeta } from "./_shared/site/document.mts";
 import { bringPictures, importSquarespaceSite, replacePictureUrls } from "./_shared/site/import-squarespace.mts";
 import {
   attachDomainToSite,
@@ -290,7 +290,7 @@ async function handlePublic(req: Request) {
     pages: site.pages,
     business,
     // What the edge writes into the served HTML for crawlers and link previews.
-    meta: { ...sitePageMeta({ page: site.page, business }), kind: site.page.kind },
+    meta: { ...sitePageMeta({ page: site.page, business }), kind: site.page.kind, faqSchema: sitePageFaqSchema(site.page) },
   };
   return json(body, 200, {
     "Netlify-CDN-Cache-Control": `public, durable, max-age=${PUBLIC_CACHE_SECONDS}, stale-while-revalidate=${PUBLIC_STALE_SECONDS}`,

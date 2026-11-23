@@ -1490,6 +1490,8 @@
   "Paid · {amount}": "Maksettu · {amount}",
   "Mark bookings completed from the calendar to pull them into invoices.": "Merkitse varaukset pidetyiksi kalenterissa, niin voit hakea ne laskuille.",
   "Catalog": "Tuotevalikoima",
+  "Full screen": "Koko näyttö",
+  "Exit full screen": "Poistu koko näytöstä",
   "Search products and packages": "Hae tuotteita ja paketteja",
   "Search the catalog": "Hae valikoimasta",
   "Nothing matches that.": "Mikään ei vastaa hakua.",

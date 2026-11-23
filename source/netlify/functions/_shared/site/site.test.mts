@@ -22,7 +22,9 @@ import {
   newSiteBlock,
   pageHref,
   pageSlugFromHref,
+  jsonLdText,
   sitePageCard,
+  sitePageFaqSchema,
   sitePageParent,
   sitePageTree,
   sitePageImageUrls,
@@ -111,6 +113,29 @@ test("an article's summary, cover and date are kept, and a bad date is dropped",
   assert.equal(content.date, "2026-10-31");
   assert.equal(cleanSitePageContent({ date: "31/10/2026" }).date, "");
   assert.deepEqual(sitePageImageUrls(content), ["https://cdn.example/c.jpg"]);
+});
+
+test("a page's FAQ blocks become one FAQPage for search engines, skipping half-written questions", () => {
+  const content = cleanSitePageContent({
+    blocks: [
+      { type: "text", body: "An article." },
+      { type: "faq", items: [{ question: "Why do I slice my driver?", answer: "It is usually a compensation." }, { question: "No answer yet", answer: "" }] },
+      { type: "faq", items: [{ question: "Should I aim left?", answer: "No. </script>" }] },
+    ],
+  });
+  const schema = sitePageFaqSchema({ content });
+  assert.deepEqual(schema, {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      { "@type": "Question", name: "Why do I slice my driver?", acceptedAnswer: { "@type": "Answer", text: "It is usually a compensation." } },
+      { "@type": "Question", name: "Should I aim left?", acceptedAnswer: { "@type": "Answer", text: "No. </script>" } },
+    ],
+  });
+  const written = jsonLdText(schema!);
+  assert.ok(!written.includes("<"), "nothing in it can close the script tag");
+  assert.deepEqual(JSON.parse(written), schema, "and it still reads back as the same data");
+  assert.equal(sitePageFaqSchema({ content: cleanSitePageContent({ blocks: [{ type: "text", body: "No questions." }] }) }), null);
 });
 
 test("pictures are https only, and a block keeps its button while it still has a label", () => {

@@ -120,6 +120,33 @@
   line-height: 1.2;
 }
 
+/* Published or Draft, on each page in the pages panel and the page strip. */
+.site-page-status {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px dashed var(--c-border);
+  border-radius: 999px;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.site-page-status.is-live {
+  border: 1px solid transparent;
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+}
+
+.site-page-tab .site-page-status {
+  margin-left: 0;
+  border-color: currentColor;
+  color: inherit;
+  opacity: 0.75;
+}
+
 .site-outline-main em {
   overflow: hidden;
   font-style: normal;

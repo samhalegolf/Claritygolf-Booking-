@@ -1490,6 +1490,8 @@
   "Paid · {amount}": "支払い済み · {amount}",
   "Mark bookings completed from the calendar to pull them into invoices.": "カレンダーで予約を完了にすると、請求書に取り込めます。",
   "Catalog": "カタログ",
+  "Full screen": "全画面表示",
+  "Exit full screen": "全画面表示を終了",
   "Search products and packages": "商品とパッケージを検索",
   "Search the catalog": "カタログを検索",
   "Nothing matches that.": "一致するものがありません。",

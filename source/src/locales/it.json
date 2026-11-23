@@ -1490,6 +1490,8 @@
   "Paid · {amount}": "Pagata · {amount}",
   "Mark bookings completed from the calendar to pull them into invoices.": "Segna le prenotazioni come completate dal calendario per importarle nelle fatture.",
   "Catalog": "Catalogo",
+  "Full screen": "Schermo intero",
+  "Exit full screen": "Esci da schermo intero",
   "Search products and packages": "Cerca prodotti e pacchetti",
   "Search the catalog": "Cerca nel catalogo",
   "Nothing matches that.": "Nessun risultato.",
