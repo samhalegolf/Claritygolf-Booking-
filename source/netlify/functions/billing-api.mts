@@ -43,7 +43,7 @@ import {
 } from "./_shared/passes.mts";
 import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
-import { deliverEmail } from "./_shared/email-delivery.mts";
+import { deliverEmail, type EmailAttachment } from "./_shared/email-delivery.mts";
 import {
   GIFT_CARD_SETTING,
   GIFT_EMAIL_FIELDS,
@@ -57,6 +57,8 @@ import { buildGiftCardPdf } from "./_shared/gift-card-pdf.mts";
 import { fillMergeFields, parseNotificationTemplates, type GiftVoucherMergeField } from "./_shared/notification-templates.mts";
 import { notificationTemplateText } from "./_shared/notification-template-text.mts";
 import { siteMediaPathFromUrl } from "./_shared/site/media.mts";
+import { MAX_EMAIL_ATTACHMENT_BYTES, cleanShopFiles, shopFileFormat, type ShopFile } from "./_shared/shop-file-rules.mts";
+import { signedShopFileUrl, startShopFileUpload, sweepUnusedShopFiles, verifyShopFiles } from "./_shared/shop-files.mts";
 import { canHoldCredit, voucherRedemption, voucherSaleLines } from "./_shared/voucher-redemption.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
@@ -244,7 +246,7 @@ async function parseBody(req: Request) {
 // by the plain product save - otherwise two tills editing a product at the same
 // time would each write back the level they happened to load.
 
-function cleanProductPayload(raw: Record<string, unknown>) {
+function cleanProductPayload(raw: Record<string, unknown>, accountId: string) {
   return {
     name: cleanString(raw?.name, "", 140),
     // Only products live in this table. A service or package arriving here
@@ -261,7 +263,10 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     sku: cleanString(raw?.sku, "", 60) || null,
     cost_price: round2(cleanNumber(raw?.costPrice, 0, { min: 0 })),
     // Off for a fitting fee or a gift voucher: sold, but never on a shelf.
-    track_stock: raw?.trackStock !== false,
+    // A download has no shelf to run out of: counting it would list an ebook
+    // as sold out the moment it went on sale with nothing "in stock".
+    track_stock:
+      raw?.trackStock !== false && !(raw?.sellOnline === true && raw?.isVoucher !== true && cleanFulfilment(raw?.fulfilment) === "download"),
     low_stock_threshold: Math.round(cleanNumber(raw?.lowStockThreshold, 0, { min: 0, max: 1e6 })),
     // Selling one of these issues a coupon rather than just taking money.
     is_voucher: raw?.isVoucher === true,
@@ -288,12 +293,14 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     })(),
     fulfilment: cleanFulfilment(raw?.fulfilment),
     image_url: cleanHttpsUrl(raw?.imageUrl),
-    download_url: cleanHttpsUrl(raw?.downloadUrl),
+    // What a download hands over. Kept whatever the fulfilment says, so trying
+    // "posted" on the form and coming back does not lose the uploads.
+    download_files: cleanShopFiles(raw?.downloadFiles, accountId),
     variants: JSON.stringify(cleanVariants(raw?.variants)),
   };
 }
 
-/** An https address or nothing: a picture or a download the shop hands to strangers. */
+/** An https address or nothing: a picture the shop shows to strangers. */
 function cleanHttpsUrl(value: unknown): string {
   const text = cleanString(value, "", 600);
   try {
@@ -332,7 +339,7 @@ function productRowToApi(row: Record<string, unknown>) {
     sellOnline: row.sell_online === true,
     fulfilment: cleanFulfilment(row.fulfilment),
     imageUrl: String(row.image_url || ""),
-    downloadUrl: String(row.download_url || ""),
+    downloadFiles: cleanShopFiles(row.download_files, String(row.account_id ?? "")),
     variants: cleanVariants(row.variants),
     giftCardDesign: cleanOwnGiftCardDesign(row.gift_card_design),
     giftEmail: cleanGiftEmailWording(row.gift_email),
@@ -615,14 +622,41 @@ async function getProductRow(accountId: string, id: string) {
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
+/** The files every product of a business hands over, by product id. */
+async function productDownloadFiles(accountId: string) {
+  const rows = (await supabase("billing_products_services", {
+    query: `select=id,download_files&account_id=eq.${encodeFilter(accountId)}&download_files=neq.${encodeURIComponent("[]")}`,
+  })) as Array<Record<string, unknown>>;
+  return new Map(rows.map((row) => [String(row.id), cleanShopFiles(row.download_files, accountId)]));
+}
+
+/**
+ * A product form's files, checked against storage before the row is written,
+ * and the business's unused uploads cleared away after it. A business that
+ * sells no downloads never touches storage here.
+ */
+async function productFilesForSave(accountId: string, productId: string, files: ShopFile[]) {
+  const saved = await productDownloadFiles(accountId);
+  if (!files.length && !saved.size) return { files, sweep: async () => 0 };
+  const verified = await verifyShopFiles(files, saved.get(productId) || []);
+  saved.set(productId, verified);
+  return {
+    files: verified,
+    sweep: () => sweepUnusedShopFiles(accountId, [...saved.values()].flat().map((file) => file.path)),
+  };
+}
+
 async function createProduct(accountId: string, body: Record<string, unknown>) {
-  const clean = cleanProductPayload(body);
+  const clean = cleanProductPayload(body, accountId);
   if (!clean.name) throw Object.assign(new Error("Product name is required."), { status: 400 });
+  const id = randomUUID();
+  const downloads = await productFilesForSave(accountId, id, clean.download_files);
+  clean.download_files = downloads.files;
   // Opening stock is allowed here because nothing else can have touched the row
   // yet. Every later change goes through adjustProductStock().
   const openingStock = clean.track_stock ? Math.round(cleanNumber(body?.stockLevel, 0, { min: -1e6, max: 1e6 })) : 0;
   const row = {
-    id: randomUUID(),
+    id,
     account_id: accountId,
     ...clean,
     stock_level: openingStock,
@@ -646,8 +680,10 @@ async function createProduct(accountId: string, body: Record<string, unknown>) {
 }
 
 async function updateProduct(accountId: string, id: string, body: Record<string, unknown>) {
-  const clean = cleanProductPayload(body);
+  const clean = cleanProductPayload(body, accountId);
   if (!clean.name) throw Object.assign(new Error("Product name is required."), { status: 400 });
+  const downloads = await productFilesForSave(accountId, id, clean.download_files);
+  clean.download_files = downloads.files;
   // Note the absence of stock_level: a product save must not be able to undo a
   // sale that landed while the form was open.
   const patch = { ...clean, updated_at: nowIso() };
@@ -663,6 +699,7 @@ async function updateProduct(accountId: string, id: string, body: Record<string,
     rethrowProductConflict(error, clean.sku);
   }
   if (!rows.length) throw Object.assign(new Error("Product not found."), { status: 404 });
+  await downloads.sweep();
   return { product: productRowToApi(rows[0]) };
 }
 
@@ -6901,7 +6938,7 @@ async function readOnlineShop(accountId: string): Promise<OnlineShopState> {
     readServiceList(accountId),
     supabase("billing_products_services", {
       query:
-        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,variants,track_stock,stock_level,gift_card_design,voucher_item_id,voucher_shows_value` +
+        `select=id,name,description,default_price,active,is_voucher,sell_online,fulfilment,image_url,download_files,account_id,variants,track_stock,stock_level,gift_card_design,voucher_item_id,voucher_shows_value` +
         `&account_id=eq.${encodeFilter(accountId)}&sell_online=is.true`,
     }) as Promise<Array<Record<string, unknown>>>,
     resolveDefaultCurrency(accountId),
@@ -7377,23 +7414,69 @@ async function onlineOrderSummary(accountId: string, row: Record<string, unknown
     email: String(row.customer_email ?? ""),
     recipientName: String(row.gift_recipient_name ?? ""),
     vouchers: coupons.map((coupon) => ({ code: coupon.code, value: coupon.originalValue, currency: coupon.currency })),
-    downloads,
+    downloads: downloads.map((download) => ({ name: download.name, url: download.url })),
     shippingAddress: String(row.shipping_address ?? ""),
   };
 }
 
-/** The files a paid order's lines hand over: each downloadable product once, by name. */
+/** Where a paid order fetches one of its files: the link in the receipt, and on the return page. */
+function onlineOrderDownloadPath(orderId: string, productId: string, format: string) {
+  return `/api/public-shop/download?order=${encodeURIComponent(orderId)}&product=${encodeURIComponent(productId)}&format=${encodeURIComponent(format.toLowerCase())}`;
+}
+
+/**
+ * The files a paid order's lines hand over: every file of each downloadable
+ * product, once, named as "The Clarity Method (PDF)". The url is a path on
+ * this site that checks the order each time it is opened (see
+ * onlineOrderDownload), so it is the same in the email and on the page, and
+ * it goes on working when the coach uploads a corrected edition.
+ */
 async function onlineOrderDownloads(accountId: string, id: string) {
   const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
   const productIds = [...new Set(items.map((item) => item.productId).filter((productId) => productId && !productId.startsWith(LESSON_ITEM_PREFIX)))];
-  if (!productIds.length) return [] as Array<{ name: string; url: string }>;
+  if (!productIds.length) return [] as Array<{ name: string; url: string; file: ShopFile }>;
   const list = productIds.map((productId) => `"${productId.replace(/"/g, "")}"`).join(",");
   const rows = (await supabase("billing_products_services", {
-    query: `select=id,name,fulfilment,download_url&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+    query: `select=id,name,fulfilment,download_files&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
   })) as Array<Record<string, unknown>>;
   return rows
-    .filter((row) => cleanFulfilment(row.fulfilment) === "download" && String(row.download_url || ""))
-    .map((row) => ({ name: String(row.name || ""), url: String(row.download_url) }));
+    .filter((row) => cleanFulfilment(row.fulfilment) === "download")
+    .flatMap((row) =>
+      cleanShopFiles(row.download_files, accountId).map((file) => ({
+        name: `${String(row.name || "")} (${shopFileFormat(file.name)})`,
+        url: onlineOrderDownloadPath(id, String(row.id), shopFileFormat(file.name)),
+        file,
+      })),
+    );
+}
+
+/**
+ * A buyer opening a download link: the address to send them on to, which
+ * lasts a minute.
+ *
+ * The link carries the order id and nothing else to prove itself. That id is
+ * a random UUID only the buyer was ever given (it is in their return address
+ * and their receipt), which is the same trust the return page puts in it to
+ * show voucher codes. The order is read by that id alone, so the link does
+ * not depend on the business keeping its web address. A refunded or unpaid
+ * order hands over nothing.
+ */
+export async function onlineOrderDownload(orderId: unknown, productId: unknown, format: unknown) {
+  const notFound = () => Object.assign(new Error("That download was not found."), { status: 404, code: "DOWNLOAD_NOT_FOUND" });
+  const id = cleanString(orderId, "", 160);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound();
+  const rows = (await supabase("billing_pos_transactions", {
+    query: `select=id,account_id,status&id=eq.${encodeFilter(id)}&source=eq.online&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  const order = rows[0];
+  if (!order) throw notFound();
+  if (order.status !== "paid") {
+    throw Object.assign(new Error("This order is not paid, so its downloads are not available."), { status: 403, code: "ORDER_NOT_PAID" });
+  }
+  const wanted = `${onlineOrderDownloadPath(id, cleanString(productId, "", 160), cleanString(format, "", 12))}`;
+  const download = (await onlineOrderDownloads(String(order.account_id ?? ""), id)).find((entry) => entry.url === wanted);
+  if (!download) throw notFound();
+  return signedShopFileUrl(download.file, 60);
 }
 
 /** The products of an order grouped by how they reach the buyer, for the two emails. */
@@ -7707,7 +7790,23 @@ async function emailOnlineOrder(accountId: string, id: string) {
   const recipient = cleanString(row.gift_recipient_name, "", 140);
   const message = cleanString(row.gift_message, "", 500);
   const packages = items.filter((item) => item.productId.startsWith(LESSON_ITEM_PREFIX)).map((item) => item.name);
-  const downloads = await onlineOrderDownloads(accountId, id);
+  // The links are to this site, which checks the order and passes the buyer on
+  // to the file, so they work for as long as the order stands.
+  const origin = cleanUrl(env("URL") || "", "https://claritygolf.app").replace(/\/$/, "");
+  const downloads = (await onlineOrderDownloads(accountId, id)).map((download) => ({ ...download, url: `${origin}${download.url}` }));
+  // Small enough to travel with the email, the files are attached as well.
+  // The mail provider fetches each one itself from an address that lasts an
+  // hour, so an ebook never passes through this function's memory.
+  const attachFiles = downloads.length > 0 && downloads.reduce((sum, download) => sum + download.file.bytes, 0) <= MAX_EMAIL_ATTACHMENT_BYTES;
+  const fileAttachments = attachFiles
+    ? await Promise.all(downloads.map(async (download) => ({ filename: download.file.name, path: await signedShopFileUrl(download.file, 60 * 60) }))).catch(
+        (error) => {
+          // The links still deliver; an email without attachments beats no email.
+          console.error("billing_api:online_order_attachments_failed", accountId, id, error);
+          return [];
+        },
+      )
+    : [];
   const shipping = Number(row.shipping_amount) || 0;
   const address = cleanString(row.shipping_address, "", 600);
   // An order with a voucher in it is the gift voucher email, in the coach's words.
@@ -7728,6 +7827,9 @@ async function emailOnlineOrder(accountId: string, id: string) {
     worth: coupon.showsValue ? mt("Worth {amount}", { amount: formatMoney(coupon.originalValue, coupon.currency) }) : "",
   }));
   const attachedLine = gift?.attachments.length ? mt("Your gift card is attached, ready to print or pass on.") : "";
+  const downloadsHeading = fileAttachments.length
+    ? mt("Your files are attached. You can also download them here at any time:")
+    : mt("Your downloads:");
   const packageLines = packages.map((name) => mt("{item} is on your account.", { item: name }));
 
   const text = [
@@ -7744,7 +7846,7 @@ async function emailOnlineOrder(accountId: string, id: string) {
     mt("Paid by card"),
     "",
     ...packageLines,
-    ...(downloadLines.length ? ["", mt("Your downloads:"), ...downloadLines] : []),
+    ...(downloadLines.length ? ["", downloadsHeading, ...downloadLines] : []),
     postedLine ? "" : "",
     postedLine,
     "",
@@ -7777,7 +7879,7 @@ async function emailOnlineOrder(accountId: string, id: string) {
     (attachedLine ? `<p style="margin:0 0 16px">${escapeHtml(attachedLine)}</p>` : "") +
     packageLines.map((line) => `<p style="margin:0 0 16px">${escapeHtml(line)}</p>`).join("") +
     (downloads.length
-      ? `<p style="margin:0 0 8px">${escapeHtml(mt("Your downloads:"))}</p><ul style="margin:0 0 16px;padding-left:20px">` +
+      ? `<p style="margin:0 0 8px">${escapeHtml(downloadsHeading)}</p><ul style="margin:0 0 16px;padding-left:20px">` +
         downloads.map((download) => `<li><a href="${escapeHtml(download.url)}">${escapeHtml(download.name)}</a></li>`).join("") +
         `</ul>`
       : "") +
@@ -7793,16 +7895,26 @@ async function emailOnlineOrder(accountId: string, id: string) {
       : `<p style="margin:16px 0 0">${escapeHtml(mt("Thanks,"))}<br/>${escapeHtml(branding.businessName)}</p>`) +
     `</div>`;
 
-  const result = await deliverEmail({
-    accountId,
-    to,
-    subject: gift?.subject || mt("Your purchase from {businessName}", { businessName: branding.businessName }),
-    text,
-    html,
-    replyTo: branding.contactEmail || undefined,
-    idempotencyKey: `online-order-${id}`,
-    attachments: gift?.attachments.length ? gift.attachments : undefined,
-  });
+  const giftAttachments = gift?.attachments || [];
+  const send = (attachments: EmailAttachment[], idempotencyKey: string) =>
+    deliverEmail({
+      accountId,
+      to,
+      subject: gift?.subject || mt("Your purchase from {businessName}", { businessName: branding.businessName }),
+      text,
+      html,
+      replyTo: branding.contactEmail || undefined,
+      idempotencyKey,
+      attachments: attachments.length ? attachments : undefined,
+    });
+  let result = await send([...giftAttachments, ...fileAttachments], `online-order-${id}`);
+  // Refused with the files attached (too big for the provider after all, or it
+  // could not fetch one): the same email goes without them, and its links
+  // deliver. Under its own key, because the provider remembers the first try.
+  if (!result.sent && fileAttachments.length && String(result.reason || "").startsWith("resend_failed_")) {
+    console.error("billing_api:online_order_email_retry_without_files", accountId, id, result.reason, result.error);
+    result = await send(giftAttachments, `online-order-${id}-links`);
+  }
   if (!result.sent) console.error("billing_api:online_order_email_not_sent", accountId, id, result.reason);
 }
 
@@ -7822,6 +7934,8 @@ export default async function handler(req: Request) {
 
     if (action === "products" && req.method === "GET") return json(await listProducts(accountId));
     if (action === "products" && req.method === "POST") return json(await createProduct(accountId, await parseBody(req)));
+    // A digital product's file: where the browser sends its bytes. See _shared/shop-files.mts.
+    if (action === "product-files" && req.method === "POST") return json(await startShopFileUpload(accountId, await parseBody(req)));
     // Stock sub-actions come first: the generic products/:id handler below would
     // otherwise read "id/stock" as the id.
     if (action.startsWith("products/") && action.endsWith("/stock") && req.method === "POST") {

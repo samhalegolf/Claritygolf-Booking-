@@ -59,11 +59,22 @@ sells: packages are the lesson types marked sellable, vouchers are the
 products ticked as vouchers under Billing, and goods are the products
 ticked "Sell on your website" under Billing › Products. A product there
 gets a picture (uploaded to the site's bucket), how it reaches the buyer
-(collected, posted or downloaded), a download link, and options one per
-line ("Large = 45" prices an option on its own; the rest sell at the
+(collected, posted or downloaded), the files a download hands over, and
+options one per line ("Large = 45" prices an option on its own; the rest sell at the
 product's price). Stock, when the product counts it, is shared across its
 options and a product with none left shows as sold out rather than
 vanishing.
+
+A digital product (an ebook, say) is a product whose buyer downloads it.
+The coach uploads its files on the product, one per format (a PDF and an
+EPUB), up to 100 MB each, into the private `shop-downloads` bucket; it goes
+on the shelf once it has a file. A paid order is emailed the files with its
+receipt (attached when they total 15 MB or less) and always a link to each,
+`/api/public-shop/download?order=…`, which checks the order is still paid
+each time it is opened and passes the buyer to a one-minute signed address.
+So a link keeps working for as long as the order stands, hands over the
+current edition when the coach uploads a corrected one, and stops when the
+order is refunded. See `netlify/functions/_shared/shop-files.mts`.
 
 In "cards" mode the shelf is drawn in the site's own look and the order is
 a cart: the visitor adds things (the cart is kept in the browser, one per
@@ -427,7 +438,5 @@ next one and swaps it in without a reload; Back and Forward work.
 - A booking block in the preview is a labelled box rather than the live
   widget, so editing never books anything and the preview stays light.
 - Pictures pasted by address are used as given; only uploads are shrunk.
-- A download is a link the coach pastes (or a file hosted elsewhere), sent
-  in the receipt; the shop does not host files itself.
 - Instagram posts are added by hand. A live feed needs Instagram's app
   review and a connected account.

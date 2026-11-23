@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Miten se päätyy ostajalle",
   "Collected in person": "Noudetaan paikan päältä",
   "Posted (the payment page asks for an address)": "Postitetaan (maksusivu kysyy osoitetta)",
-  "Downloaded (a link in the receipt)": "Ladataan (linkki kuitissa)",
-  "Download link": "Latauslinkki",
   "Posted to you": "Postitetaan sinulle",
   "Collect in person": "Nouto paikan päältä",
   "Sold out": "Loppuunmyyty",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "Sähköposti, jonka ostaja saa ostaessaan lahjakortin verkkokaupastasi, ja siihen liitetty lahjakortti. Lahjakortilla voi sen sijaan olla oma korttinsa ja tekstinsä, asetettuna kohdassa Luo tai muokkaa lahjakortteja.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Yksi viesti jokaista varaukselle tapahtuvaa asiaa kohden, ja sanamuoto on sinun. Mihin et koske, pitää Clarityn sanamuodon, joten koskaan avaamatonkin viesti on hyvä lukea. Lahjakortin sähköposti ja kortti ovat kohdassa Laskutus › Lahjakortit › Pohjat.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Muokkaa vakiolahjakorttia ja sähköpostia (Lahjakortit › Pohjat)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Tämä on vakiolahjakorttisi ja -sähköpostisi. Lahjakortilla voi olla omansa, asetettuna siellä missä sitä muokataan kohdassa Laskutus › Lahjakortit › Luo tai muokkaa lahjakortteja. Koodit, kuitti ja lahjakortti täytetään tilauskohtaisesti."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Tämä on vakiolahjakorttisi ja -sähköpostisi. Lahjakortilla voi olla omansa, asetettuna siellä missä sitä muokataan kohdassa Laskutus › Lahjakortit › Luo tai muokkaa lahjakortteja. Koodit, kuitti ja lahjakortti täytetään tilauskohtaisesti.",
+  "Could not upload that file. Check your connection and try again.": "Tiedoston lataaminen epäonnistui. Tarkista yhteytesi ja yritä uudelleen.",
+  "Digital download (files emailed to the buyer)": "Digitaalinen lataus (tiedostot lähetetään ostajalle sähköpostilla)",
+  "Files the buyer gets": "Ostajan saamat tiedostot",
+  "Upload file": "Lataa tiedosto",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "Ostaja saa nämä tiedostot sähköpostilla kuitin mukana sekä yksityisen linkin, jolla ne voi ladata uudelleen. Uusi samantyyppinen tiedosto korvaa vanhan.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Lataa jokainen myymäsi muoto, esimerkiksi PDF ja EPUB. Tuote näkyy kaupassa, kun sillä on tiedosto."
 }

@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Hoe het bij de koper komt",
   "Collected in person": "Afgehaald",
   "Posted (the payment page asks for an address)": "Per post (de betaalpagina vraagt om een adres)",
-  "Downloaded (a link in the receipt)": "Gedownload (een link in de bon)",
-  "Download link": "Downloadlink",
   "Posted to you": "Naar je opgestuurd",
   "Collect in person": "Afhalen",
   "Sold out": "Uitverkocht",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "De e-mail die een koper krijgt als die een waardebon koopt in je webwinkel, en de cadeaukaart als bijlage. Een waardebon kan ook een eigen kaart en tekst hebben, ingesteld onder Waardebonnen maken of bewerken.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Eén bericht per gebeurtenis bij een boeking, en de tekst is van jou. Wat je laat staan houdt de tekst van Clarity, dus ook een bericht dat je nooit opent leest goed. De e-mail en kaart voor waardebonnen staan onder Facturatie › Waardebonnen › Sjablonen.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Standaard cadeaukaart en e-mail bewerken (Waardebonnen › Sjablonen)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dit is je standaard cadeaukaart en e-mail. Een waardebon kan een eigen hebben, ingesteld waar hij wordt bewerkt onder Facturatie › Waardebonnen › Waardebonnen maken of bewerken. De codes, het bonnetje en de cadeaukaart worden per bestelling ingevuld."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Dit is je standaard cadeaukaart en e-mail. Een waardebon kan een eigen hebben, ingesteld waar hij wordt bewerkt onder Facturatie › Waardebonnen › Waardebonnen maken of bewerken. De codes, het bonnetje en de cadeaukaart worden per bestelling ingevuld.",
+  "Could not upload that file. Check your connection and try again.": "Het bestand kon niet worden geüpload. Controleer je verbinding en probeer het opnieuw.",
+  "Digital download (files emailed to the buyer)": "Digitale download (bestanden worden naar de koper gemaild)",
+  "Files the buyer gets": "Bestanden die de koper krijgt",
+  "Upload file": "Bestand uploaden",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "De koper krijgt deze bestanden per e-mail bij de bon, met een privélink om ze opnieuw te downloaden. Een nieuw bestand van hetzelfde type vervangt het oude.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Upload elk formaat dat je verkoopt, bijvoorbeeld een PDF en een EPUB. Het product staat in de winkel zodra het een bestand heeft."
 }

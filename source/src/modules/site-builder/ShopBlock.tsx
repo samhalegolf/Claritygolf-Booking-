@@ -42,7 +42,7 @@ function itemDetail(item: ShopItem) {
   if (item.kind === "voucher") return t("Gift voucher");
   if (item.includes.length) return item.includes.join(" + ");
   if (item.fulfilment === "ship") return t("Posted to you");
-  if (item.fulfilment === "download") return t("Download");
+  if (item.fulfilment === "download") return [t("Download"), item.formats.join(" + ")].filter(Boolean).join(" · ");
   if (item.fulfilment === "collect") return t("Collect in person");
   return "";
 }

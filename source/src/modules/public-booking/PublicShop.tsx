@@ -33,6 +33,7 @@ type ShopItem = {
   credits: number;
   includes: string[];
   fulfilment: "collect" | "ship" | "download" | "";
+  formats: string[];
   variants: Array<{ id: string; name: string; price: number | null; description: string }>;
   stock: number | null;
   /** A voucher's gift card, to preview. Null when it has none, and on anything else. */
@@ -69,7 +70,7 @@ async function shopCall<T>(path: string, body?: unknown): Promise<T> {
 
 function itemDetail(item: ShopItem, terms: BusinessTerminology) {
   if (item.kind === "voucher") return t("Gift voucher");
-  if (item.kind === "product") return item.fulfilment === "ship" ? t("Posted to you") : item.fulfilment === "download" ? t("Download") : t("Collect in person");
+  if (item.kind === "product") return item.fulfilment === "ship" ? t("Posted to you") : item.fulfilment === "download" ? [t("Download"), item.formats.join(" + ")].filter(Boolean).join(" · ") : t("Collect in person");
   if (item.includes.length) return item.includes.join(" + ");
   return tn(item.credits, "{count} {serviceSingular}", "{count} {servicePlural}", {
     serviceSingular: terms.serviceSingular.toLowerCase(),

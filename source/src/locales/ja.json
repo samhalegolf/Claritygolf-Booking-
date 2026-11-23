@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "購入者への届け方",
   "Collected in person": "店頭で受け取り",
   "Posted (the payment page asks for an address)": "郵送（支払いページで住所を確認します）",
-  "Downloaded (a link in the receipt)": "ダウンロード（レシートにリンクを記載）",
-  "Download link": "ダウンロードリンク",
   "Posted to you": "郵送でお届け",
   "Collect in person": "店頭で受け取り",
   "Sold out": "売り切れ",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "オンラインショップでギフト券を購入した購入者に届くメールと、添付されるギフトカード。ギフト券ごとに独自のカードと文面を「ギフト券の作成・編集」で設定することもできます。",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "予約に起きる出来事ごとに1通のメッセージ。文面はあなたのものです。手を付けない部分は Clarity の文面のままなので、開かないメッセージも読みやすいままです。ギフト券のメールとカードは「請求 › ギフト券 › テンプレート」にあります。",
   "Edit the standard gift card and email (Vouchers › Templates)": "標準のギフトカードとメールを編集（ギフト券 › テンプレート）",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "これは標準のギフトカードとメールです。ギフト券ごとに独自のものを「請求 › ギフト券 › ギフト券の作成・編集」で設定できます。コード、領収書、ギフトカードは注文ごとに入力されます。"
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "これは標準のギフトカードとメールです。ギフト券ごとに独自のものを「請求 › ギフト券 › ギフト券の作成・編集」で設定できます。コード、領収書、ギフトカードは注文ごとに入力されます。",
+  "Could not upload that file. Check your connection and try again.": "ファイルをアップロードできませんでした。接続を確認して、もう一度お試しください。",
+  "Digital download (files emailed to the buyer)": "デジタルダウンロード（ファイルを購入者にメールで送信）",
+  "Files the buyer gets": "購入者が受け取るファイル",
+  "Upload file": "ファイルをアップロード",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "購入者には、これらのファイルが領収書と一緒にメールで届き、再ダウンロード用の専用リンクも送られます。同じ種類の新しいファイルをアップロードすると、古いファイルと置き換わります。",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "PDFやEPUBなど、販売する形式をそれぞれアップロードしてください。ファイルを追加するとストアに表示されます。"
 }

@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Come arriva all'acquirente",
   "Collected in person": "Ritirato di persona",
   "Posted (the payment page asks for an address)": "Spedito (la pagina di pagamento chiede un indirizzo)",
-  "Downloaded (a link in the receipt)": "Scaricato (un link nella ricevuta)",
-  "Download link": "Link di download",
   "Posted to you": "Spedito a te",
   "Collect in person": "Ritiro di persona",
   "Sold out": "Esaurito",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "L'email che un acquirente riceve quando compra un buono regalo nel tuo negozio online, e la gift card allegata. Un buono può avere invece una propria carta e un proprio testo, impostati in Crea o modifica buoni.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Un messaggio per ogni cosa che succede a una prenotazione, e il testo è tuo. Ciò che non tocchi mantiene il testo di Clarity, quindi anche un messaggio mai aperto si legge bene. Email e carta del buono regalo sono in Fatturazione › Buoni › Modelli.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Modifica la gift card e l'email standard (Buoni › Modelli)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Questa è la tua gift card e la tua email standard. Un buono può avere i propri, impostati dove viene modificato in Fatturazione › Buoni › Crea o modifica buoni. Codici, ricevuta e gift card vengono compilati per ogni ordine."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Questa è la tua gift card e la tua email standard. Un buono può avere i propri, impostati dove viene modificato in Fatturazione › Buoni › Crea o modifica buoni. Codici, ricevuta e gift card vengono compilati per ogni ordine.",
+  "Could not upload that file. Check your connection and try again.": "Impossibile caricare il file. Controlla la connessione e riprova.",
+  "Digital download (files emailed to the buyer)": "Download digitale (file inviati via email all'acquirente)",
+  "Files the buyer gets": "File che riceve l'acquirente",
+  "Upload file": "Carica file",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "L'acquirente riceve questi file via email con la ricevuta, insieme a un link privato per scaricarli di nuovo. Un nuovo file dello stesso tipo sostituisce il precedente.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Carica ogni formato che vendi, ad esempio un PDF e un EPUB. Compare nel negozio appena ha un file."
 }

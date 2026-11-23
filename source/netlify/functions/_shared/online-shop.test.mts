@@ -151,7 +151,7 @@ const gloveRow = {
     { id: "l", name: "Large", price: 45 },
   ]),
 };
-const bookRow = { id: "prod-book", name: "The book (PDF)", default_price: 15, active: true, sell_online: true, fulfilment: "download", track_stock: false, variants: "[]" };
+const bookRow = { id: "prod-book", name: "The book (PDF)", default_price: 15, active: true, sell_online: true, fulfilment: "download", track_stock: false, variants: "[]", account_id: "acct-1", download_files: [{ path: "acct-1/abc-The-book.pdf", name: "The book.pdf", bytes: 1200000 }] };
 
 test("a product is on the shelf once ticked for the website, priced from its cheapest option, with its stock", () => {
   const items = onlineShopItems([], [gloveRow, bookRow, { ...gloveRow, id: "shelf-only", sell_online: false }, { ...gloveRow, id: "retired", active: false }], "NZD");
@@ -262,4 +262,26 @@ test("an online checkout closes after the time asked for, never sooner than Stri
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("a download is on the shelf once it has a file, and says what it comes as", () => {
+  const ebook = {
+    id: "prod-ebook",
+    account_id: "acct-1",
+    name: "The Clarity Method",
+    default_price: 29,
+    active: true,
+    sell_online: true,
+    fulfilment: "download",
+    download_files: [
+      { path: "acct-1/abc-Clarity-Method.pdf", name: "Clarity Method.pdf", bytes: 2000000 },
+      { path: "acct-1/def-Clarity-Method.epub", name: "Clarity Method.epub", bytes: 900000 },
+    ],
+  };
+  const [item] = onlineShopItems([], [ebook], "NZD");
+  assert.deepEqual([item.id, item.fulfilment, item.formats], ["prod-ebook", "download", ["PDF", "EPUB"]]);
+  // No file yet: it would take the money and hand over nothing.
+  assert.deepEqual(onlineShopItems([], [{ ...ebook, download_files: [] }], "NZD"), []);
+  // Another business's file is not this product's to hand over.
+  assert.deepEqual(onlineShopItems([], [{ ...ebook, account_id: "acct-2" }], "NZD"), []);
 });

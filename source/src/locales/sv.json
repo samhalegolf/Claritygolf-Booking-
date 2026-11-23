@@ -5029,8 +5029,6 @@
   "How it reaches the buyer": "Hur den når köparen",
   "Collected in person": "Hämtas på plats",
   "Posted (the payment page asks for an address)": "Skickas med post (betalsidan ber om en adress)",
-  "Downloaded (a link in the receipt)": "Laddas ner (en länk i kvittot)",
-  "Download link": "Nedladdningslänk",
   "Posted to you": "Skickas till dig",
   "Collect in person": "Hämta på plats",
   "Sold out": "Slutsåld",
@@ -5276,5 +5274,11 @@
   "The email a buyer gets when they buy a gift voucher in your online shop, and the gift card attached to it. A voucher can have its own card and wording instead, set under Create or Edit Vouchers.": "Mejlet en köpare får när de köper ett presentkort i din webbutik, och presentkortet som bifogas. Ett presentkort kan i stället ha ett eget kort och egen text, inställt under Skapa eller redigera presentkort.",
   "One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well. The gift voucher email and card are under Billing › Vouchers › Templates.": "Ett meddelande per sak som händer en bokning, och formuleringen är din. Det du låter vara behåller Claritys formulering, så ett meddelande du aldrig öppnar läser ändå bra. Presentkortets mejl och kort finns under Fakturering › Presentkort › Mallar.",
   "Edit the standard gift card and email (Vouchers › Templates)": "Redigera standardpresentkortet och mejlet (Presentkort › Mallar)",
-  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Detta är ditt standardpresentkort och -mejl. Ett presentkort kan ha egna, inställda där det redigeras under Fakturering › Presentkort › Skapa eller redigera presentkort. Koderna, kvittot och presentkortet fylls i per beställning."
+  "This is your standard gift card and email. A voucher can have its own instead, set where it is edited under Billing › Vouchers › Create or Edit Vouchers. The codes, the receipt and the gift card are filled in per order.": "Detta är ditt standardpresentkort och -mejl. Ett presentkort kan ha egna, inställda där det redigeras under Fakturering › Presentkort › Skapa eller redigera presentkort. Koderna, kvittot och presentkortet fylls i per beställning.",
+  "Could not upload that file. Check your connection and try again.": "Det gick inte att ladda upp filen. Kontrollera anslutningen och försök igen.",
+  "Digital download (files emailed to the buyer)": "Digital nedladdning (filer mejlas till köparen)",
+  "Files the buyer gets": "Filer som köparen får",
+  "Upload file": "Ladda upp fil",
+  "The buyer is emailed these files with their receipt, with a private link to download them again. Uploading a new file of the same kind replaces the old one.": "Köparen får dessa filer via e-post tillsammans med kvittot, samt en privat länk för att ladda ner dem igen. En ny fil av samma typ ersätter den gamla.",
+  "Upload each format you sell, such as a PDF and an EPUB. It shows on the store once it has a file.": "Ladda upp varje format du säljer, till exempel en PDF och en EPUB. Produkten visas i butiken när den har en fil."
 }
