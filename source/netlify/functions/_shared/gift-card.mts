@@ -1,7 +1,7 @@
 // The gift card a voucher bought online is printed on.
 //
 // The coach uploads their own artwork and says where on it the recipient's
-// name, what the voucher is for (a lesson or product, when it is for one), the
+// name, what the voucher is for (a lesson or product, or else the voucher's own name), the
 // voucher code and its value go. When a voucher is bought, those are written
 // onto the artwork and the result is attached to the gift
 // voucher email as a PDF (gift-card-pdf.mts), one page per voucher.
@@ -15,7 +15,7 @@
 // the coach lays out is the card that goes out. It must not touch `process` or
 // any Node API.
 
-/** "item": what a voucher for a lesson or product is for. Blank on an amount voucher. */
+/** "item": the lesson or product a voucher is for, or else the name of the voucher itself. */
 export type GiftCardFieldId = "name" | "item" | "code" | "value";
 export type GiftCardFont = "sans" | "serif" | "mono";
 export type GiftCardAlign = "left" | "center" | "right";

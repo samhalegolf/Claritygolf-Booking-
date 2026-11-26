@@ -6267,7 +6267,7 @@ async function couponDetails(accountId: string, id: string, url: URL) {
     coupon.saleId ? posTransactionRow(accountId, coupon.saleId) : Promise.resolve(null),
     coupon.productId
       ? (supabase("billing_products_services", {
-          query: `select=gift_card_design&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(coupon.productId)}&limit=1`,
+          query: `select=name,gift_card_design&account_id=eq.${encodeFilter(accountId)}&id=eq.${encodeFilter(coupon.productId)}&limit=1`,
         }) as Promise<Array<Record<string, unknown>>>)
       : Promise.resolve([] as Array<Record<string, unknown>>),
     readSettingValue(accountId, GIFT_CARD_SETTING),
@@ -6298,7 +6298,7 @@ async function couponDetails(accountId: string, id: string, url: URL) {
       design,
       text: {
         name: coupon.issuedToName,
-        item: coupon.coversItemName,
+        item: giftCardItem(coupon, productRows[0]?.name),
         code: coupon.code,
         value: coupon.showsValue ? formatMoney(coupon.originalValue, coupon.currency) : "",
       },
@@ -7685,7 +7685,7 @@ async function giftVoucherEmail(
     productIds.length
       ? (supabase("billing_products_services", {
           query:
-            `select=id,gift_card_design,gift_email&account_id=eq.${encodeFilter(accountId)}` +
+            `select=id,name,gift_card_design,gift_email&account_id=eq.${encodeFilter(accountId)}` +
             `&id=in.(${encodeURIComponent(productIds.map((id) => `"${id.replace(/"/g, "")}"`).join(","))})`,
         }) as Promise<Array<Record<string, unknown>>>)
       : Promise.resolve([] as Array<Record<string, unknown>>),
@@ -7693,7 +7693,11 @@ async function giftVoucherEmail(
   const ownById = new Map(
     productRows.map((product) => [
       String(product.id ?? ""),
-      { design: cleanOwnGiftCardDesign(product.gift_card_design), email: cleanGiftEmailWording(product.gift_email) },
+      {
+        name: cleanString(product.name, "", 160),
+        design: cleanOwnGiftCardDesign(product.gift_card_design),
+        email: cleanGiftEmailWording(product.gift_email),
+      },
     ]),
   );
   const ownEmail = coupons.map((coupon) => ownById.get(coupon.productId)?.email).find(Boolean) || null;
@@ -7715,6 +7719,7 @@ async function giftVoucherEmail(
 
   // Vouchers on the same card share a PDF; a different card is a PDF of its own.
   const standard = parseGiftCardDesign(designValue);
+  const voucherNames = new Map([...ownById].map(([id, own]) => [id, own.name]));
   const byCard = new Map<string, { design: GiftCardDesign; coupons: typeof coupons }>();
   for (const coupon of coupons) {
     const design = ownById.get(coupon.productId)?.design || standard;
@@ -7726,7 +7731,7 @@ async function giftVoucherEmail(
   const attachments: Array<{ filename: string; content: string }> = [];
   for (const group of byCard.values()) {
     try {
-      const attachment = await giftCardAttachment(accountId, group.design, group.coupons);
+      const attachment = await giftCardAttachment(accountId, group.design, group.coupons, voucherNames);
       if (attachment) attachments.push(attachment);
     } catch (error) {
       // The codes are in the email. A card that cannot be made must not stop it.
@@ -7739,8 +7744,21 @@ async function giftVoucherEmail(
   };
 }
 
+/**
+ * What a voucher's card says it is for: the lesson or product it covers, or
+ * else the name of the voucher it was sold as ("1 Hour Golf Lesson").
+ */
+function giftCardItem(coupon: ReturnType<typeof couponRowToApi>, voucherName: unknown) {
+  return coupon.coversItemName || cleanString(voucherName, "", 160);
+}
+
 /** One gift card PDF, or null when the card has no artwork. */
-async function giftCardAttachment(accountId: string, design: GiftCardDesign, coupons: Array<ReturnType<typeof couponRowToApi>>) {
+async function giftCardAttachment(
+  accountId: string,
+  design: GiftCardDesign,
+  coupons: Array<ReturnType<typeof couponRowToApi>>,
+  voucherNames: Map<string, string>,
+) {
   if (!design.imageUrl || !coupons.length) return null;
   // Fetched only from this business's own folder in our bucket: the address is
   // stored by the coach's browser, and the server will not fetch anywhere else.
@@ -7755,7 +7773,7 @@ async function giftCardAttachment(accountId: string, design: GiftCardDesign, cou
     image,
     coupons.map((coupon) => ({
       name: coupon.issuedToName,
-      item: coupon.coversItemName,
+      item: giftCardItem(coupon, voucherNames.get(coupon.productId)),
       code: coupon.code,
       // A lesson voucher given as a gift may leave its price off the card.
       value: coupon.showsValue ? formatMoney(coupon.originalValue, coupon.currency) : "",

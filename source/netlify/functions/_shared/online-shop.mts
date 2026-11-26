@@ -57,7 +57,7 @@ export type OnlineVariant = { id: string; name: string; price: number | null; de
 /**
  * The card a voucher is printed on, for the shop to preview: its own card, or
  * else the business's standard one. `item` is what a voucher for a lesson or
- * product is for ("" on an amount voucher); `showsValue` is whether its value
+ * product is for (the voucher's own name on an amount voucher); `showsValue` is whether its value
  * is printed. The same three the send path prints (billing-api giftCardAttachment).
  */
 export type OnlineGiftCard = { design: GiftCardDesign; item: string; showsValue: boolean };
@@ -196,7 +196,10 @@ export function onlineShopItems(
         formats: [] as string[],
         variants,
         stock: null,
-        giftCard: design?.imageUrl ? { design, item, showsValue: !item || row.voucher_shows_value !== false } : null,
+        // The card names the lesson or product, or else the voucher itself, as the send path does.
+        giftCard: design?.imageUrl
+          ? { design, item: item || text(row.name, 160), showsValue: !item || row.voucher_shows_value !== false }
+          : null,
       };
     })
     .filter((item) => item.id && item.price > 0)
