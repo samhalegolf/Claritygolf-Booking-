@@ -1,10 +1,12 @@
 import { coachAccountFromSettings, isOriginalWorkspace } from "./coach-account.mts";
+import { GIFT_CARD_SETTING, parseGiftCardDesign } from "./gift-card.mts";
 import { messageText } from "./message-language.mts";
+import { DEFAULT_MAP_LINK_LABEL, parseNotificationTemplates } from "./notification-templates.mts";
 import { playerBookingEmbedFromSettings } from "./player-booking-embed.mts";
 import { appUserRoleForMembership, type CoachActor } from "./coach-auth.mts";
 import { cleanHexColor, servicesFromSettings } from "./services.mts";
 import { parseSettingJson, settingValue } from "./settings-store.mts";
-import { cleanSlug, cleanString, timeToMinutes } from "./values.mts";
+import { cleanEmail, cleanSlug, cleanString, cleanUrl, env, timeToMinutes } from "./values.mts";
 import {
   defaultAppUserFromAccount,
   defaultCoachProfileFromAccount,
@@ -120,6 +122,27 @@ export function cleanReminderLeadMinutes(value, fallback = 24 * 60) {
   return Number.isFinite(minutes) ? Math.max(60, Math.min(14 * 24 * 60, Math.round(minutes))) : fallback;
 }
 
+// How close to now a lesson may be booked online: none to 7 days, default 4 hours.
+export function cleanMinBookingNoticeMinutes(value, fallback = 240) {
+  const minutes = Number(value === "" || value === undefined || value === null ? fallback : value);
+  return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : fallback;
+}
+
+/** The address in the sender the server is configured with: "Name <a@b.c>" or a bare address. */
+function configuredSenderEmail(value) {
+  const source = cleanString(value, "", 500);
+  const match = source.match(/<\s*([^>]+)\s*>/);
+  return cleanEmail(match ? match[1] : source, "");
+}
+
+/**
+ * Every notification setting the coach app edits, from a business's settings.
+ *
+ * The one reader: the calendar load and /api/admin-settings both answer with
+ * this. They used to keep a copy each, and the calendar's was missing the
+ * message templates and the gift card, so a screen opened before the second
+ * request landed showed them blank, and a save from there would have wiped them.
+ */
 export function adminSettingsFromSettings(settings) {
   const delaySeconds = Number(settingValue(settings, "notificationDelaySeconds") || 30);
   return {
@@ -127,9 +150,19 @@ export function adminSettingsFromSettings(settings) {
     notificationEmail: settingValue(settings, "notificationEmail"),
     coachEmail: settingValue(settings, "coachEmail"),
     replyToEmail: settingValue(settings, "replyToEmail"),
+    googleReviewUrl: cleanUrl(settingValue(settings, "googleReviewUrl"), ""),
+    notificationFromName: cleanString(settingValue(settings, "notificationFromName"), "", 120),
+    configuredSenderEmailAddress: configuredSenderEmail(
+      env("CLARITY_EMAIL_FROM", env("CLARITY_NOTIFICATION_EMAIL", settingValue(settings, "notificationEmail"))),
+    ),
+    notificationSubjectLine: cleanString(settingValue(settings, "notificationSubjectLine"), "", 180),
     notificationDelaySeconds: Number.isFinite(delaySeconds)
       ? Math.max(30, Math.min(3600, delaySeconds))
       : 30,
+    minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(
+      settingValue(settings, "minBookingNoticeMinutes") || env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", ""),
+    ),
+    publicBookingLookBusy: settingValue(settings, "publicBookingLookBusy") === "true",
     sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
     sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
     sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
@@ -157,6 +190,13 @@ export function adminSettingsFromSettings(settings) {
     smsFromNumber: settingValue(settings, "smsFromNumber"),
     sendClientSms: settingValue(settings, "sendClientSms") === "true",
     sendAdminSms: settingValue(settings, "sendAdminSms") === "true",
+    notificationTemplates: parseNotificationTemplates(settingValue(settings, "notificationTemplatesJson")),
+    mapLinkLabel: cleanString(settingValue(settings, "mapLinkLabel"), DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL,
+    // The card a voucher bought online is printed on. Edited beside the gift
+    // voucher email under Billing › Vouchers › Templates, so it saves with it.
+    giftCardDesign: parseGiftCardDesign(settingValue(settings, GIFT_CARD_SETTING)),
+    // The player portal's slot for someone else's booking widget. Flattened
+    // into this object rather than nested, so it saves through the same PUT.
     ...playerBookingEmbedFromSettings(settings),
   };
 }

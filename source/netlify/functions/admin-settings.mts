@@ -5,23 +5,17 @@ import {
   settingsSelectQuery,
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
-import {
-  cleanNotificationTemplates,
-  DEFAULT_MAP_LINK_LABEL,
-  parseNotificationTemplates,
-} from "./_shared/notification-templates.mts";
-import { cleanGiftCardDesign, GIFT_CARD_SETTING, parseGiftCardDesign } from "./_shared/gift-card.mts";
+import { cleanNotificationTemplates, DEFAULT_MAP_LINK_LABEL } from "./_shared/notification-templates.mts";
+import { cleanGiftCardDesign, GIFT_CARD_SETTING } from "./_shared/gift-card.mts";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
   cleanPlayerBookingEmbedLabel,
   cleanPlayerBookingEmbedUrl,
-  playerBookingEmbedFromSettings,
 } from "./_shared/player-booking-embed.mts";
+import { adminSettingsFromSettings, cleanMinBookingNoticeMinutes } from "./_shared/workspace-state.mts";
 import { cleanString, env, hasOwn, nowIso } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
-
-const defaultMinBookingNoticeMinutes = 240;
 
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
@@ -42,19 +36,6 @@ function cleanUrl(value: unknown, fallback = "") {
   } catch {
     return fallback;
   }
-}
-
-function configuredSenderEmailFromEnv(value: unknown) {
-  const source = cleanString(value, "", 500);
-  if (!source) return "";
-  const match = source.match(/<\s*([^>]+)\s*>/);
-  const candidate = match ? match[1] : source;
-  return cleanEmail(candidate, "");
-}
-
-function cleanMinBookingNoticeMinutes(value: unknown, fallback = defaultMinBookingNoticeMinutes) {
-  const minutes = Number(value ?? fallback);
-  return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : fallback;
 }
 
 // Reminder lead time: 1 hour to 14 days before the lesson, default 24 hours.
@@ -136,48 +117,7 @@ async function writeSettings(accountId: string, values: Record<string, unknown>)
 
 async function readAdminSettings(accountId: string) {
   const rows = await supabase("settings", { query: settingsSelectQuery(accountId) });
-  const settings = settingMap(rows);
-  const delaySeconds = Number(settings.notificationDelaySeconds || 30);
-  return {
-    emailNotificationsEnabled: settings.emailNotificationsEnabled !== "false",
-    notificationEmail: settings.notificationEmail || "",
-    coachEmail: settings.coachEmail || "",
-    replyToEmail: settings.replyToEmail || "",
-    googleReviewUrl: cleanUrl(settings.googleReviewUrl, ""),
-    notificationFromName: cleanString(settings.notificationFromName, "", 120),
-    configuredSenderEmailAddress: configuredSenderEmailFromEnv(
-      env("CLARITY_EMAIL_FROM", env("CLARITY_NOTIFICATION_EMAIL", settings.notificationEmail || "")),
-    ),
-    notificationSubjectLine: cleanString(settings.notificationSubjectLine, "", 180),
-    notificationDelaySeconds: Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
-    minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes))),
-    publicBookingLookBusy: settings.publicBookingLookBusy === "true",
-    sendClientEmail: settings.sendClientEmail !== "false",
-    sendCoachEmail: settings.sendCoachEmail !== "false",
-    sendAdminEmail: settings.sendAdminEmail !== "false",
-    sendLessonTypeChangeEmail: settings.sendLessonTypeChangeEmail === "true",
-    reminderEnabled: settings.reminderEnabled === "true",
-    reminderLeadMinutes: cleanReminderLeadMinutes(settings.reminderLeadMinutes),
-    clientEmailSubject: settings.clientEmailSubject || defaultEmailTemplates.clientEmailSubject,
-    clientEmailIntro: settings.clientEmailIntro || defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: modernClientEmailFooter(settings.clientEmailFooter),
-    adminEmailSubject: settings.adminEmailSubject || defaultEmailTemplates.adminEmailSubject,
-    adminEmailIntro: settings.adminEmailIntro || defaultEmailTemplates.adminEmailIntro,
-    smsProviderName: settings.smsProviderName || "",
-    smsWebhookUrl: settings.smsWebhookUrl || "",
-    smsFromNumber: settings.smsFromNumber || "",
-    sendClientSms: settings.sendClientSms === "true",
-    sendAdminSms: settings.sendAdminSms === "true",
-    notificationTemplates: parseNotificationTemplates(settings.notificationTemplatesJson),
-    mapLinkLabel: cleanString(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL,
-    // The card a voucher bought online is printed on. Edited beside the gift
-    // voucher email in Templates, so it saves with them.
-    giftCardDesign: parseGiftCardDesign(settings[GIFT_CARD_SETTING]),
-    // The player portal's slot for someone else's booking widget. Flattened
-    // into this object rather than nested, so it saves through the same PUT as
-    // everything else on the Settings screen.
-    ...playerBookingEmbedFromSettings(settings),
-  };
+  return adminSettingsFromSettings(settingMap(rows));
 }
 
 async function writeAdminSettings(accountId: string, settings: any) {
