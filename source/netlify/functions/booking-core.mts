@@ -141,10 +141,6 @@ import {
 import { readPlayerBag, savePlayerBag } from "./_shared/player-bag.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
-  cleanPlayerBookingEmbedHeight,
-  cleanPlayerBookingEmbedIntro,
-  cleanPlayerBookingEmbedLabel,
-  cleanPlayerBookingEmbedUrl,
   playerBookingEmbedForPortal,
 } from "./_shared/player-booking-embed.mts";
 import {
@@ -264,7 +260,6 @@ import {
   cleanString,
   cleanUrl,
   env,
-  hasOwn,
   nowIso,
   safeJsonParse,
 } from "./_shared/values.mts";
@@ -288,13 +283,11 @@ import {
   appUsersFromSettings,
   brandSettingsFromSettings,
   cleanCalendarColors,
-  cleanReminderLeadMinutes,
   coachProfilesFromSettings,
   coachUserForMembership,
   defaultAvailability,
   defaultEmailTemplates,
   locationsFromSettings,
-  modernClientEmailFooter,
   normalizeAvailability,
   publicCalendarState,
   stateFromSettings,
@@ -2634,50 +2627,6 @@ async function readStateSettingsSnapshot(accountId: string) {
 async function readAdminSettings(accountId: string, settingsMap = null) {
   await ensureSeeded();
   return adminSettingsFromSettings(settingsMap || (await readSettingsMap(accountId)));
-}
-
-// Only the keys the caller actually sent are written, so the shape stays a
-// partial update. They are collected rather than written one at a time: this is
-// one Save press, and it should cost one round trip rather than nineteen.
-async function writeAdminSettings(accountId: string, settings) {
-  const next = {};
-  const put = (key, value) => {
-    if (hasOwn(settings, key)) next[key] = value;
-  };
-  put("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
-  put("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
-  put("coachEmail", cleanString(settings?.coachEmail, "", 180));
-  put("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
-  if (hasOwn(settings, "notificationDelaySeconds")) {
-    const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-    next.notificationDelaySeconds = String(
-      Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
-    );
-  }
-  put("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  put("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
-  put("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  put("sendLessonTypeChangeEmail", settings?.sendLessonTypeChangeEmail ? "true" : "false");
-  put("reminderEnabled", settings?.reminderEnabled ? "true" : "false");
-  if (hasOwn(settings, "reminderLeadMinutes")) {
-    next.reminderLeadMinutes = String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes));
-  }
-  put("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  put("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  put("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
-  put("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  put("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  put("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  put("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  put("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  put("sendClientSms", settings?.sendClientSms ? "true" : "false");
-  put("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
-  put("playerBookingEmbedUrl", cleanPlayerBookingEmbedUrl(settings?.playerBookingEmbedUrl));
-  put("playerBookingEmbedLabel", cleanPlayerBookingEmbedLabel(settings?.playerBookingEmbedLabel));
-  put("playerBookingEmbedIntro", cleanPlayerBookingEmbedIntro(settings?.playerBookingEmbedIntro));
-  put("playerBookingEmbedHeight", String(cleanPlayerBookingEmbedHeight(settings?.playerBookingEmbedHeight)));
-  await setSettingsBulk(accountId, { ...next, updatedAt: nowIso() });
-  return readAdminSettings(accountId);
 }
 
 async function readServices(accountId: string) {
@@ -10915,20 +10864,6 @@ async function routeBookingApiRequest(
           }),
         ),
       );
-    }
-
-    if (req.method === "GET" && pathname === "/api/admin-settings") {
-      const state = await readSettingsState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to view account settings.");
-      return json(await readAdminSettings(await currentAccountId(req)));
-    }
-
-    if ((req.method === "PUT" || req.method === "POST") && pathname === "/api/admin-settings") {
-      const state = await readSettingsState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to change account settings.");
-      return json(await writeAdminSettings(await currentAccountId(req), await parseBody(req)));
     }
 
     if (req.method === "GET" && pathname === "/api/notification-history") {
