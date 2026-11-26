@@ -112,7 +112,7 @@ test("a voucher previews its own gift card, else the standard one, else none", (
     { standard, itemNames },
   );
   assert.equal(own.giftCard?.design.imageUrl, "https://cdn.example/own.png");
-  assert.deepEqual([plain.giftCard?.design.imageUrl, plain.giftCard?.item, plain.giftCard?.showsValue], ["https://cdn.example/standard.png", "", true]);
+  assert.deepEqual([plain.giftCard?.design.imageUrl, plain.giftCard?.item, plain.giftCard?.showsValue], ["https://cdn.example/standard.png", String(voucherRow.name), true]);
   assert.deepEqual([forLesson.giftCard?.item, forLesson.giftCard?.showsValue], ["1 Hour Lesson", true]);
   assert.equal(priceless.giftCard?.showsValue, false);
 

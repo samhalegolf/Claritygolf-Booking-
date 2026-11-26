@@ -36,7 +36,7 @@ function fieldLabel(id: GiftCardFieldId) {
 
 function sampleText(id: GiftCardFieldId) {
   if (id === "name") return t("Recipient name");
-  // Printed only on a voucher for a lesson or product.
+  // The lesson or product a voucher covers, or else the voucher's own name.
   if (id === "item") return t("1 hour lesson");
   if (id === "code") return "CG-7KQ4-M2XP";
   return formatMoney(100);
@@ -149,7 +149,7 @@ export function GiftCardDesigner({ design, locked, onChange }: GiftCardDesignerP
           <strong>{t("Gift card")}</strong>
           <p>
             {design.imageUrl
-              ? t("Drag each field to where it goes on your artwork. Each voucher sold gets its own card, attached to this email as a PDF. What it's for prints only on vouchers for a lesson or product, and the value only where the voucher shows it.")
+              ? t("Drag each field to where it goes on your artwork. Each voucher sold gets its own card, attached to this email as a PDF. What it's for is the lesson or product the voucher covers, or else the voucher's own name. The value prints only where the voucher shows it.")
               : t("Upload your voucher artwork and every voucher sold online gets its own card, with the name and code printed on, attached to this email as a PDF.")}
           </p>
         </div>
