@@ -9,23 +9,13 @@
 // own booking, filed against the coach's calendar. This is a second door, and
 // the two exist side by side.
 //
-// Both implementations of /api/admin-settings read and write through here
-// (admin-settings.mts is authoritative; booking-core.mts keeps a mirror), so
-// the accepted key list cannot drift between them the way the notification
-// template keys did.
+// admin-settings.mts, the one writer behind /api/admin-settings, cleans these
+// keys through here; booking-core.mts only reads them.
 
 export const PLAYER_BOOKING_EMBED_DEFAULT_LABEL = "Book";
 export const PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT = 760;
 export const PLAYER_BOOKING_EMBED_MIN_HEIGHT = 320;
 export const PLAYER_BOOKING_EMBED_MAX_HEIGHT = 2400;
-
-/** The settings rows this config lives in, in write order. */
-export const PLAYER_BOOKING_EMBED_SETTING_KEYS = [
-  "playerBookingEmbedUrl",
-  "playerBookingEmbedLabel",
-  "playerBookingEmbedIntro",
-  "playerBookingEmbedHeight",
-] as const;
 
 export type PlayerBookingEmbed = {
   /** Empty when the business has not configured one -- the tab then does not exist. */

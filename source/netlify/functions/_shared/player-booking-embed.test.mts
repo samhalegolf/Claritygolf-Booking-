@@ -9,7 +9,6 @@ import {
   PLAYER_BOOKING_EMBED_DEFAULT_LABEL,
   PLAYER_BOOKING_EMBED_MAX_HEIGHT,
   PLAYER_BOOKING_EMBED_MIN_HEIGHT,
-  PLAYER_BOOKING_EMBED_SETTING_KEYS,
   playerBookingEmbedForPortal,
   playerBookingEmbedFromSettings,
 } from "./player-booking-embed.mts";
@@ -99,24 +98,4 @@ test("a bad URL hides the tab even when the other three are set", () => {
     playerBookingEmbedHeight: "820",
   });
   assert.equal(portal.url, "");
-});
-
-test("both implementations of /api/admin-settings accept these keys", async () => {
-  // admin-settings.mts serves the route; booking-core.mts holds a mirror of the
-  // same read/write behind a pathname branch. The mirror has drifted before --
-  // it silently dropped the notification template keys -- and booking-core's
-  // params are untyped, so nothing warns you. This is the guard for these four.
-  const { readFileSync } = await import("node:fs");
-  const { fileURLToPath } = await import("node:url");
-  const dir = fileURLToPath(new URL(".", import.meta.url));
-  const read = (name: string) => readFileSync(`${dir}../${name}`, "utf8");
-
-  for (const key of PLAYER_BOOKING_EMBED_SETTING_KEYS) {
-    for (const file of ["admin-settings.mts", "booking-core.mts"]) {
-      assert.ok(
-        read(file).includes(`"${key}"`),
-        `${file} does not write ${key} — the two /api/admin-settings implementations have drifted.`,
-      );
-    }
-  }
 });
